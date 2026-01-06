@@ -10,27 +10,51 @@ import (
 	"github.com/go-goe/goe/utils"
 )
 
+type fieldDesc struct {
+	Field      reflect.Value
+	FieldName  string
+	HasSchema  bool
+	SchemaName string
+}
+
 func migrateFrom(db any, driver model.Driver) *model.Migrator {
 	valueOf := reflect.ValueOf(db).Elem()
+	count := valueOf.NumField() - 1
 
+	fieldDescs := make([]*fieldDesc, count)
 	schemasMap := make(map[string]*string)
-	for i := range valueOf.NumField() - 1 {
-		if strings.Contains(valueOf.Type().Field(i).Tag.Get("goe"), "schema") || strings.HasSuffix(valueOf.Field(i).Elem().Type().Name(), "Schema") {
-			schema := driver.KeywordHandler(utils.ColumnNamePattern(valueOf.Field(i).Elem().Type().Name()))
-			for f := range valueOf.Field(i).Elem().NumField() {
-				schemasMap[valueOf.Field(i).Elem().Field(f).Elem().Type().Name()] = &schema
+	for i := range count {
+		desc := &fieldDesc{Field: valueOf.Field(i)}
+		elem := desc.Field.Elem()
+
+		desc.FieldName = elem.Type().Name()
+		if strings.HasSuffix(desc.FieldName, "Schema") {
+			desc.HasSchema = true
+		} else {
+			fieldTag := valueOf.Type().Field(i).Tag.Get("goe")
+			desc.HasSchema = strings.Contains(fieldTag, "schema")
+		}
+
+		if desc.HasSchema {
+			desc.SchemaName = driver.KeywordHandler(utils.ColumnNamePattern(desc.FieldName))
+			for f := range elem.NumField() {
+				schElem := elem.Field(f).Elem()
+				schemasMap[schElem.Type().Name()] = &desc.SchemaName
 			}
 		}
+		fieldDescs[i] = desc
 	}
 
 	migrator := new(model.Migrator)
 	migrator.Tables = make(map[string]*model.TableMigrate)
-	for i := range valueOf.NumField() - 1 {
-		if strings.Contains(valueOf.Type().Field(i).Tag.Get("goe"), "schema") || strings.HasSuffix(valueOf.Field(i).Elem().Type().Name(), "Schema") {
-			schema := driver.KeywordHandler(utils.ColumnNamePattern(valueOf.Field(i).Elem().Type().Name()))
-			migrator.Schemas = append(migrator.Schemas, schema)
-			for f := range valueOf.Field(i).Elem().NumField() {
-				migrator.Error = typeField(valueOf, valueOf.Field(i).Elem().Field(f), migrator, driver, &schema, schemasMap)
+	for i := range count {
+		desc := fieldDescs[i]
+
+		if desc.HasSchema {
+			migrator.Schemas = append(migrator.Schemas, desc.SchemaName)
+			elem := desc.Field.Elem()
+			for f := range elem.NumField() {
+				migrator.Error = typeField(valueOf, elem.Field(f), migrator, driver, &desc.SchemaName, schemasMap)
 				if migrator.Error != nil {
 					return migrator
 				}
@@ -38,7 +62,7 @@ func migrateFrom(db any, driver model.Driver) *model.Migrator {
 			continue
 		}
 
-		migrator.Error = typeField(valueOf, valueOf.Field(i), migrator, driver, nil, schemasMap)
+		migrator.Error = typeField(valueOf, desc.Field, migrator, driver, nil, schemasMap)
 		if migrator.Error != nil {
 			return migrator
 		}

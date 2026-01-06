@@ -10,7 +10,7 @@ func TableNamePattern(name string) string {
 	if len(name) == 0 {
 		return name
 	}
-	name = namePattern(name)
+	name = ToSnakeCase(name)
 	if name[len(name)-1] != 's' {
 		name += "s"
 	}
@@ -22,33 +22,30 @@ func ColumnNamePattern(name string) string {
 	if len(name) == 0 {
 		return name
 	}
-	return namePattern(name)
+	return ToSnakeCase(name)
 }
 
-func isUpper(name string) bool {
-	for _, r := range name[1:] {
-		if unicode.IsLower(r) {
-			return false
-		}
-	}
-	return true
-}
-
-func namePattern(name string) string {
-	if isUpper(name) {
-		return strings.ToLower(name)
+func ToSnakeCase(name string) string {
+	if len(name) == 0 {
+		return name
 	}
 
 	result := strings.Builder{}
-	result.WriteRune(rune(name[0]))
-	for i := 1; i < len(name); i++ {
-		currentLetter, prevLetter := rune(name[i]), rune(name[i-1])
-		if unicode.IsUpper(currentLetter) && unicode.IsLower(prevLetter) {
-			result.WriteRune('_')
-		} else if c := i + 1; c < len(name) && (unicode.IsUpper(currentLetter) && unicode.IsLower(rune(name[c]))) {
-			result.WriteRune('_')
+	for i := 0; i < len(name); i++ {
+		letter := rune(name[i])
+		if unicode.IsUpper(letter) {
+			letter = unicode.ToLower(letter)
+			if i > 0 {
+				prevLetter := rune(name[i-1])
+				if unicode.IsLower(prevLetter) {
+					result.WriteRune('_')
+				} else if i+1 < len(name) && unicode.IsLower(rune(name[i+1])) {
+					result.WriteRune('_')
+				}
+			}
 		}
-		result.WriteRune(currentLetter)
+		result.WriteRune(letter)
 	}
-	return strings.ToLower(result.String())
+
+	return result.String()
 }
