@@ -1,9 +1,42 @@
 package utils
 
 import (
+	"reflect"
 	"strings"
 	"unicode"
 )
+
+func ParseTableNameByValue(valueOf reflect.Value) string {
+	if tableName := TableNameMethod(valueOf); tableName != "" {
+		return tableName
+	}
+	return TableNamePattern(valueOf.Type().Name())
+}
+
+func ParseTableNameByType(typeOf reflect.Type) string {
+	valueOf := reflect.New(typeOf)
+	if tableName := TableNameMethod(valueOf); tableName != "" {
+		return tableName
+	}
+	return TableNamePattern(typeOf.Name())
+}
+
+func TableNameMethod(valueOf reflect.Value) string {
+	var method reflect.Value
+	if method = valueOf.MethodByName("TableName"); method.IsValid() {
+		if method.Type().NumIn() == 0 && method.Type().NumOut() == 1 {
+			return method.Call(nil)[0].String()
+		}
+	}
+	if valueOf.Type().Kind() == reflect.Struct && valueOf.Addr().IsValid() {
+		if method = valueOf.Addr().MethodByName("TableName"); method.IsValid() {
+			if method.Type().NumIn() == 0 && method.Type().NumOut() == 1 {
+				return method.Call(nil)[0].String()
+			}
+		}
+	}
+	return ""
+}
 
 // TableNamePattern is the default name patterning for mapping struct to table
 func TableNamePattern(name string) string {
@@ -48,4 +81,10 @@ func ToSnakeCase(name string) string {
 	}
 
 	return result.String()
+}
+
+// IsFieldHasSchema check if field has schema tag or schema suffix
+func IsFieldHasSchema(valueOf reflect.Value, i int) bool {
+	return strings.Contains(valueOf.Type().Field(i).Tag.Get("goe"), "schema") ||
+		strings.HasSuffix(valueOf.Field(i).Elem().Type().Name(), "Schema")
 }
