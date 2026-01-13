@@ -293,7 +293,11 @@ func getFieldId(typeOf reflect.Type, fieldName string) int {
 }
 
 func isReturningId(id reflect.StructField) bool {
-	return strings.Contains(id.Type.Kind().String(), "int") || getTagValue(id.Tag.Get("goe"), "default:") != ""
+	tag := id.Tag.Get("goe")
+	if strings.Contains(tag, "not_incr") {
+		return false
+	}
+	return getTagValue(tag, "default:") != "" || isAutoIncrement(id)
 }
 
 func isManyToOne(b body, createMany func(b body, typeOf reflect.Type) any, createOne func(b body, typeOf reflect.Type) any) any {
@@ -376,9 +380,10 @@ func foreignKeyNamePattern(dbTables reflect.Value, fieldName string) (table, suf
 }
 
 func helperAttribute(b body) error {
-	table, prefix := foreignKeyNamePattern(b.tables, b.valueOf.Type().Field(b.fieldId).Name)
+	field := b.valueOf.Type().Field(b.fieldId)
+	table, prefix := foreignKeyNamePattern(b.tables, field.Name)
 	if table != "" {
-		b.stringInfos = stringInfos{prefixName: prefix, tableName: table, fieldName: b.valueOf.Type().Field(b.fieldId).Name}
+		b.stringInfos = stringInfos{prefixName: prefix, tableName: table, fieldName: field.Name}
 		if mto := isManyToOne(b, createManyToOne, createOneToOne); mto != nil {
 			switch v := mto.(type) {
 			case manyToOne:

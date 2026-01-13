@@ -346,25 +346,26 @@ func createMigrateAtt(attributeName string, dataType string, nullable bool, defa
 }
 
 func helperAttributeMigrate(b body) error {
-	table, prefix := foreignKeyNamePattern(b.tables, b.migrate.field.Name)
+	field := b.migrate.field
+	table, prefix := foreignKeyNamePattern(b.tables, field.Name)
 	if table != "" {
-		b.stringInfos = stringInfos{prefixName: prefix, tableName: table, fieldName: b.migrate.field.Name}
+		b.stringInfos = stringInfos{prefixName: prefix, tableName: table, fieldName: field.Name}
 		if mto := isManyToOne(b, createManyToOneMigrate, createOneToOneMigrate); mto != nil {
 			switch v := mto.(type) {
 			case *model.ManyToOneMigrate:
 				if v == nil {
 					return migrateAtt(b)
 				}
-				v.DataType = getTagType(b.migrate.field)
+				v.DataType = getTagType(field)
 				b.migrate.table.ManyToOnes = append(b.migrate.table.ManyToOnes, *v)
 			case *model.OneToOneMigrate:
 				if v == nil {
-					if slices.Contains(b.migrate.fieldNames, b.migrate.field.Name) {
+					if slices.Contains(b.migrate.fieldNames, field.Name) {
 						return nil
 					}
 					return migrateAtt(b)
 				}
-				v.DataType = getTagType(b.migrate.field)
+				v.DataType = getTagType(field)
 				b.migrate.table.OneToOnes = append(b.migrate.table.OneToOnes, *v)
 			}
 			return nil
@@ -374,13 +375,14 @@ func helperAttributeMigrate(b body) error {
 }
 
 func checkIndex(b body, at model.AttributeMigrate, skipUnique bool) error {
-	indexFunc := getIndex(b.migrate.field)
+	field := b.migrate.field
+	indexFunc := getIndex(field)
 	if indexFunc != "" {
 		for _, index := range strings.Split(indexFunc, ",") {
 			indexName := getIndexValue(index, "n:")
 
 			if indexName == "" {
-				indexName = b.migrate.table.Name + "_idx_" + strings.ToLower(b.migrate.field.Name)
+				indexName = b.migrate.table.Name + "_idx_" + strings.ToLower(field.Name)
 			}
 			in := model.IndexMigrate{
 				Name:         b.migrate.table.Name + "_" + indexName,
@@ -407,11 +409,11 @@ func checkIndex(b body, at model.AttributeMigrate, skipUnique bool) error {
 		}
 	}
 
-	tagValue := b.migrate.field.Tag.Get("goe")
+	tagValue := field.Tag.Get("goe")
 	if !skipUnique && tagValueExist(tagValue, "unique") {
 		in := model.IndexMigrate{
-			Name:         b.migrate.table.Name + "_idx_" + strings.ToLower(b.migrate.field.Name),
-			EscapingName: b.driver.KeywordHandler(b.migrate.table.Name + "_idx_" + strings.ToLower(b.migrate.field.Name)),
+			Name:         b.migrate.table.Name + "_idx_" + strings.ToLower(field.Name),
+			EscapingName: b.driver.KeywordHandler(b.migrate.table.Name + "_idx_" + strings.ToLower(field.Name)),
 			Unique:       true,
 			Attributes:   []model.AttributeMigrate{at},
 		}
@@ -420,8 +422,8 @@ func checkIndex(b body, at model.AttributeMigrate, skipUnique bool) error {
 
 	if tagValueExist(tagValue, "index") {
 		in := model.IndexMigrate{
-			Name:         b.migrate.table.Name + "_idx_" + strings.ToLower(b.migrate.field.Name),
-			EscapingName: b.driver.KeywordHandler(b.migrate.table.Name + "_idx_" + strings.ToLower(b.migrate.field.Name)),
+			Name:         b.migrate.table.Name + "_idx_" + strings.ToLower(field.Name),
+			EscapingName: b.driver.KeywordHandler(b.migrate.table.Name + "_idx_" + strings.ToLower(field.Name)),
 			Unique:       false,
 			Attributes:   []model.AttributeMigrate{at},
 		}
