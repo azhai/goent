@@ -3,7 +3,7 @@ package tests
 import (
 	"testing"
 
-	"github.com/go-goe/goe/utils"
+	"github.com/azhai/goent/utils"
 )
 
 func TestToSnakeCase(t *testing.T) {

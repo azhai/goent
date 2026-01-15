@@ -1,4 +1,4 @@
-package postgres
+package pgsql
 
 import (
 	"context"
@@ -7,15 +7,15 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-goe/goe"
-	"github.com/go-goe/goe/model"
+	"github.com/azhai/goent"
+	"github.com/azhai/goent/model"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Driver struct {
-	dns string
+	dsn string
 	sql *pgxpool.Pool
 	config
 }
@@ -48,15 +48,27 @@ func NewConfig(c Config) config {
 	}
 }
 
-func Open(dns string, c config) (driver *Driver) {
+func Open(dsn string, c config) (driver *Driver) {
 	return &Driver{
-		dns:    dns,
+		dsn:    dsn,
 		config: c,
 	}
 }
 
+func OpenDSN(dsn string) (driver *Driver) {
+	return Open(dsn, NewConfig(Config{}))
+}
+
+func (dr *Driver) AddLogger(logger model.Logger, err error) error {
+	if logger != nil {
+		dr.config.Logger = logger
+		// dr.config.IncludeArguments = true
+	}
+	return err
+}
+
 func (dr *Driver) Init() error {
-	config, err := pgxpool.ParseConfig(dr.dns)
+	config, err := pgxpool.ParseConfig(dr.dsn)
 	if err != nil {
 		// logged by goe
 		return err
@@ -103,8 +115,8 @@ func (dr *Driver) Close() error {
 }
 
 var errMap = map[string][]error{
-	"23505": {goe.ErrBadRequest, goe.ErrUniqueValue},
-	"23503": {goe.ErrBadRequest, goe.ErrForeignKey},
+	"23505": {goent.ErrBadRequest, goent.ErrUniqueValue},
+	"23503": {goent.ErrBadRequest, goent.ErrForeignKey},
 }
 
 type wrapErrors struct {
@@ -113,7 +125,7 @@ type wrapErrors struct {
 }
 
 func (e *wrapErrors) Error() string {
-	return "goe: " + e.msg
+	return "goent: " + e.msg
 }
 
 func (e *wrapErrors) Unwrap() []error {

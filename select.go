@@ -1,4 +1,4 @@
-package goe
+package goent
 
 import (
 	"context"
@@ -8,11 +8,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/go-goe/goe/enum"
-	"github.com/go-goe/goe/model"
-	"github.com/go-goe/goe/query/aggregate"
-	"github.com/go-goe/goe/query/function"
-	"github.com/go-goe/goe/query/where"
+	"github.com/azhai/goent/enum"
+	"github.com/azhai/goent/model"
+	"github.com/azhai/goent/query/aggregate"
+	"github.com/azhai/goent/query/function"
+	"github.com/azhai/goent/query/where"
 )
 
 type stateSelect[T any] struct {
@@ -35,13 +35,13 @@ type find[T any] struct {
 // # Example
 //
 //	// one primary key
-//	animal, err = goe.Find(db.Animal).ByValue(Animal{ID: 2})
+//	animal, err = goent.Find(db.Animal).ByValue(Animal{ID: 2})
 //
 //	// two primary keys
-//	animalFood, err = goe.Find(db.AnimalFood).ByValue(AnimalFood{AnimalID: 3, FoodID: 2})
+//	animalFood, err = goent.Find(db.AnimalFood).ByValue(AnimalFood{AnimalID: 3, FoodID: 2})
 //
 //	// find record by value, if have more than one it will returns the first
-//	cat, err = goe.Find(db.Animal).ByValue(Animal{Name: "Cat"})
+//	cat, err = goent.Find(db.Animal).ByValue(Animal{Name: "Cat"})
 func Find[T any](table *T) find[T] {
 	return FindContext(context.Background(), table)
 }
@@ -66,7 +66,7 @@ func FindContext[T any](ctx context.Context, table *T) find[T] {
 //
 //	var animals []Animal
 //
-//	animals, err = goe.List(db.Animal).OnTransaction(tx).AsSlice()
+//	animals, err = goent.List(db.Animal).OnTransaction(tx).AsSlice()
 //	if err != nil {
 //		// handler error
 //	}
@@ -119,7 +119,7 @@ func (f find[T]) ByValue(value T) (*T, error) {
 //	}
 //
 //	// row is the generic struct
-//	for row, err := range goe.Select[struct {
+//	for row, err := range goent.Select[struct {
 //			User    string     // output row
 //			Role    *string    // output row
 //			EndTime *time.Time // output row
@@ -360,7 +360,7 @@ func (s stateSelect[T]) AsPagination(page, size int) (*Pagination[T], error) {
 //
 //	var animals []Animal
 //
-//	animals, err = goe.List(db.Animal).OnTransaction(tx).AsSlice()
+//	animals, err = goent.List(db.Animal).OnTransaction(tx).AsSlice()
 //	if err != nil {
 //		// handler error
 //	}
@@ -401,11 +401,11 @@ func createSelectState[T any](ctx context.Context, getArgs func(args ...any) arg
 // # Example
 //
 //	// where animals.name LIKE $1 AND animal.id = $2 AND animals.habitat_id = $3
-//	goe.List(db.Animal).OrderByAsc(&db.Animal.Name).Match(Animal{Name: "Cat", Id: 3, HabitatID: &habitatId}).AsSlice()
+//	goent.List(db.Animal).OrderByAsc(&db.Animal.Name).Match(Animal{Name: "Cat", Id: 3, HabitatID: &habitatId}).AsSlice()
 //
 //	// pagination list
-//	var p *goe.Pagination[Animal]
-//	p, err = goe.List(db.Animal).AsPagination(1, 10)
+//	var p *goent.Pagination[Animal]
+//	p, err = goent.List(db.Animal).AsPagination(1, 10)
 func List[T any](table *T) stateSelect[T] {
 	return ListContext(context.Background(), table)
 }
@@ -530,11 +530,11 @@ func getArgsJoin(addrMap map[uintptr]field, args ...any) []field {
 			}
 			continue
 		}
-		panic("goe: invalid argument. try sending a pointer to a database mapped struct as argument")
+		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
 	}
 
 	if fields[0] == nil || fields[1] == nil {
-		panic("goe: invalid argument. try sending a pointer to a database mapped struct as argument")
+		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
 	}
 	return fields
 }
@@ -542,7 +542,7 @@ func getArgsJoin(addrMap map[uintptr]field, args ...any) []field {
 func getArgFunction(arg any, addrMap map[uintptr]field, operation *model.Operation) field {
 	value := reflect.ValueOf(arg)
 	if value.IsNil() {
-		panic("goe: invalid argument. try sending a pointer to a database mapped struct as argument")
+		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
 	}
 
 	if function, ok := value.Elem().Interface().(model.Attributer); ok {
@@ -555,7 +555,7 @@ func getArgFunction(arg any, addrMap map[uintptr]field, operation *model.Operati
 func getArg(arg any, addrMap map[uintptr]field, operation *model.Operation) field {
 	v := reflect.ValueOf(arg)
 	if v.Kind() != reflect.Pointer {
-		panic("goe: invalid argument. try sending a pointer to a database mapped struct as argument")
+		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
 	}
 
 	if operation != nil {
@@ -591,7 +591,7 @@ func getAnyArg(value reflect.Value, addrMap map[uintptr]field) field {
 func getAttribute(arg any, addrMap map[uintptr]field) (model.Attribute, bool) {
 	v := reflect.ValueOf(arg)
 	if v.Kind() != reflect.Pointer {
-		panic("goe: invalid argument. try sending a pointer to a database mapped struct as argument")
+		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
 	}
 
 	f := addrMap[uintptr(v.UnsafePointer())]
@@ -705,7 +705,7 @@ func getArgsSelect(args ...any) argsSelect {
 	}
 
 	if len(fields) == 0 {
-		panic("goe: invalid argument. try sending a pointer to a database mapped argument")
+		panic("goent: invalid argument. try sending a pointer to a database mapped argument")
 	}
 
 	return argsSelect{fields: fields, tableArgs: args}
@@ -729,7 +729,7 @@ func getArgsList(args ...any) argsSelect {
 	}
 
 	if len(fields) == 0 {
-		panic("goe: invalid argument. try sending a pointer to a database mapped argument")
+		panic("goent: invalid argument. try sending a pointer to a database mapped argument")
 	}
 
 	return argsSelect{fields: fields, tableArgs: tableArgs}

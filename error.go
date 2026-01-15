@@ -1,4 +1,4 @@
-package goe
+package goent
 
 import "errors"
 
@@ -12,4 +12,4 @@ var ErrForeignKey = errors.New("")
 var ErrBadRequest = errors.New("")
 
 // ErrNotFound occurs when the Find function returns zero results.
-var ErrNotFound = errors.New("goe: not found any element on result set")
+var ErrNotFound = errors.New("goent: not found any element on result set")

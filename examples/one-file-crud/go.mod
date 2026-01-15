@@ -4,8 +4,8 @@ go 1.25.3
 
 require (
 	github.com/go-fuego/fuego v0.18.8
-	github.com/go-goe/goe v0.7.0
-	github.com/go-goe/sqlite v0.5.1
+	github.com/azhai/goent v0.7.0
+	github.com/azhai/goent/drivers/sqlite v0.5.1
 )
 
 require (

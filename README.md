@@ -1,9 +1,9 @@
 # GOE
 GO Entity or just "GOE" is a type safe ORM for Go
 
-[![test status](https://github.com/go-goe/goe/actions/workflows/tests.yml/badge.svg "test status")](https://github.com/go-goe/goe/actions)
-[![Go Report Card](https://goreportcard.com/badge/github.com/go-goe/goe)](https://goreportcard.com/report/github.com/go-goe/goe)
-[![Go.Dev reference](https://img.shields.io/badge/go.dev-reference-blue?logo=go&logoColor=white)](https://pkg.go.dev/github.com/go-goe/goe)
+[![test status](https://github.com/azhai/goent/actions/workflows/tests.yml/badge.svg "test status")](https://github.com/azhai/goent/actions)
+[![Go Report Card](https://goreportcard.com/badge/github.com/azhai/goent)](https://goreportcard.com/report/github.com/azhai/goent)
+[![Go.Dev reference](https://img.shields.io/badge/go.dev-reference-blue?logo=go&logoColor=white)](https://pkg.go.dev/github.com/azhai/goent)
 [![MIT license](https://img.shields.io/badge/license-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT)
 
 ![](goe.png)
@@ -13,7 +13,7 @@ GO Entity or just "GOE" is a type safe ORM for Go
 - go v1.24 or above;
 
 ## Real world examples
-GOE has [examples](https://github.com/go-goe/goe/tree/main/examples) of queries and integrations, if you think in a nice example and wanted to see if GOE can handler, just try out.
+GOE has [examples](https://github.com/azhai/goent/tree/main/examples) of queries and integrations, if you think in a nice example and wanted to see if GOE can handler, just try out.
 
 Common examples are:
 
@@ -100,14 +100,14 @@ Check out the [Benchmarks](#benchmarks) section for a overview on GOE performanc
 
 ## Install
 ```
-go get github.com/go-goe/goe
+go get github.com/azhai/goent
 ```
 As any database/sql support in go, you have to get a specific driver for your database, check [Available Drivers](#available-drivers)
 
 ## Available Drivers
 ### PostgreSQL
 ```
-go get github.com/go-goe/postgres
+go get github.com/azhai/goent/drivers/pgsql
 ```
 #### Usage
 ```go
@@ -117,16 +117,16 @@ type Animal struct {
 
 type Database struct {
 	Animal         *Animal
-	*goe.DB
+	*goent.DB
 }
 
-dns := "user=postgres password=postgres host=localhost port=5432 database=postgres"
-db, err := goe.Open[Database](postgres.Open(dns, postgres.NewConfig(postgres.Config{})))
+dsn := "user=postgres password=postgres host=localhost port=5432 database=postgres"
+db, err := goent.Open[Database](pgsql.Open(dsn, pgsql.NewConfig(pgsql.Config{})))
 ```
 
 ### SQLite
 ```
-go get github.com/go-goe/sqlite
+go get github.com/azhai/goent/drivers/sqlite
 ```
 
 #### Usage
@@ -137,13 +137,13 @@ type Animal struct {
 
 type Database struct {
 	Animal         *Animal
-	*goe.DB
+	*goent.DB
 }
 
-db, err := goe.Open[Database](sqlite.Open("goe.db", sqlite.NewConfig(sqlite.Config{})))
+db, err := goent.Open[Database](sqlite.Open("goent.db", sqlite.NewConfig(sqlite.Config{})))
 ```
 
-Checkout the exclusive features of sqlite on [goe-sqlite](https://github.com/go-goe/sqlite)
+Checkout the exclusive features of sqlite on [goe-sqlite](https://github.com/azhai/goent/drivers/sqlite)
 
 ## Quick Start
 ```go
@@ -152,8 +152,9 @@ package main
 import (
 	"fmt"
 
-	"github.com/go-goe/goe"
-	"github.com/go-goe/sqlite"
+	"github.com/azhai/goent"
+	"github.com/azhai/goent/drivers"
+	"github.com/azhai/goent/drivers/sqlite"
 )
 
 type Animal struct {
@@ -164,22 +165,22 @@ type Animal struct {
 
 type Database struct {
 	Animal *Animal
-	*goe.DB
+	*goent.DB
 }
 
 func main() {
-	db, err := goe.Open[Database](sqlite.Open("goe.db", sqlite.NewConfig(sqlite.Config{})))
+	db, err := drivers.QuickOpen[Database]("sqlite", "goent.db", "")
 	if err != nil {
 		panic(err)
 	}
-	defer goe.Close(db)
+	defer goent.Close(db)
 
-	err = goe.Migrate(db).AutoMigrate()
+	err = goent.Migrate(db).AutoMigrate()
 	if err != nil {
 		panic(err)
 	}
 
-	err = goe.Delete(db.Animal).All()
+	err = goent.Delete(db.Animal).All()
 	if err != nil {
 		panic(err)
 	}
@@ -194,12 +195,12 @@ func main() {
 		{Name: "Bird", Emoji: "🐦"},
 	}
 
-	err = goe.Insert(db.Animal).All(animals)
+	err = goent.Insert(db.Animal).All(animals)
 	if err != nil {
 		panic(err)
 	}
 
-	animals, err = goe.List(db.Animal).AsSlice()
+	animals, err = goent.List(db.Animal).AsSlice()
 	if err != nil {
 		panic(err)
 	}
@@ -235,11 +236,11 @@ type Database struct {
 	User    	*User
 	Role    	*Role
 	UserLog 	*UserLog
-	*goe.DB
+	*goent.DB
 }
 ```
 In goe, it's necessary to define a Database struct,
-this struct implements *goe.DB and a pointer to all
+this struct implements *goent.DB and a pointer to all
 the structs that's it's to be mappend.
 
 It's through the Database struct that you will
@@ -325,7 +326,7 @@ A default value is used when the field is inserted with no value.
 
 ```go
 // CreatedAt will have the default value
-err = goe.Insert(db.User).One(&User{Name: "Rose"})
+err = goent.Insert(db.User).One(&User{Name: "Rose"})
 
 if err != nil {
 	// handler error
@@ -564,7 +565,7 @@ type Database struct {
 	Status  *Status // status will be on the default schema
 	*UserSchema // all structs on UserSchema will be created inside user schema
 	*Authentication `goe:"schema"` // will create Authentication schema
-	*goe.DB
+	*goent.DB
 }
 ```
 
@@ -587,11 +588,7 @@ type Logger interface {
 
 The logger is defined on database opening
 ```go
-	db, err := goe.Open[Database](sqlite.Open("goe.db", sqlite.NewConfig(
-		sqlite.Config{
-			Logger: slog.New(slog.NewJSONHandler(os.Stdout, nil)),
-		},
-	)))
+	db, err := drivers.QuickOpen[Database]("sqlite", "goent.db", "stdout")
 ```
 
 > [!TIP]
@@ -600,21 +597,20 @@ The logger is defined on database opening
 [Back to Contents](#content)
 
 ## Open
-To open a database use `goe.Open` function, it's require a valid driver. Most of the drives will require a dns/path connection and a config setup. On `goe.Open` needs to specify the struct database.
+To open a database use `goent.Open` function, it's require a valid driver. Most of the drives will require a dsn/path connection and a config setup. On `goent.Open` needs to specify the struct database.
 
-If you don't need the database connection anymore, call `goe.Close` to ensure that all the database resources will be removed from memory.
+If you don't need the database connection anymore, call `goent.Close` to ensure that all the database resources will be removed from memory.
 
 ```go
 type Database struct {
 	Animal         *Animal
 	AnimalFood     *AnimalFood
 	Food           *Food
-	*goe.DB
+	*goent.DB
 }
 
-dns := "user=postgres password=postgres host=localhost port=5432 database=postgres"
-
-db, err := goe.Open[Database](postgres.Open(dns, postgres.Config{}))
+dsn := "user=postgres password=postgres host=localhost port=5432 database=postgres"
+db, err := drivers.QuickOpen[Database]("pgsql", dsn, "")
 
 if err != nil {
 	// handler error
@@ -626,11 +622,11 @@ if err != nil {
 
 ### Auto Migrate
 
-To auto migrate the structs, use the `goe.Migrate(db).AutoMigrate()` passing the database returned by `goe.Open`.
+To auto migrate the structs, use the `goent.Migrate(db).AutoMigrate()` passing the database returned by `goent.Open`.
 
 ```go
 // migrate all database structs
-err = goe.Migrate(db).AutoMigrate()
+err = goent.Migrate(db).AutoMigrate()
 if err != nil {
 	// handler error
 }
@@ -646,25 +642,25 @@ type Select struct {
 
 type Database struct {
 	Select         *Select
-	*goe.DB
+	*goent.DB
 }
 
-err = goe.Migrate(db).OnTable("Select").RenameColumn("Name", "NewName")
+err = goent.Migrate(db).OnTable("Select").RenameColumn("Name", "NewName")
 if err != nil {
 	// handler error
 }
 
-err = goe.Migrate(db).OnTable("Select").DropColumn("NewName")
+err = goent.Migrate(db).OnTable("Select").DropColumn("NewName")
 if err != nil {
 	// handler error
 }
 
-err = goe.Migrate(db).OnTable("Select").RenameTable("NewSelect")
+err = goent.Migrate(db).OnTable("Select").RenameTable("NewSelect")
 if err != nil {
 	// handler error
 }
 
-err = goe.Migrate(db).OnTable("NewSelect").DropTable()
+err = goent.Migrate(db).OnTable("NewSelect").DropTable()
 if err != nil {
 	// handler error
 }
@@ -676,7 +672,7 @@ GOE drivers supports a output migrate path to specify a directory to store the g
 
 ```go
 // open the database with the migrate path config setup
-db, err := goe.Open[Database](sqlite.Open("goe.db", sqlite.Config{
+db, err := goent.Open[Database](sqlite.Open("goent.db", sqlite.Config{
 	MigratePath: "migrate/",
 }))
 if err != nil {
@@ -684,7 +680,7 @@ if err != nil {
 }
 
 // AutoMigrate will output the result as a sql file, and not auto apply the migration
-err = goe.Migrate(db).AutoMigrate()
+err = goent.Migrate(db).AutoMigrate()
 if err != nil {
 	// handler error
 }
@@ -707,17 +703,17 @@ go.mod
 Find is used when you want to return a single result.
 ```go
 // one primary key
-animal, err = goe.Find(db.Animal).ByValue(Animal{ID: 2})
+animal, err = goent.Find(db.Animal).ByValue(Animal{ID: 2})
 
 // two primary keys
-animalFood, err = goe.Find(db.AnimalFood).ByValue(AnimalFood{IDAnimal: 3, IDFood: 2})
+animalFood, err = goent.Find(db.AnimalFood).ByValue(AnimalFood{IDAnimal: 3, IDFood: 2})
 
 // find record by value, if have more than one it will returns the first
-cat, err = goe.Find(db.Animal).ByValue(Animal{Name: "Cat"})
+cat, err = goent.Find(db.Animal).ByValue(Animal{Name: "Cat"})
 ```
 
 > [!TIP]
-> Use **goe.FindContext** for specify a context.
+> Use **goent.FindContext** for specify a context.
 
 [Back to Contents](#content)
 ### List
@@ -726,24 +722,24 @@ List has support for [OrderBy](#orderby), [Pagination](#pagination) and [Join](#
 
 ```go
 // list all animals
-animals, err = goe.List(db.Animal).AsSlice()
+animals, err = goent.List(db.Animal).AsSlice()
 
 // list the animals with name "Cat", ID "3" and IDHabitat "4"
-animals, err = goe.List(db.Animal).Filter(Animal{Name: "Cat", ID: 3, IDHabitat: 4}).AsSlice()
+animals, err = goent.List(db.Animal).Filter(Animal{Name: "Cat", ID: 3, IDHabitat: 4}).AsSlice()
 
 // when using % on filter, goe makes a like operation
-animals, err = goe.List(db.Animal).Filter(Animal{Name: "%Cat%"}).AsSlice()
+animals, err = goent.List(db.Animal).Filter(Animal{Name: "%Cat%"}).AsSlice()
 ```
 
 > [!TIP]
-> Use **goe.ListContext** for specify a context.
+> Use **goent.ListContext** for specify a context.
 
 [Back to Contents](#content)
 ### Select Iterator
 
 Iterate over the rows
 ```go
-for row, err := range goe.List(db.Animal).Rows() {
+for row, err := range goent.List(db.Animal).Rows() {
 	// iterator rows
  }
 ```
@@ -759,7 +755,7 @@ var result []struct {
 }
 
 // row is the generic struct
-for row, err := range goe.Select[struct {
+for row, err := range goent.Select[struct {
 		User    string     // output row
 		Role    *string    // output row
 		EndTime *time.Time // output row
@@ -783,7 +779,7 @@ For specific field is used a new struct, each new field guards the reference for
 ### Where
 For where, goe uses a sub-package where, on where package you have all the goe available where operations.
 ```go
-animals, err = goe.List(db.Animal).Where(where.Equals(&db.Animal.ID, 2)).AsSlice()
+animals, err = goent.List(db.Animal).Where(where.Equals(&db.Animal.ID, 2)).AsSlice()
 
 if err != nil {
 	//handler error
@@ -793,7 +789,7 @@ if err != nil {
 It's possible to group a list of where operations inside Where()
 
 ```go
-animals, err = goe.List(db.Animal).Where(
+animals, err = goent.List(db.Animal).Where(
 					where.And(
 						where.LessEquals(&db.Animal.ID, 2), 
 						where.In(&db.Animal.Name, []string{"Cat", "Dog"}),
@@ -807,7 +803,7 @@ if err != nil {
 
 You can use a if to call a where operation only if it's match
 ```go
-selectQuery := goe.List(db.Animal).Where(where.LessEquals(&db.Animal.ID, 30))
+selectQuery := goent.List(db.Animal).Where(where.LessEquals(&db.Animal.ID, 30))
 
 if filter.In {
 	selectQuery = selectQuery.Where(
@@ -829,7 +825,7 @@ It's possible to use a query inside a `where.In`
 
 ```go
 // use AsQuery() for get a result as a query
-querySelect := goe.Select[any](&db.Animal.Name).
+querySelect := goent.Select[any](&db.Animal.Name).
 					Join(&db.Animal.ID, &db.AnimalFood.IDAnimal).
 					Join(&db.AnimalFood.IDFood, &db.Food.ID).
 					Where(
@@ -837,7 +833,7 @@ querySelect := goe.Select[any](&db.Animal.Name).
 					AsQuery()
 
 // where in with another query
-a, err := goe.List(db.Animal).Where(where.In(&db.Animal.Name, querySelect)).AsSlice()
+a, err := goent.List(db.Animal).Where(where.In(&db.Animal.Name, querySelect)).AsSlice()
 
 if err != nil {
 	//handler error
@@ -848,7 +844,7 @@ On where, GOE supports operations on two columns, all where operations that have
 In the example, the operator greater (>) on the columns Score and Minimum is used to return all exams that have a score greater than the minimum.
 
 ```go
-err = goe.List(db.Exam).
+err = goent.List(db.Exam).
 	Where(where.GreaterArg[float32](&db.Exam.Score, &db.Exam.Minimum)).AsSlice()
 ```
 
@@ -861,7 +857,7 @@ Filter creates where operations on non-zero values, so if you want a dynamic whe
 
 ```go
 var s []string
-a, err = goe.List(db.Animal).
+a, err = goent.List(db.Animal).
 	Filter(
 		where.And(where.In(&db.Animal.Name, s),
 			where.And(where.Equals(&db.Animal.Id, 0),
@@ -890,7 +886,7 @@ Match creates where operations on non-zero values using the query model. Match u
 
 ```go
 // SELECT * FROM "status" where UPPER("status"."name") LIKE '%A%'
-result, err := goe.List(db.Status).Match(Status{Name: "a"}).AsSlice()
+result, err := goent.List(db.Status).Match(Status{Name: "a"}).AsSlice()
 if err != nil {
 	//handler error
 }
@@ -903,7 +899,7 @@ It's possible to use Match on Select
 // JOIN "animal_foods" on ("animals"."id" = "animal_foods"."animal_id")
 // JOIN "food_habitat_schema"."foods" on ("animal_foods"."food_id" = "foods"."id")
 // WHERE UPPER("foods"."name") LIKE '%A%'
-result, err := goe.Select[struct {
+result, err := goent.Select[struct {
 	AnimalName string
 	FoodName   string
 }](&db.Animal.Name, &db.Food.Name).Match(struct {
@@ -928,7 +924,7 @@ On join, goe uses a sub-package join, on join package you have all the goe avail
 
 For the join operations, you need to specify the type, this make the joins operations more safe. So if you change a type from a field, the compiler will throw a error.
 ```go
-animals, err = goe.List(db.Animal).
+animals, err = goent.List(db.Animal).
 				Join(&db.Animal.ID, &db.AnimalFood.IDAnimal).
 				Join(&db.Food.ID, &db.AnimalFood.IDFood).
 			   AsSlice()
@@ -947,7 +943,7 @@ For OrderBy you need to pass a reference to a mapped database field.
 It's possible to OrderBy desc and asc. List and Select has support for OrderBy queries.
 #### List
 ```go
-animals, err = goe.List(db.Animal).OrderByDesc(&db.Animal.ID).AsSlice()
+animals, err = goent.List(db.Animal).OrderByDesc(&db.Animal.ID).AsSlice()
 
 if err != nil {
 	//handler error
@@ -955,7 +951,7 @@ if err != nil {
 ```
 #### Select
 ```go
-animals, err = goe.List(db.Animal).OrderByAsc(&db.Animal.ID).AsSlice()
+animals, err = goent.List(db.Animal).OrderByAsc(&db.Animal.ID).AsSlice()
 
 if err != nil {
 	//handler error
@@ -968,7 +964,7 @@ For GroupBy you need to pass a reference to a mapped database field.
 It's possible to GroupBy by a aggregate.
 #### Select
 ```go
-habitatCount, err := goe.Select[struct {
+habitatCount, err := goent.Select[struct {
 	Name  string
 	Count int64
 }](&db.Habitat.Name, aggregate.Count(&db.Animal.Id)).Join(&db.Animal.HabitatId, &db.Habitat.Id).
@@ -987,7 +983,7 @@ For pagination, it's possible to run on Select and List functions
 #### Select Pagination
 ```go
 // page 1 of size 10
-page, err = goe.List(db.Animal).AsPagination(1, 10)
+page, err = goent.List(db.Animal).AsPagination(1, 10)
 
 if err != nil {
 	//handler error
@@ -997,7 +993,7 @@ if err != nil {
 #### List Pagination
 ```go
 // page 1 of size 10
-page, err = goe.List(db.Animal).AsPagination(1, 10)
+page, err = goent.List(db.Animal).AsPagination(1, 10)
 
 if err != nil {
 	//handler error
@@ -1012,7 +1008,7 @@ if err != nil {
 For aggregates goe uses a sub-package aggregate, on aggregate package you have all the goe available aggregates.
 
 ```go
-result, err := goe.Select[struct {
+result, err := goent.Select[struct {
 					Count int64
 				}](aggregate.Count(&db.Animal.ID)).AsSlice()
 
@@ -1029,7 +1025,7 @@ result[0].Count.Value
 For functions goe uses a sub-package function, on function package you have all the goe available functions. 
 
 ```go
-for row, err := range goe.Select[struct {
+for row, err := range goent.Select[struct {
 					UpperName string
 				}](function.ToUpper(&db.Animal.Name)).Rows() {
 					if err != nil {
@@ -1042,7 +1038,7 @@ for row, err := range goe.Select[struct {
 
 Functions can be used inside where.
 ```go
-animals, err = goe.List(db.Animal).
+animals, err = goent.List(db.Animal).
 Where(
 	where.Like(function.ToUpper(&db.Animal.Name), "%CAT%")
 ).AsSlice()
@@ -1056,7 +1052,7 @@ if err != nil {
 > where like expected a second argument always as string.
 
 ```go
-animals, err = goe.List(db.Animal).
+animals, err = goent.List(db.Animal).
 			   Where(
 					where.Equals(function.ToUpper(&db.Animal.Name), function.Argument("CAT")),
 			   ).AsSlice()
@@ -1076,7 +1072,7 @@ On Insert if the primary key value is auto-increment, the new ID will be stored 
 ### Insert One
 ```go
 a := Animal{Name: "Cat", Emoji: "🐘"}
-err = goe.Insert(db.Animal).One(&a)
+err = goent.Insert(db.Animal).One(&a)
 
 if err != nil {
 	//handler error
@@ -1087,7 +1083,7 @@ a.ID
 ```
 
 > [!TIP] 
-> Use **goe.InsertContext** for specify a context.
+> Use **goent.InsertContext** for specify a context.
 
 [Back to Contents](#content)
 ### Insert Batch
@@ -1097,7 +1093,7 @@ foods := []Food{
 		{Name: "Hotdog", Emoji: "🌭"},
 		{Name: "Cookie", Emoji: "🍪"},
 	}
-err = goe.Insert(db.Food).All(foods)
+err = goent.Insert(db.Food).All(foods)
 
 if err != nil {
 	//handler error
@@ -1105,7 +1101,7 @@ if err != nil {
 ```
 
 > [!TIP] 
-> Use **goe.InsertContext** for specify a context.
+> Use **goent.InsertContext** for specify a context.
 
 [Back to Contents](#content)
 ## Update
@@ -1117,7 +1113,7 @@ a := Animal{ID: 2}
 a.Name = "Update Cat"
 
 // update animal of id 2
-err = goe.Save(db.Animal).One(a)
+err = goent.Save(db.Animal).One(a)
 
 if err != nil {
 	//handler error
@@ -1125,7 +1121,7 @@ if err != nil {
 ```
 
 > [!TIP] 
-> Use **goe.SaveContext** for specify a context.
+> Use **goent.SaveContext** for specify a context.
 
 [Back to Contents](#content)
 
@@ -1136,7 +1132,7 @@ Update with set uses update sub-package. This is used for more complex updates, 
 a := Animal{ID: 2}
 
 // a.IDHabitat is nil, so is ignored by Save
-err = goe.Update(db.Animal).
+err = goent.Update(db.Animal).
 	  Sets(update.Set(&db.Animal.IDHabitat, a.IDHabitat)).
 	  Where(where.Equals(&db.Animal.ID, a.ID))
 
@@ -1151,7 +1147,7 @@ Check out the [Where](#where) section for more information about where operation
 > The where call ensures that only the matched rows will be updated.
 
 > [!TIP] 
-> Use **goe.UpdateContext** for specify a context.
+> Use **goent.UpdateContext** for specify a context.
 
 [Back to Contents](#content)
 ## Delete
@@ -1159,7 +1155,7 @@ Check out the [Where](#where) section for more information about where operation
 Remove is used for remove only one record by primary key
 ```go
 // remove animal of id 2
-err = goe.Remove(db.Animal).ByValue(Animal{ID: 2})
+err = goent.Remove(db.Animal).ByValue(Animal{ID: 2})
 
 if err != nil {
 	//handler error
@@ -1167,14 +1163,14 @@ if err != nil {
 ```
 
 > [!TIP] 
-> Use **goe.RemoveContext** for specify a context.
+> Use **goent.RemoveContext** for specify a context.
 
 [Back to Contents](#content)
 
 ### Delete Batch
 Delete all records from Animal
 ```go
-err = goe.Delete(db.Animal).All()
+err = goent.Delete(db.Animal).All()
 
 if err != nil {
 	//handler error
@@ -1183,7 +1179,7 @@ if err != nil {
 
 Delete all matched records
 ```go
-err = goe.Delete(db.Animal).Where(where.Like(&db.Animal.Name, "%Cat%"))
+err = goent.Delete(db.Animal).Where(where.Like(&db.Animal.Name, "%Cat%"))
 
 if err != nil {
 	//handler error
@@ -1196,7 +1192,7 @@ Check out the [Where](#where) section for more information about where operation
 > The where call ensures that only the matched rows will be deleted.
 
 > [!TIP]
-> Use **goe.DeleteContext** for specify a context.
+> Use **goent.DeleteContext** for specify a context.
 
 [Back to Contents](#content)
 
@@ -1205,18 +1201,18 @@ Check out the [Where](#where) section for more information about where operation
 ### Begin Transaction
 
 ```go
-	err = db.BeginTransaction(func(tx goe.Transaction) error {
+	err = db.BeginTransaction(func(tx goent.Transaction) error {
 		cat := Animal{
 			Name: "Cat",
 		}
-		if err = goe.Insert(db.Animal).OnTransaction(tx).One(&cat); err != nil {
+		if err = goent.Insert(db.Animal).OnTransaction(tx).One(&cat); err != nil {
 			return err // try a rollback
 		}
 
 		dog := Animal{
 			Name: "Dog",
 		}
-		if err = goe.Insert(db.Animal).OnTransaction(tx).One(&dog); err != nil {
+		if err = goent.Insert(db.Animal).OnTransaction(tx).One(&dog); err != nil {
 			return err // try a rollback
 		}
 		return nil // try a commit
@@ -1230,19 +1226,19 @@ Check out the [Where](#where) section for more information about where operation
 Nested Transaction
 
 ```go
-err = db.BeginTransaction(func(tx goe.Transaction) error {
+err = db.BeginTransaction(func(tx goent.Transaction) error {
 	cat := Animal{
 		Name: "Cat",
 	}
-	if err = goe.Insert(db.Animal).OnTransaction(tx).One(&cat); err != nil {
+	if err = goent.Insert(db.Animal).OnTransaction(tx).One(&cat); err != nil {
 		return err // try a rollback
 	}
 
-	tx.BeginTransaction(func(tx2 goe.Transaction) error {
+	tx.BeginTransaction(func(tx2 goent.Transaction) error {
 		meat := Food{
 			Name: "meat",
 		}
-		if err := goe.Insert(db.Food).OnTransaction(tx2).One(&meat); err != nil {
+		if err := goent.Insert(db.Food).OnTransaction(tx2).One(&meat); err != nil {
 			return err // try a rollback in nested transaction
 		}
 		return nil // try a commit in nested transaction
@@ -1251,7 +1247,7 @@ err = db.BeginTransaction(func(tx goe.Transaction) error {
 	dog := Animal{
 		Name: "Dog",
 	}
-	if err = goe.Insert(db.Animal).OnTransaction(tx).One(&dog); err != nil {
+	if err = goent.Insert(db.Animal).OnTransaction(tx).One(&dog); err != nil {
 		return err // try a rollback
 	}
 	return nil // try a commit
@@ -1268,7 +1264,7 @@ You need to call the `OnTransaction()` function to setup a transaction for [Sele
 > Any select inside a transaction will be "FOR UPDATE".
 
 > [!TIP]
-> Use **goe.BeginTransactionContext** for specify a context
+> Use **goent.BeginTransactionContext** for specify a context
 
 [Back to Contents](#content)
 
@@ -1293,7 +1289,7 @@ You need to call the `OnTransaction()` function to setup a transaction for [Sele
 > Any select inside a transaction will be "FOR UPDATE".
 
 > [!TIP]
-> Use **goe.NewTransactionContext** for specify a context
+> Use **goent.NewTransactionContext** for specify a context
 
 [Back to Contents](#content)
 

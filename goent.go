@@ -1,4 +1,4 @@
-package goe
+package goent
 
 import (
 	"context"
@@ -8,8 +8,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/go-goe/goe/model"
-	"github.com/go-goe/goe/utils"
+	"github.com/azhai/goent/model"
+	"github.com/azhai/goent/utils"
 )
 
 func init() {
@@ -20,7 +20,7 @@ func init() {
 //
 // # Example
 //
-//	goe.Open[Database](postgres.Open("user=postgres password=postgres host=localhost port=5432 database=postgres", postgres.Config{}))
+//	goent.Open[Database](pgsql.Open("user=postgres password=postgres host=localhost port=5432 database=postgres", pgsql.Config{}))
 func Open[T any](driver model.Driver) (*T, error) {
 	driver.GetDatabaseConfig().Init(driver.Name(), driver.ErrorTranslator())
 
@@ -32,12 +32,12 @@ func Open[T any](driver model.Driver) (*T, error) {
 	db := new(T)
 	valueOf := reflect.ValueOf(db).Elem()
 	if valueOf.Kind() != reflect.Struct {
-		return nil, errors.New("goe: invalid database, the target needs to be a struct")
+		return nil, errors.New("goent: invalid database, the target needs to be a struct")
 	}
 
 	dbId := valueOf.NumField() - 1
 	if valueOf.Field(dbId).Type().Elem().Name() != "DB" {
-		return nil, errors.New("goe: invalid database, last struct field needs to be goe.DB")
+		return nil, errors.New("goent: invalid database, last struct field needs to be goent.DB")
 	}
 
 	dbTarget := new(DB)
@@ -94,6 +94,8 @@ func Open[T any](driver model.Driver) (*T, error) {
 	return db, nil
 }
 
+type RelationFunc func(b body, typeOf reflect.Type) any
+
 // data used for map
 type infosMap struct {
 	db      *DB
@@ -102,7 +104,7 @@ type infosMap struct {
 	addr    uintptr
 }
 
-// data used for migrate
+// data used for Migration
 type infosMigrate struct {
 	field      reflect.StructField
 	table      *model.TableMigrate
@@ -268,7 +270,7 @@ func getPk(db *DB, schema *string, valueOf reflect.Value, tableId int, driver mo
 	typeOf := valueOf.Type()
 	fields := getPks(typeOf)
 	if len(fields) == 0 {
-		return nil, nil, fmt.Errorf("goe: struct %q don't have a primary key setted", typeOf.Name())
+		return nil, nil, fmt.Errorf("goent: struct %q don't have a primary key setted", typeOf.Name())
 	}
 
 	table := utils.ParseTableNameByValue(valueOf)
@@ -300,31 +302,37 @@ func isReturningId(id reflect.StructField) bool {
 	return getTagValue(tag, "default:") != "" || isAutoIncrement(id)
 }
 
-func isManyToOne(b body, createMany func(b body, typeOf reflect.Type) any, createOne func(b body, typeOf reflect.Type) any) any {
-	fieldByName := b.tables.FieldByName(b.tableName).Elem()
-	if fieldByName.IsValid() {
-		for i := 0; i < fieldByName.NumField(); i++ {
-			// check if there is a slice to typeOf
-			if fieldByName.Field(i).Kind() == reflect.Slice {
-				if fieldByName.Field(i).Type().Elem().Name() == b.typeOf.Name() {
-					return createMany(b, fieldByName.Type())
-				}
+func checkAllFields(valueOf reflect.Value, table string) bool {
+	for i := 0; i < valueOf.NumField(); i++ {
+		fieldN := valueOf.Field(i)
+		// check if there is a slice to typeOf
+		if fieldN.Kind() == reflect.Slice {
+			if fieldN.Type().Elem().Name() == table {
+				return true
 			}
 		}
-		if tableMtm := strings.ReplaceAll(b.typeOf.Name(), b.tableName, ""); tableMtm != b.typeOf.Name() {
-			typeOfMtm := b.tables.FieldByName(tableMtm)
-			if typeOfMtm.IsValid() && !typeOfMtm.IsZero() {
-				typeOfMtm = typeOfMtm.Elem()
-				for i := 0; i < typeOfMtm.NumField(); i++ {
-					if typeOfMtm.Field(i).Kind() == reflect.Slice && typeOfMtm.Field(i).Type().Elem().Name() == b.tableName {
-						return createMany(b, typeOfMtm.Field(i).Type().Elem())
-					}
-				}
-			}
-		}
-		return createOne(b, fieldByName.Type())
 	}
-	return nil
+	return false
+}
+
+func createRelation(b body, createMany RelationFunc, createOne RelationFunc) any {
+	fieldByName := b.tables.FieldByName(b.tableName).Elem()
+	if !fieldByName.IsValid() {
+		return nil
+	}
+	typeName := b.typeOf.Name()
+	if checkAllFields(fieldByName, typeName) {
+		return createMany(b, fieldByName.Type()) // M2O
+	}
+	if table := strings.ReplaceAll(typeName, b.tableName, ""); table != typeName {
+		valueOf := b.tables.FieldByName(table)
+		if valueOf.IsValid() && !valueOf.IsZero() {
+			if checkAllFields(valueOf.Elem(), b.tableName) {
+				return createMany(b, valueOf.Elem().Type().Elem()) // M2M
+			}
+		}
+	}
+	return createOne(b, fieldByName.Type()) // O2M/O2O
 }
 
 func primaryKeys(str reflect.Type) (pks []reflect.StructField) {
@@ -362,17 +370,18 @@ func getTagValue(FieldTag string, subTag string) string {
 
 func foreignKeyNamePattern(dbTables reflect.Value, fieldName string) (table, suffix string) {
 	for r := 1; r <= len(fieldName); r++ {
-		table = fieldName[:r]
-		suffix = fieldName[r:]
-		if dbTables.FieldByName(table).IsValid() {
-			pks := getPks(dbTables.FieldByName(table).Elem().Type())
-			for c := 1; c <= len(suffix); c++ {
-				pkName := suffix[:c]
-				if slices.ContainsFunc(pks, func(f reflect.StructField) bool {
-					return f.Name == pkName
-				}) {
-					return table, pkName
-				}
+		table, suffix = fieldName[:r], fieldName[r:]
+		if !dbTables.FieldByName(table).IsValid() {
+			continue
+		}
+		pks := getPks(dbTables.FieldByName(table).Elem().Type())
+		for c := 1; c <= len(suffix); c++ {
+			pkName := suffix[:c]
+			isEqual := func(f reflect.StructField) bool {
+				return f.Name == pkName
+			}
+			if slices.ContainsFunc(pks, isEqual) {
+				return table, pkName
 			}
 		}
 	}
@@ -380,30 +389,32 @@ func foreignKeyNamePattern(dbTables reflect.Value, fieldName string) (table, suf
 }
 
 func helperAttribute(b body) error {
-	field := b.valueOf.Type().Field(b.fieldId)
-	table, prefix := foreignKeyNamePattern(b.tables, field.Name)
-	if table != "" {
-		b.stringInfos = stringInfos{prefixName: prefix, tableName: table, fieldName: field.Name}
-		if mto := isManyToOne(b, createManyToOne, createOneToOne); mto != nil {
-			switch v := mto.(type) {
-			case manyToOne:
-				if addrMap.get(b.mapp.addr) == nil {
-					addrMap.set(b.mapp.addr, v)
-				}
-				for i := range b.mapp.pks {
-					if !b.nullable && b.mapp.pks[i].fieldId == v.fieldId {
-						b.mapp.pks[i].autoIncrement = false
-					}
-				}
-			case oneToOne:
-				if addrMap.get(b.mapp.addr) == nil {
-					addrMap.set(b.mapp.addr, v)
-				}
+	fieldAtt := b.valueOf.Type().Field(b.fieldId)
+	table, prefix := foreignKeyNamePattern(b.tables, fieldAtt.Name)
+	if table == "" {
+		return newAttr(b)
+	}
+	b.stringInfos = stringInfos{prefixName: prefix, tableName: table, fieldName: fieldAtt.Name}
+	rel := createRelation(b, createManyToSome, createOneToSome)
+	if rel == nil {
+		return newAttr(b)
+	}
+	switch v := rel.(type) {
+	case ManyToSomeRelation:
+		if addrMap.get(b.mapp.addr) == nil {
+			addrMap.set(b.mapp.addr, v)
+		}
+		for i := range b.mapp.pks {
+			if !b.nullable && b.mapp.pks[i].fieldId == v.fieldId {
+				b.mapp.pks[i].autoIncrement = false
 			}
-			return nil
+		}
+	case OneToSomeRelation:
+		v.IsOneToOne = strings.Contains(fieldAtt.Tag.Get("goe"), "O2O")
+		if addrMap.get(b.mapp.addr) == nil {
+			addrMap.set(b.mapp.addr, v)
 		}
 	}
-	newAttr(b)
 	return nil
 }
 

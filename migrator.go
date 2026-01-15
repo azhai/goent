@@ -1,4 +1,4 @@
-package goe
+package goent
 
 import (
 	"fmt"
@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/go-goe/goe/model"
-	"github.com/go-goe/goe/utils"
+	"github.com/azhai/goent/model"
+	"github.com/azhai/goent/utils"
 )
 
 func MigrateFrom(db any, driver model.Driver) (*model.Migrator, error) {
@@ -185,7 +185,7 @@ func (dm *dbMigrator) typeField(tables reflect.Value, elem reflect.Value, driver
 	return nil
 }
 
-func createManyToOneMigrate(b body, typeOf reflect.Type) any {
+func createManyToSomeMigrate(b body, typeOf reflect.Type) any {
 	fieldPks := primaryKeys(typeOf)
 	count := 0
 	for i := range fieldPks {
@@ -193,30 +193,28 @@ func createManyToOneMigrate(b body, typeOf reflect.Type) any {
 			count++
 		}
 	}
-
 	if count == 0 {
 		return nil
 	}
 
-	mto := new(model.ManyToOneMigrate)
+	rel := new(model.ManyToSomeMigrate)
+	rel.TargetTable = utils.ParseTableNameByType(typeOf)
+	rel.TargetColumn = utils.ColumnNamePattern(b.prefixName)
+	rel.TargetSchema = b.schemasMap[typeOf.Name()]
+	rel.EscapingTargetTable = b.driver.KeywordHandler(rel.TargetTable)
+	rel.EscapingTargetColumn = b.driver.KeywordHandler(rel.TargetColumn)
 
-	mto.TargetTable = utils.ParseTableNameByType(typeOf)
-	mto.TargetColumn = utils.ColumnNamePattern(b.prefixName)
-	mto.TargetSchema = b.schemasMap[typeOf.Name()]
-	mto.EscapingTargetTable = b.driver.KeywordHandler(mto.TargetTable)
-	mto.EscapingTargetColumn = b.driver.KeywordHandler(mto.TargetColumn)
-
-	mto.Name = utils.ColumnNamePattern(b.fieldName)
-	mto.EscapingName = b.driver.KeywordHandler(mto.Name)
-	mto.Nullable = b.nullable
-	mto.Default = getTagValue(b.migrate.field.Tag.Get("goe"), "default:")
-	if err := checkIndex(b, mto.AttributeMigrate, true); err != nil {
+	rel.Name = utils.ColumnNamePattern(b.fieldName)
+	rel.EscapingName = b.driver.KeywordHandler(rel.Name)
+	rel.Nullable = b.nullable
+	rel.Default = getTagValue(b.migrate.field.Tag.Get("goe"), "default:")
+	if err := checkIndex(b, rel.AttributeMigrate, true); err != nil {
 		panic(err)
 	}
-	return mto
+	return rel
 }
 
-func createOneToOneMigrate(b body, typeOf reflect.Type) any {
+func createOneToSomeMigrate(b body, typeOf reflect.Type) any {
 	fieldPks := primaryKeys(typeOf)
 	count := 0
 	for i := range fieldPks {
@@ -224,32 +222,30 @@ func createOneToOneMigrate(b body, typeOf reflect.Type) any {
 			count++
 		}
 	}
-
 	if count == 0 {
 		return nil
 	}
 
-	mto := new(model.OneToOneMigrate)
+	rel := new(model.OneToSomeMigrate)
+	rel.TargetTable = utils.ParseTableNameByType(typeOf)
+	rel.TargetColumn = utils.ColumnNamePattern(b.prefixName)
+	rel.TargetSchema = b.schemasMap[typeOf.Name()]
+	rel.EscapingTargetTable = b.driver.KeywordHandler(rel.TargetTable)
+	rel.EscapingTargetColumn = b.driver.KeywordHandler(rel.TargetColumn)
 
-	mto.TargetTable = utils.ParseTableNameByType(typeOf)
-	mto.TargetColumn = utils.ColumnNamePattern(b.prefixName)
-	mto.TargetSchema = b.schemasMap[typeOf.Name()]
-	mto.EscapingTargetTable = b.driver.KeywordHandler(mto.TargetTable)
-	mto.EscapingTargetColumn = b.driver.KeywordHandler(mto.TargetColumn)
-
-	mto.Name = utils.ColumnNamePattern(b.fieldName)
-	mto.EscapingName = b.driver.KeywordHandler(mto.Name)
-	mto.Nullable = b.nullable
-	if err := checkIndex(b, mto.AttributeMigrate, true); err != nil {
+	rel.Name = utils.ColumnNamePattern(b.fieldName)
+	rel.EscapingName = b.driver.KeywordHandler(rel.Name)
+	rel.Nullable = b.nullable
+	if err := checkIndex(b, rel.AttributeMigrate, true); err != nil {
 		panic(err)
 	}
-	return mto
+	return rel
 }
 
 func migratePk(typeOf reflect.Type, driver model.Driver) ([]*model.PrimaryKeyMigrate, []string, error) {
 	fields := getPks(typeOf)
 	if len(fields) == 0 {
-		return nil, nil, fmt.Errorf("goe: struct %q don't have a primary key setted", typeOf.Name())
+		return nil, nil, fmt.Errorf("goent: struct %q don't have a primary key setted", typeOf.Name())
 	}
 
 	pks := make([]*model.PrimaryKeyMigrate, len(fields))
@@ -266,11 +262,15 @@ func isAutoIncrement(id reflect.StructField) bool {
 }
 
 func migrateAtt(b body) error {
+	migField := b.migrate.field
+	if slices.Contains(b.migrate.fieldNames, migField.Name) {
+		return nil
+	}
 	at := createMigrateAtt(
-		b.migrate.field.Name,
-		getTagType(b.migrate.field),
+		migField.Name,
+		getTagType(migField),
 		b.nullable,
-		getTagValue(b.migrate.field.Tag.Get("goe"), "default:"),
+		getTagValue(migField.Tag.Get("goe"), "default:"),
 		b.driver,
 	)
 	b.migrate.table.Attributes = append(b.migrate.table.Attributes, at)
@@ -346,88 +346,93 @@ func createMigrateAtt(attributeName string, dataType string, nullable bool, defa
 }
 
 func helperAttributeMigrate(b body) error {
-	field := b.migrate.field
-	table, prefix := foreignKeyNamePattern(b.tables, field.Name)
-	if table != "" {
-		b.stringInfos = stringInfos{prefixName: prefix, tableName: table, fieldName: field.Name}
-		if mto := isManyToOne(b, createManyToOneMigrate, createOneToOneMigrate); mto != nil {
-			switch v := mto.(type) {
-			case *model.ManyToOneMigrate:
-				if v == nil {
-					return migrateAtt(b)
-				}
-				v.DataType = getTagType(field)
-				b.migrate.table.ManyToOnes = append(b.migrate.table.ManyToOnes, *v)
-			case *model.OneToOneMigrate:
-				if v == nil {
-					if slices.Contains(b.migrate.fieldNames, field.Name) {
-						return nil
-					}
-					return migrateAtt(b)
-				}
-				v.DataType = getTagType(field)
-				b.migrate.table.OneToOnes = append(b.migrate.table.OneToOnes, *v)
-			}
-			return nil
-		}
+	migField := b.migrate.field
+	table, prefix := foreignKeyNamePattern(b.tables, migField.Name)
+	if table == "" {
+		return migrateAtt(b)
 	}
-	return migrateAtt(b)
+	b.stringInfos = stringInfos{prefixName: prefix, tableName: table, fieldName: migField.Name}
+	rel := createRelation(b, createManyToSomeMigrate, createOneToSomeMigrate)
+	if rel == nil {
+		return migrateAtt(b)
+	}
+
+	migTable := b.migrate.table
+	switch v := rel.(type) {
+	case *model.ManyToSomeMigrate:
+		// if v == nil {
+		// 	return migrateAtt(b)
+		// }
+		v.DataType = getTagType(migField)
+		migTable.ManyToSomes = append(migTable.ManyToSomes, *v)
+	case *model.OneToSomeMigrate:
+		// if v == nil {
+		// 	if slices.Contains(b.Migration.fieldNames, b.Migration.field.Name) {
+		// 		return nil
+		// 	}
+		// 	return migrateAtt(b)
+		// }
+		v.IsOneToOne = strings.Contains(migField.Tag.Get("goe"), "O2O")
+		v.DataType = getTagType(migField)
+		migTable.OneToSomes = append(migTable.OneToSomes, *v)
+	}
+	return nil
 }
 
 func checkIndex(b body, at model.AttributeMigrate, skipUnique bool) error {
-	field := b.migrate.field
-	indexFunc := getIndex(field)
+	migTable, migField := b.migrate.table, b.migrate.field
+	indexFunc := getIndex(migField)
 	if indexFunc != "" {
 		for _, index := range strings.Split(indexFunc, ",") {
 			indexName := getIndexValue(index, "n:")
 
 			if indexName == "" {
-				indexName = b.migrate.table.Name + "_idx_" + strings.ToLower(field.Name)
+				indexName = migTable.Name + "_idx_" + strings.ToLower(migField.Name)
 			}
 			in := model.IndexMigrate{
-				Name:         b.migrate.table.Name + "_" + indexName,
-				EscapingName: b.driver.KeywordHandler(b.migrate.table.Name + "_" + indexName),
+				Name:         migTable.Name + "_" + indexName,
+				EscapingName: b.driver.KeywordHandler(migTable.Name + "_" + indexName),
 				Unique:       strings.Contains(index, "unique"),
 				Func:         strings.ToLower(getIndexValue(index, "f:")),
 				Attributes:   []model.AttributeMigrate{at},
 			}
 
 			var i int
-			if i = slices.IndexFunc(b.migrate.table.Indexes, func(i model.IndexMigrate) bool {
+			if i = slices.IndexFunc(migTable.Indexes, func(i model.IndexMigrate) bool {
 				return i.Name == in.Name && i.Unique == in.Unique && i.Func == in.Func
 			}); i == -1 {
-				if c := slices.IndexFunc(b.migrate.table.Indexes, func(i model.IndexMigrate) bool {
+				if c := slices.IndexFunc(migTable.Indexes, func(i model.IndexMigrate) bool {
 					return i.Name == in.Name && (i.Unique != in.Unique || i.Func != in.Func)
 				}); c != -1 {
-					return fmt.Errorf(`goe: struct "%v" have two or more indexes with same name but different uniqueness/function "%v"`, b.migrate.table.Name, in.Name)
+					return fmt.Errorf(`goent: struct "%v" have two or more indexes with same name but different uniqueness/function "%v"`, migTable.Name, in.Name)
 				}
 
-				b.migrate.table.Indexes = append(b.migrate.table.Indexes, in)
+				migTable.Indexes = append(migTable.Indexes, in)
 				continue
 			}
-			b.migrate.table.Indexes[i].Attributes = append(b.migrate.table.Indexes[i].Attributes, at)
+			migTable.Indexes[i].Attributes = append(migTable.Indexes[i].Attributes, at)
 		}
 	}
 
-	tagValue := field.Tag.Get("goe")
+	tagValue := migField.Tag.Get("goe")
 	if !skipUnique && tagValueExist(tagValue, "unique") {
 		in := model.IndexMigrate{
-			Name:         b.migrate.table.Name + "_idx_" + strings.ToLower(field.Name),
-			EscapingName: b.driver.KeywordHandler(b.migrate.table.Name + "_idx_" + strings.ToLower(field.Name)),
+			Name:         migTable.Name + "_idx_" + strings.ToLower(migField.Name),
+			EscapingName: b.driver.KeywordHandler(migTable.Name + "_idx_" + strings.ToLower(migField.Name)),
 			Unique:       true,
 			Attributes:   []model.AttributeMigrate{at},
 		}
-		b.migrate.table.Indexes = append(b.migrate.table.Indexes, in)
+		migTable.Indexes = append(migTable.Indexes, in)
 	}
 
 	if tagValueExist(tagValue, "index") {
 		in := model.IndexMigrate{
-			Name:         b.migrate.table.Name + "_idx_" + strings.ToLower(field.Name),
-			EscapingName: b.driver.KeywordHandler(b.migrate.table.Name + "_idx_" + strings.ToLower(field.Name)),
+			Name:         migTable.Name + "_idx_" + strings.ToLower(migField.Name),
+			EscapingName: b.driver.KeywordHandler(migTable.Name + "_idx_" + strings.ToLower(migField.Name)),
 			Unique:       false,
 			Attributes:   []model.AttributeMigrate{at},
 		}
-		b.migrate.table.Indexes = append(b.migrate.table.Indexes, in)
+		migTable.Indexes = append(migTable.Indexes, in)
 	}
 	return nil
 }

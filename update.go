@@ -1,11 +1,11 @@
-package goe
+package goent
 
 import (
 	"context"
 	"reflect"
 
-	"github.com/go-goe/goe/enum"
-	"github.com/go-goe/goe/model"
+	"github.com/azhai/goent/enum"
+	"github.com/azhai/goent/model"
 )
 
 type save[T any] struct {
@@ -26,7 +26,7 @@ type save[T any] struct {
 // # Examples
 //
 //	// updates animal name on record id 1
-//	err = goe.Save(db.Animal).One(Animal{ID: 1, Name: "Cat"})
+//	err = goent.Save(db.Animal).One(Animal{ID: 1, Name: "Cat"})
 func Save[T any](table *T) save[T] {
 	return SaveContext(context.Background(), table)
 }
@@ -50,7 +50,7 @@ func SaveContext[T any](ctx context.Context, table *T) save[T] {
 //	}
 //	defer tx.Rollback()
 //
-//	err = goe.Save(db.Animal).OnTransaction(tx).One(Animal{ID: 2})
+//	err = goent.Save(db.Animal).OnTransaction(tx).One(Animal{ID: 2})
 //	if err != nil {
 //		// handler error
 //	}
@@ -92,7 +92,7 @@ type stateUpdate[T any] struct {
 // # Examples
 //
 //	// update only the attribute JobTitleID from PersonJobTitle with the value 3
-//	err = goe.Update(db.PersonJobTitle).
+//	err = goent.Update(db.PersonJobTitle).
 //	Sets(update.Set(&db.PersonJobTitle.JobTitleID, 3)).
 //	Where(
 //		where.And(
@@ -102,7 +102,7 @@ type stateUpdate[T any] struct {
 //	)
 //
 //	// update all animals name to Cat
-//	goe.Update(db.Animal).Sets(update.Set(&db.Animal.Name, "Cat")).All()
+//	goent.Update(db.Animal).Sets(update.Set(&db.Animal.Name, "Cat")).All()
 func Update[T any](table *T) stateUpdate[T] {
 	return UpdateContext(context.Background(), table)
 }
@@ -133,7 +133,7 @@ func (s stateUpdate[T]) Sets(sets ...model.Set) stateUpdate[T] {
 //	}
 //	defer tx.Rollback()
 //
-//	err = goe.Update(db.Animal).OnTransaction(tx).
+//	err = goent.Update(db.Animal).OnTransaction(tx).
 //	  		Sets(update.Set(&db.Animal.HabitatID, 44)).
 //	  		Where(where.Equals(&db.Animal.ID, 2))
 //	if err != nil {
@@ -177,13 +177,13 @@ type argSave struct {
 
 func getArgsSave[T any](addrMap map[uintptr]field, table *T, value T) argSave {
 	if table == nil {
-		panic("goe: invalid argument. try sending a pointer to a database mapped struct as argument")
+		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
 	}
 
 	tableOf := reflect.ValueOf(table).Elem()
 
 	if tableOf.Kind() != reflect.Struct {
-		panic("goe: invalid argument. try sending a pointer to a database mapped struct as argument")
+		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
 	}
 
 	valueOf := reflect.ValueOf(value)

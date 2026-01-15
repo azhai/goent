@@ -6,6 +6,13 @@ import (
 	"unicode"
 )
 
+// IsFieldHasSchema check if field has schema tag or schema suffix
+func IsFieldHasSchema(valueOf reflect.Value, i int) bool {
+	return strings.Contains(valueOf.Type().Field(i).Tag.Get("goe"), "schema") ||
+		strings.HasSuffix(valueOf.Field(i).Elem().Type().Name(), "Schema")
+}
+
+// ParseTableNameByValue parse table name by value
 func ParseTableNameByValue(valueOf reflect.Value) string {
 	if tableName := TableNameMethod(valueOf); tableName != "" {
 		return tableName
@@ -13,6 +20,7 @@ func ParseTableNameByValue(valueOf reflect.Value) string {
 	return TableNamePattern(valueOf.Type().Name())
 }
 
+// ParseTableNameByType parse table name by type
 func ParseTableNameByType(typeOf reflect.Type) string {
 	valueOf := reflect.New(typeOf)
 	if tableName := TableNameMethod(valueOf); tableName != "" {
@@ -21,6 +29,8 @@ func ParseTableNameByType(typeOf reflect.Type) string {
 	return TableNamePattern(typeOf.Name())
 }
 
+// TableNameMethod try to get table name from method TableName
+// If method TableName is not found, return empty string
 func TableNameMethod(valueOf reflect.Value) string {
 	var method reflect.Value
 	if method = valueOf.MethodByName("TableName"); method.IsValid() {
@@ -58,6 +68,7 @@ func ColumnNamePattern(name string) string {
 	return ToSnakeCase(name)
 }
 
+// ToSnakeCase convert camelCase or PascalCase to snake_case
 func ToSnakeCase(name string) string {
 	if len(name) == 0 {
 		return name
@@ -81,10 +92,4 @@ func ToSnakeCase(name string) string {
 	}
 
 	return result.String()
-}
-
-// IsFieldHasSchema check if field has schema tag or schema suffix
-func IsFieldHasSchema(valueOf reflect.Value, i int) bool {
-	return strings.Contains(valueOf.Type().Field(i).Tag.Get("goe"), "schema") ||
-		strings.HasSuffix(valueOf.Field(i).Elem().Type().Name(), "Schema")
 }

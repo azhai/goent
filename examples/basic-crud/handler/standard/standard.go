@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/azhai/goent"
 	"github.com/go-goe/examples/crud-basic/data"
 	"github.com/go-goe/examples/crud-basic/handler"
 	"github.com/go-goe/examples/crud-basic/repository"
-	"github.com/go-goe/goe"
 )
 
 type handlerStandard struct {
@@ -39,7 +39,7 @@ func (h handlerStandard) Find(w http.ResponseWriter, r *http.Request) error {
 
 	var p *data.Person
 	if p, err = h.repository.Find(data.Person{ID: id}); err != nil {
-		if errors.Is(err, goe.ErrNotFound) {
+		if errors.Is(err, goent.ErrNotFound) {
 			return notFoundError(w, err)
 		}
 		return internalServerError(w, err)
@@ -62,7 +62,7 @@ func (h handlerStandard) List(w http.ResponseWriter, r *http.Request) error {
 		return badRequestError(w, err, "invalid size")
 	}
 
-	var pages *goe.Pagination[data.Person]
+	var pages *goent.Pagination[data.Person]
 	if pages, err = h.repository.List(page, size); err != nil {
 		return internalServerError(w, err)
 	}

@@ -14,8 +14,8 @@ This is a no CGO sqlite driver for GOE ORM based on https://pkg.go.dev/modernc.o
 package main
 
 import (
-	"github.com/go-goe/goe"
-	"github.com/go-goe/goe/drivers/sqlite"
+	"github.com/azhai/goent"
+	"github.com/azhai/goent/drivers/sqlite"
 )
 
 type User struct {
@@ -26,7 +26,7 @@ type User struct {
 
 type Database struct {
 	User *User
-	*goe.DB
+	*goent.DB
 }
 
 func main() {
@@ -34,7 +34,7 @@ func main() {
 	cfg := sqlite.NewConfig(sqlite.Config{
 		Logger: logger, IncludeArguments: true,
 	})
-	db, err := goe.Open[Database](sqlite.Open("goe.db", cfg))
+	db, err := goent.Open[Database](sqlite.Open("goent.db", cfg))
 }
 ```
 
@@ -44,8 +44,8 @@ func main() {
 package main
 
 import (
-	"github.com/go-goe/goe"
-	"github.com/go-goe/sqlite"
+	"github.com/azhai/goent"
+	"github.com/azhai/goent/drivers/sqlite"
 )
 
 type User struct {
@@ -56,11 +56,11 @@ type User struct {
 
 type Database struct {
 	User *User
-	*goe.DB
+	*goent.DB
 }
 
 func main() {
-	db, err := goe.Open[Database](sqlite.Open(filepath.Join(os.TempDir(), "goe.db"), sqlite.NewConfig(
+	db, err := goent.Open[Database](sqlite.Open(filepath.Join(os.TempDir(), "goent.db"), sqlite.NewConfig(
 		sqlite.Config{
 			ConnectionHook: func(conn sqlite.ExecQuerierContext, dsn string) error {
 				conn.ExecContext(context.Background(), "PRAGMA foreign_keys = OFF;", nil)
@@ -77,8 +77,8 @@ func main() {
 package main
 
 import (
-	"github.com/go-goe/goe"
-	"github.com/go-goe/goe/drivers/sqlite"
+	"github.com/azhai/goent"
+	"github.com/azhai/goent/drivers/sqlite"
 )
 
 type User struct {
@@ -89,11 +89,11 @@ type User struct {
 
 type Database struct {
 	User *User
-	*goe.DB
+	*goent.DB
 }
 
 func main() {
 	cfg := sqlite.NewConfig(sqlite.Config{})
-	db, err := goe.Open[Database](sqlite.OpenInMemory(cfg))
+	db, err := goent.Open[Database](sqlite.OpenInMemory(cfg))
 }
 ```

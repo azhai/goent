@@ -1,15 +1,15 @@
 package aggregate
 
 import (
-	"github.com/go-goe/goe/enum"
-	"github.com/go-goe/goe/model"
+	"github.com/azhai/goent/enum"
+	"github.com/azhai/goent/model"
 )
 
 // Aggregate Count uses database aggregate to make a count on the target.
 //
 // # Example
 //
-//	goe.Select[struct {
+//	goent.Select[struct {
 //		Count count
 //	}](aggregate.Count(&db.Animal.Id))...
 func Count(t any) *count {
@@ -20,7 +20,7 @@ func Count(t any) *count {
 //
 // # Example
 //
-//	goe.Select[struct {
+//	goent.Select[struct {
 //		Avg float64
 //	}](aggregate.Avg(&db.Exam.Result))...
 func Avg(t any) *avg {
@@ -31,7 +31,7 @@ func Avg(t any) *avg {
 //
 // # Example
 //
-//	goe.Select[struct {
+//	goent.Select[struct {
 //		Max float64
 //	}](aggregate.Max(&db.Exam.Result))...
 func Max(t any) *max {
@@ -42,7 +42,7 @@ func Max(t any) *max {
 //
 // # Example
 //
-//	goe.Select[struct {
+//	goent.Select[struct {
 //		Min float64
 //	}](aggregate.Min(&db.Exam.Result))...
 func Min(t any) *min {
@@ -53,7 +53,7 @@ func Min(t any) *min {
 //
 // # Example
 //
-//	goe.Select[struct {
+//	goent.Select[struct {
 //		Sum float64
 //	}](aggregate.Sum(&db.Exam.Result))...
 func Sum(t any) *sum {

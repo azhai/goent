@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-goe/goe/enum"
-	"github.com/go-goe/goe/model"
+	"github.com/azhai/goent/enum"
+	"github.com/azhai/goent/model"
 )
 
 type body struct {
@@ -111,7 +111,7 @@ func wrapperExec(ctx context.Context, conn model.Connection, query *model.Query)
 func (db *Driver) DropTable(schema, table string) error {
 	if len(schema) > 2 {
 		table = schema + "." + table
-		checkAttach(db.sql, db.dns, map[string]bool{schema[1 : len(schema)-1]: true})
+		checkAttach(db.sql, db.dsn, map[string]bool{schema[1 : len(schema)-1]: true})
 	}
 	return db.rawExecContext(context.TODO(), fmt.Sprintf("DROP TABLE IF EXISTS %v;", table))
 }
@@ -127,7 +127,7 @@ func (db *Driver) RenameTable(schema, table, newTable string) error {
 func (db *Driver) RenameColumn(schema, table, oldColumn, newColumn string) error {
 	if len(schema) > 2 {
 		table = schema + "." + table
-		checkAttach(db.sql, db.dns, map[string]bool{schema[1 : len(schema)-1]: true})
+		checkAttach(db.sql, db.dsn, map[string]bool{schema[1 : len(schema)-1]: true})
 	}
 	return db.rawExecContext(context.TODO(), renameColumn(table, oldColumn, newColumn))
 }
@@ -135,7 +135,7 @@ func (db *Driver) RenameColumn(schema, table, oldColumn, newColumn string) error
 func (db *Driver) DropColumn(schema, table, column string) error {
 	if len(schema) > 2 {
 		table = schema + "." + table
-		checkAttach(db.sql, db.dns, map[string]bool{schema[1 : len(schema)-1]: true})
+		checkAttach(db.sql, db.dsn, map[string]bool{schema[1 : len(schema)-1]: true})
 	}
 	return db.rawExecContext(context.TODO(), dropColumn(table, column))
 }
@@ -220,9 +220,9 @@ func checkTableChanges(b body) error {
 }
 
 func primaryKeyIsForeignKey(table *model.TableMigrate, attName string) bool {
-	return slices.ContainsFunc(table.ManyToOnes, func(m model.ManyToOneMigrate) bool {
+	return slices.ContainsFunc(table.ManyToSomes, func(m model.ManyToSomeMigrate) bool {
 		return m.Name == attName
-	}) || slices.ContainsFunc(table.OneToOnes, func(o model.OneToOneMigrate) bool {
+	}) || slices.ContainsFunc(table.OneToSomes, func(o model.OneToSomeMigrate) bool {
 		return o.Name == attName
 	})
 }
@@ -259,27 +259,27 @@ func createTable(tbl *model.TableMigrate, dataMap map[string]*dataType, sql *str
 		}(), setDefault(att.Default)))
 	}
 
-	for _, att := range tbl.OneToOnes {
+	for _, att := range tbl.OneToSomes {
 		tb := tables[att.TargetTable]
 		if tb.Migrated {
-			t.createAttrs = append(t.createAttrs, foreingOneToOne(att, dataMap))
+			t.createAttrs = append(t.createAttrs, foreignOneToSome(att, dataMap))
 		} else {
 			if tb != tbl && !skipDependency {
 				createTable(tb, dataMap, sql, tables, false)
 			}
-			t.createAttrs = append(t.createAttrs, foreingOneToOne(att, dataMap))
+			t.createAttrs = append(t.createAttrs, foreignOneToSome(att, dataMap))
 		}
 	}
 
-	for _, att := range tbl.ManyToOnes {
+	for _, att := range tbl.ManyToSomes {
 		tb := tables[att.TargetTable]
 		if tb.Migrated {
-			t.createAttrs = append(t.createAttrs, foreingManyToOne(att, dataMap))
+			t.createAttrs = append(t.createAttrs, foreignManyToSome(att, dataMap))
 		} else {
 			if tb != tbl && !skipDependency {
 				createTable(tb, dataMap, sql, tables, false)
 			}
-			t.createAttrs = append(t.createAttrs, foreingManyToOne(att, dataMap))
+			t.createAttrs = append(t.createAttrs, foreignManyToSome(att, dataMap))
 		}
 	}
 
@@ -300,27 +300,29 @@ func setDefault(d string) string {
 	return fmt.Sprintf("DEFAULT %v", d)
 }
 
-func foreingManyToOne(att model.ManyToOneMigrate, dataMap map[string]*dataType) string {
+func foreignManyToSome(att model.ManyToSomeMigrate, dataMap map[string]*dataType) string {
 	att.DataType = checkDataType(att.DataType, dataMap).typeName
-	return fmt.Sprintf("%v %v %v REFERENCES %v(%v),", att.EscapingName, att.DataType, func() string {
-		if att.Nullable {
-			return "NULL"
-		}
-		return "NOT NULL"
-	}(), att.EscapingTargetTable, att.EscapingTargetColumn)
+	feature := "NULL"
+	if !att.Nullable {
+		feature = "NOT NULL"
+	}
+	return fmt.Sprintf("%v %v %v REFERENCES %v(%v),",
+		att.EscapingName, att.DataType, feature,
+		att.EscapingTargetTable, att.EscapingTargetColumn)
 }
 
-func foreingOneToOne(att model.OneToOneMigrate, dataMap map[string]*dataType) string {
+func foreignOneToSome(att model.OneToSomeMigrate, dataMap map[string]*dataType) string {
 	att.DataType = checkDataType(att.DataType, dataMap).typeName
-	return fmt.Sprintf("%v %v %v REFERENCES %v(%v),",
-		att.EscapingName,
-		att.DataType,
-		func() string {
-			if att.Nullable {
-				return "NULL"
-			}
-			return "NOT NULL"
-		}(), att.EscapingTargetTable, att.EscapingTargetColumn)
+	feature := "NULL"
+	if !att.Nullable {
+		feature = "NOT NULL"
+	}
+	if att.IsOneToOne {
+		feature = "UNIQUE " + feature
+	}
+	return fmt.Sprintf("%v %v %s REFERENCES %v(%v),",
+		att.EscapingName, att.DataType, feature,
+		att.EscapingTargetTable, att.EscapingTargetColumn)
 }
 
 type table struct {
@@ -421,7 +423,7 @@ func checkIndex(indexes []model.IndexMigrate, table *model.TableMigrate, sql *st
 
 	for _, dbIndex := range dis {
 		if !dbIndex.migrated {
-			if !slices.ContainsFunc(table.OneToOnes, func(o model.OneToOneMigrate) bool {
+			if !slices.ContainsFunc(table.OneToSomes, func(o model.OneToSomeMigrate) bool {
 				return o.Name == dbIndex.attname
 			}) {
 				sql.WriteString(fmt.Sprintf("DROP INDEX IF EXISTS %v;", keywordHandler(dbIndex.indexName)) + "\n")
@@ -497,7 +499,7 @@ func checkFields(b body) {
 		}
 	}
 
-	for _, att := range b.table.OneToOnes {
+	for _, att := range b.table.OneToSomes {
 		if column, exist := b.dbTable.columns[att.Name]; exist {
 			column.migrated = true
 			// change from many to one to one to one
@@ -518,7 +520,7 @@ func checkFields(b body) {
 		break
 	}
 
-	for _, att := range b.table.ManyToOnes {
+	for _, att := range b.table.ManyToSomes {
 		if column, exist := b.dbTable.columns[att.Name]; exist {
 			column.migrated = true
 			// change from one to one to many to one
@@ -615,10 +617,10 @@ func tableAttributes(t *model.TableMigrate) (string, string) {
 	for _, a := range t.Attributes {
 		sql.WriteString("," + a.EscapingName)
 	}
-	for _, a := range t.OneToOnes {
+	for _, a := range t.OneToSomes {
 		sql.WriteString("," + a.EscapingName)
 	}
-	for _, a := range t.ManyToOnes {
+	for _, a := range t.ManyToSomes {
 		sql.WriteString("," + a.EscapingName)
 	}
 	newColumns := sql.String()

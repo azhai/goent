@@ -1,7 +1,7 @@
-package goe
+package goent
 
 import (
-	"github.com/go-goe/goe/model"
+	"github.com/azhai/goent/model"
 )
 
 type Transaction struct {

@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-goe/goe/enum"
-	"github.com/go-goe/goe/model"
+	"github.com/azhai/goent/enum"
+	"github.com/azhai/goent/model"
 )
 
 var joins = map[enum.JoinType]string{
@@ -264,7 +264,7 @@ func writeWhereInArgument(where *model.Where, builder *strings.Builder, query *m
 	builder.WriteByte(')')
 }
 
-func checkAttach(pool connection, dns string, schemas map[string]bool) {
+func checkAttach(pool connection, dsn string, schemas map[string]bool) {
 	myQuery := struct {
 		Id     int
 		Schema string
@@ -280,7 +280,7 @@ func checkAttach(pool connection, dns string, schemas map[string]bool) {
 		return
 	}
 	rx := regexp.MustCompile(`[^/]+\.db`)
-	currentDb := rx.FindString(dns)
+	currentDb := rx.FindString(dsn)
 
 	for rows.Next() {
 		rows.Scan(&myQuery.Id, &myQuery.Schema, &myQuery.File)
@@ -296,7 +296,7 @@ func checkAttach(pool connection, dns string, schemas map[string]bool) {
 		}) bool {
 			return s[1:len(s)-1] == mq.Schema
 		}) {
-			schemaBuilders.WriteString(fmt.Sprintf("ATTACH DATABASE '%v' AS %v;\n", strings.Replace(dns, currentDb, s[1:len(s)-1]+".db", 1), s))
+			schemaBuilders.WriteString(fmt.Sprintf("ATTACH DATABASE '%v' AS %v;\n", strings.Replace(dsn, currentDb, s[1:len(s)-1]+".db", 1), s))
 		}
 	}
 	if schemaBuilders.Len() != 0 {

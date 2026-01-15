@@ -9,16 +9,16 @@ import (
 	"os"
 	"testing"
 
+	"github.com/azhai/goent"
 	"github.com/go-goe/examples/crud-basic/data"
 	"github.com/go-goe/examples/crud-basic/handler"
-	"github.com/go-goe/goe"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestApi(t *testing.T) {
 	db, err := data.NewMemoryDatabase()
 	assert.Nil(t, err)
-	defer goe.Close(db)
+	defer goent.Close(db)
 
 	starter := frameworks[os.Getenv("PK")]
 	if !assert.NotNil(t, starter) {
@@ -79,7 +79,7 @@ func TestApi(t *testing.T) {
 
 				assert.Equal(t, http.StatusOK, w.Code)
 
-				var res handler.Response[goe.Pagination[data.Person]]
+				var res handler.Response[goent.Pagination[data.Person]]
 				json.NewDecoder(w.Body).Decode(&res)
 
 				assert.Len(t, res.Data.Values, 5)

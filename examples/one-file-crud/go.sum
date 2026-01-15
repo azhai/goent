@@ -8,10 +8,10 @@ github.com/getkin/kin-openapi v0.133.0 h1:pJdmNohVIJ97r4AUFtEXRXwESr8b0bD721u/Tz
 github.com/getkin/kin-openapi v0.133.0/go.mod h1:boAciF6cXk5FhPqe/NQeBTeenbjqU4LhWBf09ILVvWE=
 github.com/go-fuego/fuego v0.18.8 h1:Is8Ya3+FstbU42288Uj/zRqjCCp7uP6awBqrtcjFUsU=
 github.com/go-fuego/fuego v0.18.8/go.mod h1:D1VBuXa3D2h8Kf37vixKvBvmn8IIMgqLyDR8GbYPMMo=
-github.com/go-goe/goe v0.7.0 h1:hJvAE1rVGa6ADZ4FB/+Ya1+ePys8MI3PfvmMbHITZsc=
-github.com/go-goe/goe v0.7.0/go.mod h1:7LKNFppuz51oeesGciMggFYNeb49X3FlkzWlEro62fo=
-github.com/go-goe/sqlite v0.5.1 h1:7kWGhitDMwK0bFO8Ozvin3W4H+tEUM1MFL6TNqZroCQ=
-github.com/go-goe/sqlite v0.5.1/go.mod h1:ycsBs83hqqvDyr7KG9R6GNmQ/BswzOxKotvAVAxi/lw=
+github.com/azhai/goent v0.7.0 h1:hJvAE1rVGa6ADZ4FB/+Ya1+ePys8MI3PfvmMbHITZsc=
+github.com/azhai/goent v0.7.0/go.mod h1:7LKNFppuz51oeesGciMggFYNeb49X3FlkzWlEro62fo=
+github.com/azhai/goent/drivers/sqlite v0.5.1 h1:7kWGhitDMwK0bFO8Ozvin3W4H+tEUM1MFL6TNqZroCQ=
+github.com/azhai/goent/drivers/sqlite v0.5.1/go.mod h1:ycsBs83hqqvDyr7KG9R6GNmQ/BswzOxKotvAVAxi/lw=
 github.com/go-openapi/jsonpointer v0.22.3 h1:dKMwfV4fmt6Ah90zloTbUKWMD+0he+12XYAsPotrkn8=
 github.com/go-openapi/jsonpointer v0.22.3/go.mod h1:0lBbqeRsQ5lIanv3LHZBrmRGHLHcQoOXQnf88fHlGWo=
 github.com/go-openapi/swag/jsonname v0.25.3 h1:U20VKDS74HiPaLV7UZkztpyVOw3JNVsit+w+gTXRj0A=

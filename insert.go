@@ -1,12 +1,12 @@
-package goe
+package goent
 
 import (
 	"context"
 	"errors"
 	"reflect"
 
-	"github.com/go-goe/goe/enum"
-	"github.com/go-goe/goe/model"
+	"github.com/azhai/goent/enum"
+	"github.com/azhai/goent/model"
 )
 
 type stateInsert[T any] struct {
@@ -27,11 +27,11 @@ type stateInsert[T any] struct {
 // # Examples
 //
 //	// insert one record
-//	err = goe.Insert(db.Person).One(&Person{Name: "John"})
+//	err = goent.Insert(db.Person).One(&Person{Name: "John"})
 //	// insert a list of records
 //
 //	persons := []Person{{Name: "John"}, {Name: "Mary"}}
-//	err = goe.Insert(db.Person).All(persons)
+//	err = goent.Insert(db.Person).All(persons)
 func Insert[T any](table *T) stateInsert[T] {
 	return InsertContext(context.Background(), table)
 }
@@ -55,7 +55,7 @@ func InsertContext[T any](ctx context.Context, table *T) stateInsert[T] {
 //	defer tx.Rollback()
 //
 //	a := Animal{Name: "Cat"}
-//	err = goe.Insert(db.Animal).OnTransaction(tx).One(&a)
+//	err = goent.Insert(db.Animal).OnTransaction(tx).One(&a)
 //	if err != nil {
 //		// handler error
 //	}
@@ -71,7 +71,7 @@ func (s stateInsert[T]) OnTransaction(tx model.Transaction) stateInsert[T] {
 
 func (s stateInsert[T]) One(value *T) error {
 	if value == nil {
-		return errors.New("goe: invalid insert value. try sending a pointer to a struct as value")
+		return errors.New("goent: invalid insert value. try sending a pointer to a struct as value")
 	}
 	valueOf := reflect.ValueOf(value).Elem()
 
@@ -92,7 +92,7 @@ func (s stateInsert[T]) One(value *T) error {
 
 func (s stateInsert[T]) All(value []T) error {
 	if len(value) == 0 {
-		return errors.New("goe: can't insert a empty batch value")
+		return errors.New("goent: can't insert a empty batch value")
 	}
 	valueOf := reflect.ValueOf(value)
 
@@ -114,13 +114,13 @@ func createInsertState[T any](ctx context.Context, t *T) stateInsert[T] {
 
 func getArgsTable(addrMap map[uintptr]field, table any, valueOf reflect.Value) []field {
 	if table == nil {
-		panic("goe: invalid argument. try sending a pointer to a database mapped struct as argument")
+		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
 	}
 	fields := make([]field, 0)
 
 	tableValueOf := reflect.ValueOf(table).Elem()
 	if tableValueOf.Kind() != reflect.Struct {
-		panic("goe: invalid argument. try sending a pointer to a database mapped struct as argument")
+		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
 	}
 
 	var fieldOf reflect.Value
@@ -139,7 +139,7 @@ func getArgsTable(addrMap map[uintptr]field, table any, valueOf reflect.Value) [
 	}
 
 	if len(fields) == 0 {
-		panic("goe: invalid argument. try sending a pointer to a database mapped struct as argument")
+		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
 	}
 	return fields
 }

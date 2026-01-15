@@ -1,4 +1,4 @@
-package goe
+package goent
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/go-goe/goe/model"
+	"github.com/azhai/goent/model"
 )
 
 func handlerValues(ctx context.Context, conn model.Connection, query model.Query, dbConfig *model.DatabaseConfig) error {
@@ -43,7 +43,7 @@ func handlerValuesReturningBatch(ctx context.Context, conn model.Connection, que
 	for rows.Next() {
 		query.Header.Err = rows.Scan(value.Index(i).Field(pkFieldId).Addr().Interface())
 		if query.Header.Err != nil {
-			//TODO: add infos about row
+			// TODO: add infos about row
 			return dbConfig.ErrorQueryHandler(ctx, query)
 		}
 		i++
@@ -75,7 +75,7 @@ func handlerResult[T any](ctx context.Context, conn model.Connection, query mode
 		for rows.Next() {
 			query.Header.Err = rows.Scan(dest...)
 			if query.Header.Err != nil {
-				//TODO: add infos about row
+				// TODO: add infos about row
 				yield(entity, dbConfig.ErrorQueryHandler(ctx, query))
 				return
 			}

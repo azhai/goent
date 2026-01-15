@@ -1,4 +1,4 @@
-package goe
+package goent
 
 import (
 	"context"
@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/go-goe/goe/enum"
-	"github.com/go-goe/goe/model"
+	"github.com/azhai/goent/enum"
+	"github.com/azhai/goent/model"
 )
 
 type goeMap struct {
@@ -39,12 +39,12 @@ type DB struct {
 	driver model.Driver
 }
 
-// Return the database stats as [sql.DBStats].
+// Stats Return the database stats as [sql.DBStats].
 func (db *DB) Stats() sql.DBStats {
 	return db.driver.Stats()
 }
 
-// Get the database name; SQLite, PostgreSQL...
+// Name Get the database name; SQLite, PostgreSQL...
 func (db *DB) Name() string {
 	return db.driver.Name()
 }
@@ -86,25 +86,25 @@ func (db *DB) NewTransactionContext(ctx context.Context, isolation sql.Isolation
 	return t, nil
 }
 
-// Begin a Transaction with the database default level, any panic or error will trigger a rollback.
+// BeginTransaction Begin a Transaction with the database default level, any panic or error will trigger a rollback.
 //
 // BeginTransaction uses [context.Background] internally;
 // to specify the context and the isolation level, use [BeginTransactionContext]
 //
 // # Example
 //
-//	err = db.BeginTransaction(func(tx goe.Transaction) error {
+//	err = db.BeginTransaction(func(tx goent.Transaction) error {
 //		cat := Animal{
 //			Name: "Cat",
 //		}
-//		if err = goe.Insert(db.Animal).OnTransaction(tx).One(&cat); err != nil {
+//		if err = goent.Insert(db.Animal).OnTransaction(tx).One(&cat); err != nil {
 //			return err // try a rollback
 //		}
 //
 //		dog := Animal{
 //			Name: "Dog",
 //		}
-//		if err = goe.Insert(db.Animal).OnTransaction(tx).One(&dog); err != nil {
+//		if err = goent.Insert(db.Animal).OnTransaction(tx).One(&dog); err != nil {
 //			return err // try a rollback
 //		}
 //		return nil // try a commit
@@ -117,22 +117,22 @@ func (db *DB) BeginTransaction(txFunc func(Transaction) error) error {
 	return db.BeginTransactionContext(context.Background(), sql.LevelDefault, txFunc)
 }
 
-// Begin a Transaction, any panic or error will trigger a rollback.
+// BeginTransactionContext Begin a Transaction, any panic or error will trigger a rollback.
 //
 // # Example
 //
-//	err = db.BeginTransactionContext(context.Background(), sql.LevelSerializable, func(tx goe.Transaction) error {
+//	err = db.BeginTransactionContext(context.Background(), sql.LevelSerializable, func(tx goent.Transaction) error {
 //		cat := Animal{
 //			Name: "Cat",
 //		}
-//		if err = goe.Insert(db.Animal).OnTransaction(tx).One(&cat); err != nil {
+//		if err = goent.Insert(db.Animal).OnTransaction(tx).One(&cat); err != nil {
 //			return err // try a rollback
 //		}
 //
 //		dog := Animal{
 //			Name: "Dog",
 //		}
-//		if err = goe.Insert(db.Animal).OnTransaction(tx).One(&dog); err != nil {
+//		if err = goent.Insert(db.Animal).OnTransaction(tx).One(&dog); err != nil {
 //			return err // try a rollback
 //		}
 //		return nil // try a commit
@@ -158,7 +158,7 @@ func (db *DB) BeginTransactionContext(ctx context.Context, isolation sql.Isolati
 	return t.Commit()
 }
 
-// Closes the database connection.
+// Close Closes the database connection.
 func Close(dbTarget any) error {
 	goeDb := getDatabase(dbTarget)
 	err := goeDb.driver.Close()

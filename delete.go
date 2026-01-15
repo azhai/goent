@@ -1,11 +1,11 @@
-package goe
+package goent
 
 import (
 	"context"
 	"reflect"
 
-	"github.com/go-goe/goe/enum"
-	"github.com/go-goe/goe/model"
+	"github.com/azhai/goent/enum"
+	"github.com/azhai/goent/model"
 )
 
 type stateDelete struct {
@@ -28,7 +28,7 @@ type remove[T any] struct {
 // # Examples
 //
 //	// remove animal of id 2
-//	err = goe.Remove(db.Animal).ByValue(Animal{Id: 2})
+//	err = goent.Remove(db.Animal).ByValue(Animal{Id: 2})
 func Remove[T any](table *T) remove[T] {
 	return RemoveContext(context.Background(), table)
 }
@@ -51,7 +51,7 @@ func RemoveContext[T any](ctx context.Context, table *T) remove[T] {
 //	}
 //	defer tx.Rollback()
 //
-//	err = err = goe.Remove(db.Animal).OnTransaction(tx).ByValue(Animal{ID: 2})
+//	err = err = goent.Remove(db.Animal).OnTransaction(tx).ByValue(Animal{ID: 2})
 //	if err != nil {
 //		// handler error
 //	}
@@ -87,9 +87,9 @@ func (r remove[T]) ByValue(value T) error {
 // # Examples
 //
 //	// delete all records
-//	err = goe.Delete(db.UserRole).All()
+//	err = goent.Delete(db.UserRole).All()
 //	// delete one record
-//	err = goe.Delete(db.Animal).Where(where.Equals(&db.Animal.ID, 2))
+//	err = goent.Delete(db.Animal).Where(where.Equals(&db.Animal.ID, 2))
 func Delete[T any](table *T) stateDelete {
 	return DeleteContext(context.Background(), table)
 }
@@ -113,7 +113,7 @@ func DeleteContext[T any](ctx context.Context, table *T) stateDelete {
 //	}
 //	defer tx.Rollback()
 //
-//	err = goe.Delete(db.Animal).OnTransaction(tx).All()
+//	err = goent.Delete(db.Animal).OnTransaction(tx).All()
 //	if err != nil {
 //		// handler error
 //	}
@@ -153,7 +153,7 @@ func createDeleteState(ctx context.Context) stateDelete {
 func getArgDelete(arg any, addrMap map[uintptr]field) field {
 	v := reflect.ValueOf(arg)
 	if v.Kind() != reflect.Pointer {
-		panic("goe: invalid argument. try sending a pointer to a database mapped struct as argument")
+		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
 	}
 
 	addr := uintptr(v.UnsafePointer())
@@ -168,7 +168,7 @@ func getRemoveTableArgs(table any) []any {
 	valueOf := reflect.ValueOf(table).Elem()
 
 	if valueOf.Kind() != reflect.Struct {
-		panic("goe: invalid argument. try sending a pointer to a database mapped struct as argument")
+		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
 	}
 	args := make([]any, 0, valueOf.NumField())
 	var fieldOf reflect.Value

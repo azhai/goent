@@ -1,15 +1,15 @@
 package function
 
 import (
-	"github.com/go-goe/goe/enum"
-	"github.com/go-goe/goe/model"
+	"github.com/azhai/goent/enum"
+	"github.com/azhai/goent/model"
 )
 
 // ToUpper uses database function to converts the target string to uppercase
 //
 // # Example
 //
-//	goe.Select(&struct {
+//	goent.Select(&struct {
 //		UpperName *function[string]
 //	}{
 //		UpperName: function.ToUpper(&db.Animal.Name),
@@ -22,7 +22,7 @@ func ToUpper(target *string) *function[string] {
 //
 // # Example
 //
-//	goe.Select(&struct {
+//	goent.Select(&struct {
 //		LowerName *function[string]
 //	}{
 //		LowerName: function.ToLower(&db.Animal.Name),
@@ -35,7 +35,7 @@ func ToLower(target *string) *function[string] {
 //
 // # Example
 //
-//	goe.Select(db.Animal).Where(where.Equals(function.ToUpper(&db.Animal.Name), function.Argument("CAT"))).AsSlice()
+//	goent.Select(db.Animal).Where(where.Equals(function.ToUpper(&db.Animal.Name), function.Argument("CAT"))).AsSlice()
 func Argument[T any](value T) function[T] {
 	return function[T]{Value: value}
 }

@@ -3,8 +3,8 @@ package where
 import (
 	"reflect"
 
-	"github.com/go-goe/goe/enum"
-	"github.com/go-goe/goe/model"
+	"github.com/azhai/goent/enum"
+	"github.com/azhai/goent/model"
 )
 
 type valueOperation struct {
@@ -102,10 +102,10 @@ func NotLike[T any](a *T, v string) model.Operation {
 //	Where(where.In(&db.Animal.Name, []string{"Cat", "Dog"}))
 //
 //	// AsQuery for get the query result from a select query
-//	querySelect := goe.Select[any](&struct{ Name *string }{Name: &db.Animal.Name}).AsQuery()
+//	querySelect := goent.Select[any](&struct{ Name *string }{Name: &db.Animal.Name}).AsQuery()
 //
 //	// Use querySelect on in
-//	rows, err := goe.Select(db.Animal).Where(where.In(&db.Animal.Name, querySelect).AsSlice()
+//	rows, err := goent.Select(db.Animal).Where(where.In(&db.Animal.Name, querySelect).AsSlice()
 func In[T any, V []T | model.Query](a *T, mq V) model.Operation {
 	return model.Operation{Arg: a, Value: valueOperation{value: mq}, Operator: enum.In, Type: enum.OperationInWhere}
 }
@@ -116,10 +116,10 @@ func In[T any, V []T | model.Query](a *T, mq V) model.Operation {
 //	Where(where.NotIn(&db.Animal.Name, []string{"Cat", "Dog"}))
 //
 //	// AsQuery for get the query result from a select query
-//	querySelect, err := goe.Select(&struct{ Name *string }{Name: &db.Animal.Name}).AsQuery()
+//	querySelect, err := goent.Select(&struct{ Name *string }{Name: &db.Animal.Name}).AsQuery()
 //
 //	// Use querySelect on not in
-//	rows, err := goe.Select(db.Animal).Where(where.NotIn(&db.Animal.Name, querySelect).AsSlice()
+//	rows, err := goent.Select(db.Animal).Where(where.NotIn(&db.Animal.Name, querySelect).AsSlice()
 func NotIn[T any, V []T | model.Query](a *T, mq V) model.Operation {
 	return model.Operation{Arg: a, Value: valueOperation{value: mq}, Operator: enum.NotIn, Type: enum.OperationInWhere}
 }
@@ -161,7 +161,7 @@ func Or(fo, so model.Operation) model.Operation {
 // # Example
 //
 //	// implicit join using EqualsArg
-//	goe.Select(db.Animal).
+//	goent.Select(db.Animal).
 //	Where(
 //		where.And(
 //			where.EqualsArg[int](&db.Animal.Id, &db.AnimalFood.IdAnimal),

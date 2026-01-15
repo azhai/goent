@@ -1,4 +1,4 @@
-package postgres
+package pgsql
 
 import (
 	"context"
@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-goe/goe/enum"
-	"github.com/go-goe/goe/model"
+	"github.com/azhai/goent/enum"
+	"github.com/azhai/goent/model"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -234,9 +234,9 @@ func checkTableChanges(table *model.TableMigrate, dataMap map[string]dataType, s
 }
 
 func primaryKeyIsForeignKey(table *model.TableMigrate, attName string) bool {
-	return slices.ContainsFunc(table.ManyToOnes, func(m model.ManyToOneMigrate) bool {
+	return slices.ContainsFunc(table.ManyToSomes, func(m model.ManyToSomeMigrate) bool {
 		return m.Name == attName
-	}) || slices.ContainsFunc(table.OneToOnes, func(o model.OneToOneMigrate) bool {
+	}) || slices.ContainsFunc(table.OneToSomes, func(o model.OneToSomeMigrate) bool {
 		return o.Name == attName
 	})
 }
@@ -273,27 +273,27 @@ func createTable(tbl *model.TableMigrate, dataMap map[string]dataType, sql *stri
 		}(), setDefault(att.Default)))
 	}
 
-	for _, att := range tbl.OneToOnes {
+	for _, att := range tbl.OneToSomes {
 		tb := tables[att.TargetTable]
 		if tb.Migrated {
-			t.createAttrs = append(t.createAttrs, foreingOneToOne(att, dataMap))
+			t.createAttrs = append(t.createAttrs, foreignOneToSome(att, dataMap))
 		} else {
 			if tb != tbl {
 				createTable(tb, dataMap, sql, tables)
 			}
-			t.createAttrs = append(t.createAttrs, foreingOneToOne(att, dataMap))
+			t.createAttrs = append(t.createAttrs, foreignOneToSome(att, dataMap))
 		}
 	}
 
-	for _, att := range tbl.ManyToOnes {
+	for _, att := range tbl.ManyToSomes {
 		tb := tables[att.TargetTable]
 		if tb.Migrated {
-			t.createAttrs = append(t.createAttrs, foreingManyToOne(att, dataMap))
+			t.createAttrs = append(t.createAttrs, foreignManyToSome(att, dataMap))
 		} else {
 			if tb != tbl {
 				createTable(tb, dataMap, sql, tables)
 			}
-			t.createAttrs = append(t.createAttrs, foreingManyToOne(att, dataMap))
+			t.createAttrs = append(t.createAttrs, foreignManyToSome(att, dataMap))
 		}
 	}
 
@@ -314,27 +314,29 @@ func setDefault(d string) string {
 	return fmt.Sprintf("DEFAULT %v", d)
 }
 
-func foreingManyToOne(att model.ManyToOneMigrate, dataMap map[string]dataType) string {
+func foreignManyToSome(att model.ManyToSomeMigrate, dataMap map[string]dataType) string {
 	att.DataType = checkDataType(att.DataType, dataMap).typeName
-	return fmt.Sprintf("%v %v %v REFERENCES %v(%v),", att.EscapingName, att.DataType, func() string {
-		if att.Nullable {
-			return "NULL"
-		}
-		return "NOT NULL"
-	}(), att.EscapingTargetTableName(), att.EscapingTargetColumn)
+	feature := "NULL"
+	if !att.Nullable {
+		feature = "NOT NULL"
+	}
+	return fmt.Sprintf("%v %v %v REFERENCES %v(%v),",
+		att.EscapingName, att.DataType, feature,
+		att.EscapingTargetTableName(), att.EscapingTargetColumn)
 }
 
-func foreingOneToOne(att model.OneToOneMigrate, dataMap map[string]dataType) string {
+func foreignOneToSome(att model.OneToSomeMigrate, dataMap map[string]dataType) string {
 	att.DataType = checkDataType(att.DataType, dataMap).typeName
-	return fmt.Sprintf("%v %v %v REFERENCES %v(%v),",
-		att.EscapingName,
-		att.DataType,
-		func() string {
-			if att.Nullable {
-				return "NULL"
-			}
-			return "NOT NULL"
-		}(), att.EscapingTargetTableName(), att.EscapingTargetColumn)
+	feature := "NULL"
+	if !att.Nullable {
+		feature = "NOT NULL"
+	}
+	if att.IsOneToOne {
+		feature = "UNIQUE " + feature
+	}
+	return fmt.Sprintf("%v %v %s REFERENCES %v(%v),",
+		att.EscapingName, att.DataType, feature,
+		att.EscapingTargetTableName(), att.EscapingTargetColumn)
 }
 
 type table struct {
@@ -397,7 +399,7 @@ func checkIndex(indexes []model.IndexMigrate, table *model.TableMigrate, sql *st
 
 	for _, dbIndex := range dis {
 		if !dbIndex.migrated {
-			if !slices.ContainsFunc(table.OneToOnes, func(o model.OneToOneMigrate) bool {
+			if !slices.ContainsFunc(table.OneToSomes, func(o model.OneToSomeMigrate) bool {
 				return o.Name == dbIndex.attname
 			}) {
 				sql.WriteString(dropIndex(table, keywordHandler(dbIndex.indexName)))
@@ -531,18 +533,20 @@ func checkFields(conn *pgxpool.Pool, dbTable dbTable, table *model.TableMigrate,
 		sql.WriteString(addColumn(table, att.EscapingName, dt, att.Nullable, true))
 	}
 
-	for _, att := range table.OneToOnes {
+	for _, att := range table.OneToSomes {
 		if column, exist := dbTable.columns[att.Name]; exist {
 			// change from many to one to one to one
 			if _, unique := checkFkUnique(conn, table.Name, att.Name); !unique {
 				if foreignKeyIsPrimarykey(table, att.Name) {
 					continue
 				}
-				c := fmt.Sprintf("%v_%v_key", table.Name, column.columnName)
-				sql.WriteString(fmt.Sprintf("ALTER TABLE %v ADD CONSTRAINT %v (%v);\n",
-					table.EscapingTableName(),
-					keywordHandler(c),
-					att.EscapingName))
+				if att.IsOneToOne {
+					c := fmt.Sprintf("%v_%v_key", table.Name, column.columnName)
+					sql.WriteString(fmt.Sprintf("ALTER TABLE %v ADD CONSTRAINT %v UNIQUE (%v);\n",
+						table.EscapingTableName(),
+						keywordHandler(c),
+						att.EscapingName))
+				}
 			}
 			if column.nullable != att.Nullable {
 				sql.WriteString(nullableColumn(table, att.EscapingName, att.Nullable))
@@ -550,10 +554,10 @@ func checkFields(conn *pgxpool.Pool, dbTable dbTable, table *model.TableMigrate,
 			continue
 		}
 		sql.WriteString(addColumnUnique(table, att.EscapingName, checkDataType(att.DataType, dataMap), att.Nullable))
-		sql.WriteString(addFkOneToOne(table, att))
+		sql.WriteString(addFkOneToSome(table, att))
 	}
 
-	for _, att := range table.ManyToOnes {
+	for _, att := range table.ManyToSomes {
 		if column, exist := dbTable.columns[att.Name]; exist {
 			// change from one to one to many to one
 			if c, unique := checkFkUnique(conn, table.Name, att.Name); unique {
@@ -595,11 +599,11 @@ func checkFields(conn *pgxpool.Pool, dbTable dbTable, table *model.TableMigrate,
 		if att.Default != "" {
 			dt.zeroValue = att.Default
 			sql.WriteString(addColumn(table, att.EscapingName, dt, att.Nullable, false))
-			sql.WriteString(addFkManyToOne(table, att))
+			sql.WriteString(addFkManyToSome(table, att))
 			continue
 		}
 		sql.WriteString(addColumn(table, att.EscapingName, dt, att.Nullable, true))
-		sql.WriteString(addFkManyToOne(table, att))
+		sql.WriteString(addFkManyToSome(table, att))
 	}
 }
 
@@ -637,7 +641,7 @@ func addColumnUnique(table *model.TableMigrate, column string, dataType dataType
 		table.EscapingTableName(), column, dataType.typeName, dataType.zeroValue)
 }
 
-func addFkManyToOne(table *model.TableMigrate, att model.ManyToOneMigrate) string {
+func addFkManyToSome(table *model.TableMigrate, att model.ManyToSomeMigrate) string {
 	c := keywordHandler(fmt.Sprintf("fk_%v_%v", table.Name, att.Name))
 	return fmt.Sprintf("ALTER TABLE %v ADD CONSTRAINT %v FOREIGN KEY (%v) REFERENCES %v (%v);\n",
 		table.EscapingTableName(),
@@ -647,7 +651,7 @@ func addFkManyToOne(table *model.TableMigrate, att model.ManyToOneMigrate) strin
 		att.EscapingTargetColumn)
 }
 
-func addFkOneToOne(table *model.TableMigrate, att model.OneToOneMigrate) string {
+func addFkOneToSome(table *model.TableMigrate, att model.OneToSomeMigrate) string {
 	c := keywordHandler(fmt.Sprintf("fk_%v_%v", table.Name, att.Name))
 	return fmt.Sprintf("ALTER TABLE %v ADD CONSTRAINT %v FOREIGN KEY (%v) REFERENCES %v (%v);\n",
 		table.EscapingTableName(),

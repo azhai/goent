@@ -1,43 +1,44 @@
-package goe
+package goent
 
 import (
 	"reflect"
 
-	"github.com/go-goe/goe/enum"
-	"github.com/go-goe/goe/model"
-	"github.com/go-goe/goe/utils"
+	"github.com/azhai/goent/enum"
+	"github.com/azhai/goent/model"
+	"github.com/azhai/goent/utils"
 )
 
-type oneToOne struct {
+type OneToSomeRelation struct {
+	IsOneToOne bool
 	attributeStrings
 }
 
-func (o oneToOne) schema() *string {
-	return o.schemaName
+func (r OneToSomeRelation) schema() *string {
+	return r.schemaName
 }
 
-func (o oneToOne) getDb() *DB {
-	return o.db
+func (r OneToSomeRelation) getDb() *DB {
+	return r.db
 }
 
-func (o oneToOne) isPrimaryKey() bool {
+func (r OneToSomeRelation) isPrimaryKey() bool {
 	return false
 }
 
-func (o oneToOne) getTableId() int {
-	return o.tableId
+func (r OneToSomeRelation) getTableId() int {
+	return r.tableId
 }
 
-func (o oneToOne) table() string {
-	return o.tableName
+func (r OneToSomeRelation) table() string {
+	return r.tableName
 }
 
-func (o oneToOne) getAttributeName() string {
-	return o.attributeName
+func (r OneToSomeRelation) getAttributeName() string {
+	return r.attributeName
 }
 
-func createOneToOne(b body, typeOf reflect.Type) any {
-	mto := oneToOne{}
+func createOneToSome(b body, typeOf reflect.Type) any {
+	rel := OneToSomeRelation{}
 	targetPks := primaryKeys(typeOf)
 	count := 0
 	for i := range targetPks {
@@ -50,7 +51,7 @@ func createOneToOne(b body, typeOf reflect.Type) any {
 		return nil
 	}
 
-	mto.attributeStrings = createAttributeStrings(
+	rel.attributeStrings = createAttributeStrings(
 		b.mapp.db,
 		b.schema,
 		b.mapp.pks[0].tableName,
@@ -59,40 +60,40 @@ func createOneToOne(b body, typeOf reflect.Type) any {
 		b.fieldId,
 		b.driver,
 	)
-	return mto
+	return rel
 }
 
-type manyToOne struct {
-	isDefault bool
+type ManyToSomeRelation struct {
+	IsDefault bool
 	attributeStrings
 }
 
-func (m manyToOne) schema() *string {
-	return m.schemaName
+func (r ManyToSomeRelation) schema() *string {
+	return r.schemaName
 }
 
-func (m manyToOne) getDb() *DB {
-	return m.db
+func (r ManyToSomeRelation) getDb() *DB {
+	return r.db
 }
 
-func (m manyToOne) isPrimaryKey() bool {
+func (r ManyToSomeRelation) isPrimaryKey() bool {
 	return false
 }
 
-func (m manyToOne) getTableId() int {
-	return m.tableId
+func (r ManyToSomeRelation) getTableId() int {
+	return r.tableId
 }
 
-func (m manyToOne) table() string {
-	return m.tableName
+func (r ManyToSomeRelation) table() string {
+	return r.tableName
 }
 
-func (m manyToOne) getAttributeName() string {
-	return m.attributeName
+func (r ManyToSomeRelation) getAttributeName() string {
+	return r.attributeName
 }
 
-func createManyToOne(b body, typeOf reflect.Type) any {
-	mto := manyToOne{}
+func createManyToSome(b body, typeOf reflect.Type) any {
+	rel := ManyToSomeRelation{}
 	targetPks := primaryKeys(typeOf)
 	count := 0
 	for i := range targetPks {
@@ -104,8 +105,8 @@ func createManyToOne(b body, typeOf reflect.Type) any {
 	if count == 0 {
 		return nil
 	}
-	mto.isDefault = getTagValue(b.valueOf.Type().Field(b.fieldId).Tag.Get("goe"), "default:") != ""
-	mto.attributeStrings = createAttributeStrings(
+	rel.IsDefault = getTagValue(b.valueOf.Type().Field(b.fieldId).Tag.Get("goe"), "default:") != ""
+	rel.attributeStrings = createAttributeStrings(
 		b.mapp.db,
 		b.schema,
 		b.mapp.pks[0].tableName,
@@ -114,7 +115,7 @@ func createManyToOne(b body, typeOf reflect.Type) any {
 		b.fieldId,
 		b.driver,
 	)
-	return mto
+	return rel
 }
 
 type attributeStrings struct {
@@ -222,17 +223,17 @@ func (a att) buildAttributeSelect(atts []model.Attribute, i int) {
 	}
 }
 
-func (m manyToOne) buildAttributeSelect(atts []model.Attribute, i int) {
+func (r ManyToSomeRelation) buildAttributeSelect(atts []model.Attribute, i int) {
 	atts[i] = model.Attribute{
-		Table: m.tableName,
-		Name:  m.attributeName,
+		Table: r.tableName,
+		Name:  r.attributeName,
 	}
 }
 
-func (o oneToOne) buildAttributeSelect(atts []model.Attribute, i int) {
+func (r OneToSomeRelation) buildAttributeSelect(atts []model.Attribute, i int) {
 	atts[i] = model.Attribute{
-		Table: o.tableName,
-		Name:  o.attributeName,
+		Table: r.tableName,
+		Name:  r.attributeName,
 	}
 }
 
@@ -251,14 +252,14 @@ func (a att) buildAttributeInsert(b *builder) {
 	b.query.Attributes = append(b.query.Attributes, model.Attribute{Name: a.getAttributeName()})
 }
 
-func (m manyToOne) buildAttributeInsert(b *builder) {
-	b.fieldIds = append(b.fieldIds, m.fieldId)
-	b.query.Attributes = append(b.query.Attributes, model.Attribute{Name: m.getAttributeName()})
+func (r ManyToSomeRelation) buildAttributeInsert(b *builder) {
+	b.fieldIds = append(b.fieldIds, r.fieldId)
+	b.query.Attributes = append(b.query.Attributes, model.Attribute{Name: r.getAttributeName()})
 }
 
-func (o oneToOne) buildAttributeInsert(b *builder) {
-	b.fieldIds = append(b.fieldIds, o.fieldId)
-	b.query.Attributes = append(b.query.Attributes, model.Attribute{Name: o.getAttributeName()})
+func (r OneToSomeRelation) buildAttributeInsert(b *builder) {
+	b.fieldIds = append(b.fieldIds, r.fieldId)
+	b.query.Attributes = append(b.query.Attributes, model.Attribute{Name: r.getAttributeName()})
 }
 
 func (p pk) getFieldId() int {
@@ -269,12 +270,12 @@ func (a att) getFieldId() int {
 	return a.fieldId
 }
 
-func (m manyToOne) getFieldId() int {
-	return m.fieldId
+func (r ManyToSomeRelation) getFieldId() int {
+	return r.fieldId
 }
 
-func (o oneToOne) getFieldId() int {
-	return o.fieldId
+func (r OneToSomeRelation) getFieldId() int {
+	return r.fieldId
 }
 
 func (p pk) getDefault() bool {
@@ -285,11 +286,11 @@ func (a att) getDefault() bool {
 	return a.isDefault
 }
 
-func (m manyToOne) getDefault() bool {
-	return m.isDefault
+func (r ManyToSomeRelation) getDefault() bool {
+	return r.IsDefault
 }
 
-func (o oneToOne) getDefault() bool {
+func (r OneToSomeRelation) getDefault() bool {
 	return false
 }
 

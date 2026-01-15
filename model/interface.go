@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/go-goe/goe/enum"
+	"github.com/azhai/goent/enum"
 )
 
 type Driver interface {
@@ -14,6 +14,7 @@ type Driver interface {
 	RenameColumn(schema, table, oldColumn, newName string) error
 	RenameTable(schema, table, newName string) error
 	Init() error
+	AddLogger(Logger, error) error
 	KeywordHandler(string) string
 	NewConnection() Connection
 	NewTransaction(ctx context.Context, opts *sql.TxOptions) (Transaction, error)

@@ -11,13 +11,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-goe/goe"
-	"github.com/go-goe/goe/model"
+	"github.com/azhai/goent"
+	"github.com/azhai/goent/model"
 	"modernc.org/sqlite"
 )
 
 type Driver struct {
-	dns string
+	dsn string
 	sql *sql.DB
 	config
 }
@@ -32,8 +32,8 @@ type ExecQuerierContext interface {
 }
 
 type ConnectionHook func(
-	conn ExecQuerierContext,
-	dsn string,
+		conn ExecQuerierContext,
+		dsn string,
 ) error
 
 type config struct {
@@ -73,11 +73,23 @@ func OpenInMemory(c config) (driver *Driver) {
 }
 
 // Open opens a sqlite connection. By default uses "PRAGMA foreign_keys = ON;" and "PRAGMA busy_timeout = 5000;".
-func Open(dns string, c config) (driver *Driver) {
+func Open(dsn string, c config) (driver *Driver) {
 	return &Driver{
-		dns:    dns,
+		dsn:    dsn,
 		config: c,
 	}
+}
+
+func OpenDSN(dsn string) (driver *Driver) {
+	return Open(dsn, NewConfig(Config{}))
+}
+
+func (dr *Driver) AddLogger(logger model.Logger, err error) error {
+	if logger != nil {
+		dr.config.Logger = logger
+		// dr.config.IncludeArguments = true
+	}
+	return err
 }
 
 func (dr *Driver) Init() error {
@@ -86,7 +98,7 @@ func (dr *Driver) Init() error {
 		defer lock.Unlock()
 		var err error
 		dr.setHooks()
-		dr.sql, err = sql.Open("sqlite", dr.dns)
+		dr.sql, err = sql.Open("sqlite", dr.dsn)
 		if err != nil {
 			// logged by goe
 			return err
@@ -109,10 +121,10 @@ func (dr *Driver) setHooks() {
 		})
 	}
 	schemas := dr.Schemas()
-	dns, params, _ := strings.Cut(dr.dns, "?")
+	dsn, params, _ := strings.Cut(dr.dsn, "?")
 	if len(schemas) != 0 {
 		rx := regexp.MustCompile(`([^/]+?)(?:\.[a-zA-Z0-9]+)?$`)
-		currentDb := rx.FindString(dns)
+		currentDb := rx.FindString(dsn)
 		currentDb = strings.TrimPrefix(currentDb, "file:")
 		var ex string
 		ix := strings.Index(currentDb, ".")
@@ -124,7 +136,7 @@ func (dr *Driver) setHooks() {
 		for _, schema := range schemas {
 			schemaBuilder.WriteString(
 				fmt.Sprintf("ATTACH DATABASE '%v' AS %v;\n",
-					strings.Replace(dns, currentDb, schema[1:len(schema)-1]+ex, 1)+func() string {
+					strings.Replace(dsn, currentDb, schema[1:len(schema)-1]+ex, 1)+func() string {
 						if params != "" {
 							return "?" + params
 						}
@@ -160,9 +172,9 @@ func (dr *Driver) Close() error {
 }
 
 var errMap = map[int][]error{
-	1555: {goe.ErrBadRequest, goe.ErrUniqueValue},
-	2067: {goe.ErrBadRequest, goe.ErrUniqueValue},
-	787:  {goe.ErrBadRequest, goe.ErrForeignKey},
+	1555: {goent.ErrBadRequest, goent.ErrUniqueValue},
+	2067: {goent.ErrBadRequest, goent.ErrUniqueValue},
+	787:  {goent.ErrBadRequest, goent.ErrForeignKey},
 }
 
 type wrapErrors struct {
@@ -171,7 +183,7 @@ type wrapErrors struct {
 }
 
 func (e *wrapErrors) Error() string {
-	return "goe: " + e.msg
+	return "goent: " + e.msg
 }
 
 func (e *wrapErrors) Unwrap() []error {
@@ -188,11 +200,11 @@ func (dr *Driver) ErrorTranslator() func(err error) error {
 }
 
 func (dr *Driver) NewConnection() model.Connection {
-	return Connection{sql: dr.sql, config: dr.config, dns: dr.dns}
+	return Connection{sql: dr.sql, config: dr.config, dsn: dr.dsn}
 }
 
 type Connection struct {
-	dns    string
+	dsn    string
 	config config
 	sql    *sql.DB
 }
@@ -219,11 +231,11 @@ func (c Connection) ExecContext(ctx context.Context, query *model.Query) error {
 
 func (dr *Driver) NewTransaction(ctx context.Context, opts *sql.TxOptions) (model.Transaction, error) {
 	tx, err := dr.sql.BeginTx(ctx, opts)
-	return Transaction{tx: tx, config: dr.config, dns: dr.dns}, err
+	return Transaction{tx: tx, config: dr.config, dsn: dr.dsn}, err
 }
 
 type Transaction struct {
-	dns    string
+	dsn    string
 	config config
 	tx     *sql.Tx
 	saves  int64

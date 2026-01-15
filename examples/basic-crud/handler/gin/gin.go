@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/azhai/goent"
 	"github.com/gin-gonic/gin"
 	"github.com/go-goe/examples/crud-basic/data"
 	"github.com/go-goe/examples/crud-basic/handler"
 	"github.com/go-goe/examples/crud-basic/repository"
-	"github.com/go-goe/goe"
 )
 
 type handlerGin struct {
@@ -40,7 +40,7 @@ func (h handlerGin) Find(c *gin.Context) error {
 	}
 
 	if p, err = h.repository.Find(data.Person{ID: id}); err != nil {
-		if errors.Is(err, goe.ErrNotFound) {
+		if errors.Is(err, goent.ErrNotFound) {
 			notFoundError(c)
 			return err
 		}
@@ -54,7 +54,7 @@ func (h handlerGin) Find(c *gin.Context) error {
 
 func (h handlerGin) List(c *gin.Context) error {
 	var err error
-	var pages *goe.Pagination[data.Person]
+	var pages *goent.Pagination[data.Person]
 	var page, size int
 
 	if page, err = strconv.Atoi(c.Query("page")); err != nil {

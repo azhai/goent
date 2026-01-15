@@ -1,47 +1,25 @@
-package goe
+package goent
 
 import (
 	"context"
 
-	"github.com/go-goe/goe/utils"
+	"github.com/azhai/goent/utils"
 )
 
-type migrate struct {
+type Migration struct {
 	db       *DB
 	dbTarget any
 }
 
-type migrateSchema struct {
-	migrate
-	schema string
+func Migrate(dbTarget any) Migration {
+	return Migration{db: getDatabase(dbTarget), dbTarget: dbTarget}
 }
 
-type migrateTable struct {
-	migrateSchema
-	table string
-}
-
-func Migrate(dbTarget any) migrate {
-	return migrate{db: getDatabase(dbTarget), dbTarget: dbTarget}
-}
-
-func (m migrate) AutoMigrate() error {
+func (m Migration) AutoMigrate() error {
 	return m.AutoMigrateContext(context.Background())
 }
 
-func (m migrate) OnSchema(schema string) migrateSchema {
-	return migrateSchema{m, schema}
-}
-
-func (m migrate) OnTable(table string) migrateTable {
-	return migrateTable{migrateSchema{migrate: m}, table}
-}
-
-func (ms migrateSchema) OnTable(table string) migrateTable {
-	return migrateTable{ms, table}
-}
-
-func (m migrate) AutoMigrateContext(ctx context.Context) error {
+func (m Migration) AutoMigrateContext(ctx context.Context) error {
 	data, err := MigrateFrom(m.dbTarget, m.db.driver)
 	if err != nil {
 		return err
@@ -49,30 +27,52 @@ func (m migrate) AutoMigrateContext(ctx context.Context) error {
 	return m.db.driver.MigrateContext(ctx, data)
 }
 
-func (mt migrateTable) DropTable() error {
-	return mt.db.driver.DropTable(
-		mt.db.driver.KeywordHandler(utils.ColumnNamePattern(mt.schema)),
-		mt.db.driver.KeywordHandler(utils.TableNamePattern(mt.table)))
+func (m Migration) OnSchema(schema string) SchemaMigration {
+	return SchemaMigration{m, schema}
 }
 
-func (mt migrateTable) RenameTable(newName string) error {
-	return mt.db.driver.RenameTable(
-		mt.db.driver.KeywordHandler(utils.ColumnNamePattern(mt.schema)),
-		mt.db.driver.KeywordHandler(utils.TableNamePattern(mt.table)),
-		mt.db.driver.KeywordHandler(utils.TableNamePattern(newName)))
+func (m Migration) OnTable(table string) TableMigration {
+	return TableMigration{SchemaMigration{Migration: m}, table}
 }
 
-func (mt migrateTable) DropColumn(column string) error {
-	return mt.db.driver.DropColumn(
-		mt.db.driver.KeywordHandler(utils.ColumnNamePattern(mt.schema)),
-		mt.db.driver.KeywordHandler(utils.TableNamePattern(mt.table)),
-		mt.db.driver.KeywordHandler(utils.ColumnNamePattern(column)))
+type SchemaMigration struct {
+	Migration
+	schema string
 }
 
-func (mt migrateTable) RenameColumn(column, newName string) error {
-	return mt.db.driver.RenameColumn(
-		mt.db.driver.KeywordHandler(utils.ColumnNamePattern(mt.schema)),
-		mt.db.driver.KeywordHandler(utils.TableNamePattern(mt.table)),
-		mt.db.driver.KeywordHandler(utils.ColumnNamePattern(column)),
-		mt.db.driver.KeywordHandler(utils.ColumnNamePattern(newName)))
+func (m SchemaMigration) OnTable(table string) TableMigration {
+	return TableMigration{m, table}
+}
+
+type TableMigration struct {
+	SchemaMigration
+	table string
+}
+
+func (m TableMigration) DropTable() error {
+	return m.db.driver.DropTable(
+		m.db.driver.KeywordHandler(utils.ColumnNamePattern(m.schema)),
+		m.db.driver.KeywordHandler(utils.TableNamePattern(m.table)))
+}
+
+func (m TableMigration) RenameTable(newName string) error {
+	return m.db.driver.RenameTable(
+		m.db.driver.KeywordHandler(utils.ColumnNamePattern(m.schema)),
+		m.db.driver.KeywordHandler(utils.TableNamePattern(m.table)),
+		m.db.driver.KeywordHandler(utils.TableNamePattern(newName)))
+}
+
+func (m TableMigration) DropColumn(column string) error {
+	return m.db.driver.DropColumn(
+		m.db.driver.KeywordHandler(utils.ColumnNamePattern(m.schema)),
+		m.db.driver.KeywordHandler(utils.TableNamePattern(m.table)),
+		m.db.driver.KeywordHandler(utils.ColumnNamePattern(column)))
+}
+
+func (m TableMigration) RenameColumn(column, newName string) error {
+	return m.db.driver.RenameColumn(
+		m.db.driver.KeywordHandler(utils.ColumnNamePattern(m.schema)),
+		m.db.driver.KeywordHandler(utils.TableNamePattern(m.table)),
+		m.db.driver.KeywordHandler(utils.ColumnNamePattern(column)),
+		m.db.driver.KeywordHandler(utils.ColumnNamePattern(newName)))
 }

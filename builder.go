@@ -1,22 +1,22 @@
-package goe
+package goent
 
 import (
 	"reflect"
 	"time"
 
-	"github.com/go-goe/goe/enum"
-	"github.com/go-goe/goe/model"
+	"github.com/azhai/goent/enum"
+	"github.com/azhai/goent/model"
 )
 
 type builder struct {
 	query        model.Query
 	modelStart   time.Time
-	pkFieldId    int //insert
+	pkFieldId    int // insert
 	fields       []field
 	fieldsSelect []fieldSelect
-	fieldIds     []int           //insert and update
-	joins        []enum.JoinType //select
-	joinsArgs    []field         //select
+	fieldIds     []int           // insert and update
+	joins        []enum.JoinType // select
+	joinsArgs    []field         // select
 	brs          []model.Operation
 	filters      []model.Operation
 	sets         []set

@@ -1,8 +1,8 @@
 package data
 
 import (
-	"github.com/go-goe/goe"
-	"github.com/go-goe/sqlite"
+	"github.com/azhai/goent"
+	"github.com/azhai/goent/drivers/sqlite"
 )
 
 type Person struct {
@@ -13,16 +13,16 @@ type Person struct {
 
 type Database struct {
 	Person *Person
-	*goe.DB
+	*goent.DB
 }
 
 func NewDatabase(uri string) (*Database, error) {
-	db, err := goe.Open[Database](sqlite.Open(uri, sqlite.NewConfig(sqlite.Config{})))
+	db, err := goent.Open[Database](sqlite.Open(uri, sqlite.NewConfig(sqlite.Config{})))
 	if err != nil {
 		return nil, err
 	}
 
-	err = goe.Migrate(db).AutoMigrate()
+	err = goent.Migrate(db).AutoMigrate()
 	if err != nil {
 		return nil, err
 	}
@@ -30,12 +30,12 @@ func NewDatabase(uri string) (*Database, error) {
 }
 
 func NewMemoryDatabase() (*Database, error) {
-	db, err := goe.Open[Database](sqlite.OpenInMemory(sqlite.NewConfig(sqlite.Config{})))
+	db, err := goent.Open[Database](sqlite.OpenInMemory(sqlite.NewConfig(sqlite.Config{})))
 	if err != nil {
 		return nil, err
 	}
 
-	err = goe.Migrate(db).AutoMigrate()
+	err = goent.Migrate(db).AutoMigrate()
 	if err != nil {
 		return nil, err
 	}

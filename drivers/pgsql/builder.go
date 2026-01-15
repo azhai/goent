@@ -1,11 +1,11 @@
-package postgres
+package pgsql
 
 import (
 	"strconv"
 	"strings"
 
-	"github.com/go-goe/goe/enum"
-	"github.com/go-goe/goe/model"
+	"github.com/azhai/goent/enum"
+	"github.com/azhai/goent/model"
 )
 
 var joins = map[enum.JoinType]string{

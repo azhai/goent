@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/go-goe/goe/enum"
+	"github.com/azhai/goent/enum"
 )
 
 type Attribute struct {
@@ -61,20 +61,20 @@ type Query struct {
 	Attributes []Attribute
 	Tables     []Table
 
-	Joins     []Join    //Select
-	Limit     int       //Select
-	Offset    int       //Select
-	OrderBy   []OrderBy //Select
-	GroupBy   []GroupBy //Select
-	ForUpdate bool      //Select
+	Joins     []Join    // Select
+	Limit     int       // Select
+	Offset    int       // Select
+	OrderBy   []OrderBy // Select
+	GroupBy   []GroupBy // Select
+	ForUpdate bool      // Select
 
-	WhereOperations []Where //Select, Update and Delete
-	WhereIndex      int     //Start of where position arguments $1, $2...
+	WhereOperations []Where // Select, Update and Delete
+	WhereIndex      int     // Start of where position arguments $1, $2...
 	Arguments       []any
 
-	ReturningID    *Attribute //Insert
-	BatchSizeQuery int        //Insert
-	SizeArguments  int        //Insert
+	ReturningID    *Attribute // Insert
+	BatchSizeQuery int        // Insert
+	SizeArguments  int        // Insert
 
 	RawSql string
 	Header QueryHeader
@@ -124,13 +124,13 @@ type TableMigrate struct {
 	Schema       *string
 	Migrated     bool
 	PrimaryKeys  []PrimaryKeyMigrate
-	Attributes   []AttributeMigrate
-	ManyToOnes   []ManyToOneMigrate
-	OneToOnes    []OneToOneMigrate
 	Indexes      []IndexMigrate
+	Attributes   []AttributeMigrate
+	ManyToSomes  []ManyToSomeMigrate
+	OneToSomes   []OneToSomeMigrate
 }
 
-// Returns the table and the schema.
+// EscapingTableName returns the table and the schema.
 func (t TableMigrate) EscapingTableName() string {
 	if t.Schema != nil {
 		return *t.Schema + "." + t.EscapingName
@@ -159,41 +159,44 @@ type AttributeMigrate struct {
 	Default      string
 }
 
-type OneToOneMigrate struct {
-	AttributeMigrate
+// OneToSomeMigrate O2M/O2O relationship
+type OneToSomeMigrate struct {
+	IsOneToOne           bool
 	TargetTable          string
 	TargetColumn         string
 	EscapingTargetTable  string
 	EscapingTargetColumn string
 	TargetSchema         *string
+	AttributeMigrate
 }
 
-// Returns the target table and the schema.
-func (o OneToOneMigrate) EscapingTargetTableName() string {
+// EscapingTargetTableName returns the target table and the schema.
+func (o OneToSomeMigrate) EscapingTargetTableName() string {
 	if o.TargetSchema != nil {
 		return *o.TargetSchema + "." + o.EscapingTargetTable
 	}
 	return o.EscapingTargetTable
 }
 
-type ManyToOneMigrate struct {
-	AttributeMigrate
+// ManyToSomeMigrate M2O/M2M relationship
+type ManyToSomeMigrate struct {
 	TargetTable          string
 	TargetColumn         string
 	EscapingTargetTable  string
 	EscapingTargetColumn string
 	TargetSchema         *string
+	AttributeMigrate
 }
 
-// Returns the target table and the schema.
-func (m ManyToOneMigrate) EscapingTargetTableName() string {
+// EscapingTargetTableName returns the target table and the schema.
+func (m ManyToSomeMigrate) EscapingTargetTableName() string {
 	if m.TargetSchema != nil {
 		return *m.TargetSchema + "." + m.EscapingTargetTable
 	}
 	return m.EscapingTargetTable
 }
 
-// Database config used by all GOE drivers
+// DatabaseConfig Database config used by all GOE drivers
 type DatabaseConfig struct {
 	Logger           Logger
 	IncludeArguments bool          // include all arguments used on query

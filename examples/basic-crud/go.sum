@@ -17,10 +17,10 @@ github.com/gin-contrib/sse v1.1.0 h1:n0w2GMuUpWDVp7qSpvze6fAu9iRxJY4Hmj6AmBOU05w
 github.com/gin-contrib/sse v1.1.0/go.mod h1:hxRZ5gVpWMT7Z0B0gSNYqqsSCNIJMjzvm6fqCz9vjwM=
 github.com/gin-gonic/gin v1.11.0 h1:OW/6PLjyusp2PPXtyxKHU0RbX6I/l28FTdDlae5ueWk=
 github.com/gin-gonic/gin v1.11.0/go.mod h1:+iq/FyxlGzII0KHiBGjuNn4UNENUlKbGlNmc+W50Dls=
-github.com/go-goe/goe v0.7.0 h1:hJvAE1rVGa6ADZ4FB/+Ya1+ePys8MI3PfvmMbHITZsc=
-github.com/go-goe/goe v0.7.0/go.mod h1:7LKNFppuz51oeesGciMggFYNeb49X3FlkzWlEro62fo=
-github.com/go-goe/sqlite v0.5.1 h1:7kWGhitDMwK0bFO8Ozvin3W4H+tEUM1MFL6TNqZroCQ=
-github.com/go-goe/sqlite v0.5.1/go.mod h1:ycsBs83hqqvDyr7KG9R6GNmQ/BswzOxKotvAVAxi/lw=
+github.com/azhai/goent v0.7.0 h1:hJvAE1rVGa6ADZ4FB/+Ya1+ePys8MI3PfvmMbHITZsc=
+github.com/azhai/goent v0.7.0/go.mod h1:7LKNFppuz51oeesGciMggFYNeb49X3FlkzWlEro62fo=
+github.com/azhai/goent/drivers/sqlite v0.5.1 h1:7kWGhitDMwK0bFO8Ozvin3W4H+tEUM1MFL6TNqZroCQ=
+github.com/azhai/goent/drivers/sqlite v0.5.1/go.mod h1:ycsBs83hqqvDyr7KG9R6GNmQ/BswzOxKotvAVAxi/lw=
 github.com/go-playground/assert/v2 v2.2.0 h1:JvknZsQTYeFEAhQwI4qEt9cyV5ONwRHC+lYKSsYSR8s=
 github.com/go-playground/assert/v2 v2.2.0/go.mod h1:VDjEfimB/XKnb+ZQfWdccd7VUvScMdVu0Titje2rxJ4=
 github.com/go-playground/locales v0.14.1 h1:EWaQ/wswjilfKLTECiXz7Rh+3BjFhfDFKv/oXslEjJA=
