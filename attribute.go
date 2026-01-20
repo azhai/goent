@@ -9,7 +9,7 @@ import (
 )
 
 type OneToSomeRelation struct {
-	IsOneToOne bool
+	IsOneToMany bool
 	attributeStrings
 }
 
@@ -128,13 +128,14 @@ type attributeStrings struct {
 }
 
 func createAttributeStrings(db *DB, schema *string, table string, attributeName string, tableId, fieldId int, Driver model.Driver) attributeStrings {
+	name := Driver.KeywordHandler(utils.ColumnNamePattern(attributeName))
 	return attributeStrings{
 		db:            db,
 		tableName:     table,
 		tableId:       tableId,
 		fieldId:       fieldId,
 		schemaName:    schema,
-		attributeName: Driver.KeywordHandler(utils.ColumnNamePattern(attributeName)),
+		attributeName: name,
 	}
 }
 
@@ -169,9 +170,8 @@ func (p pk) getAttributeName() string {
 
 func createPk(db *DB, schema *string, table string, attributeName string, autoIncrement bool, tableId, fieldId int, Driver model.Driver) pk {
 	table = Driver.KeywordHandler(table)
-	return pk{
-		attributeStrings: createAttributeStrings(db, schema, table, attributeName, tableId, fieldId, Driver),
-		autoIncrement:    autoIncrement}
+	attStr := createAttributeStrings(db, schema, table, attributeName, tableId, fieldId, Driver)
+	return pk{attributeStrings: attStr, autoIncrement: autoIncrement}
 }
 
 type att struct {
@@ -204,9 +204,8 @@ func (a att) getAttributeName() string {
 }
 
 func createAtt(db *DB, attributeName string, schema *string, table string, tableId, fieldId int, isDefault bool, d model.Driver) att {
-	return att{
-		isDefault:        isDefault,
-		attributeStrings: createAttributeStrings(db, schema, table, attributeName, tableId, fieldId, d)}
+	attStr := createAttributeStrings(db, schema, table, attributeName, tableId, fieldId, d)
+	return att{attributeStrings: attStr, isDefault: isDefault}
 }
 
 func (p pk) buildAttributeSelect(atts []model.Attribute, i int) {

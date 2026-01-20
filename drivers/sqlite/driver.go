@@ -32,8 +32,8 @@ type ExecQuerierContext interface {
 }
 
 type ConnectionHook func(
-		conn ExecQuerierContext,
-		dsn string,
+	conn ExecQuerierContext,
+	dsn string,
 ) error
 
 type config struct {

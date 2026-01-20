@@ -53,20 +53,22 @@ func (db *DB) RawQueryContext(ctx context.Context, rawSql string, args ...any) (
 	query := model.Query{Type: enum.RawQuery, RawSql: rawSql, Arguments: args}
 	var rows model.Rows
 	rows, query.Header.Err = wrapperQuery(ctx, db.driver.NewConnection(), &query)
+	dc := db.driver.GetDatabaseConfig()
 	if query.Header.Err != nil {
-		return nil, db.driver.GetDatabaseConfig().ErrorQueryHandler(ctx, query)
+		return nil, dc.ErrorQueryHandler(ctx, query)
 	}
-	db.driver.GetDatabaseConfig().InfoHandler(ctx, query)
+	dc.InfoHandler(ctx, query)
 	return rows, nil
 }
 
 func (db *DB) RawExecContext(ctx context.Context, rawSql string, args ...any) error {
 	query := model.Query{Type: enum.RawQuery, RawSql: rawSql, Arguments: args}
 	query.Header.Err = wrapperExec(ctx, db.driver.NewConnection(), &query)
+	dc := db.driver.GetDatabaseConfig()
 	if query.Header.Err != nil {
-		return db.driver.GetDatabaseConfig().ErrorQueryHandler(ctx, query)
+		return dc.ErrorQueryHandler(ctx, query)
 	}
-	db.driver.GetDatabaseConfig().InfoHandler(ctx, query)
+	dc.InfoHandler(ctx, query)
 	return nil
 }
 
@@ -81,7 +83,8 @@ func (db *DB) NewTransaction() (model.Transaction, error) {
 func (db *DB) NewTransactionContext(ctx context.Context, isolation sql.IsolationLevel) (model.Transaction, error) {
 	t, err := db.driver.NewTransaction(ctx, &sql.TxOptions{Isolation: isolation})
 	if err != nil {
-		return nil, db.driver.GetDatabaseConfig().ErrorHandler(ctx, err)
+		dc := db.driver.GetDatabaseConfig()
+		return nil, dc.ErrorHandler(ctx, err)
 	}
 	return t, nil
 }
@@ -163,7 +166,8 @@ func Close(dbTarget any) error {
 	goeDb := getDatabase(dbTarget)
 	err := goeDb.driver.Close()
 	if err != nil {
-		return goeDb.driver.GetDatabaseConfig().ErrorHandler(context.TODO(), err)
+		dc := goeDb.driver.GetDatabaseConfig()
+		return dc.ErrorHandler(context.TODO(), err)
 	}
 
 	valueOf := reflect.ValueOf(dbTarget).Elem()

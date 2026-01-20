@@ -22,11 +22,11 @@ func init() {
 //
 //	goent.Open[Database](pgsql.Open("user=postgres password=postgres host=localhost port=5432 database=postgres", pgsql.Config{}))
 func Open[T any](driver model.Driver) (*T, error) {
-	driver.GetDatabaseConfig().Init(driver.Name(), driver.ErrorTranslator())
-
+	dc := driver.GetDatabaseConfig()
+	dc.Init(driver.Name(), driver.ErrorTranslator())
 	err := driver.Init()
 	if err != nil {
-		return nil, driver.GetDatabaseConfig().ErrorHandler(context.TODO(), err)
+		return nil, dc.ErrorHandler(context.TODO(), err)
 	}
 
 	db := new(T)
@@ -34,56 +34,16 @@ func Open[T any](driver model.Driver) (*T, error) {
 	if valueOf.Kind() != reflect.Struct {
 		return nil, errors.New("goent: invalid database, the target needs to be a struct")
 	}
-
 	dbId := valueOf.NumField() - 1
 	if valueOf.Field(dbId).Type().Elem().Name() != "DB" {
 		return nil, errors.New("goent: invalid database, last struct field needs to be goent.DB")
 	}
 
-	dbTarget := new(DB)
-	valueOf.Field(dbId).Set(reflect.ValueOf(dbTarget))
-
-	// set value for Fields
-	for i := range dbId {
-		field := valueOf.Field(i)
-		if field.IsNil() {
-			field.Set(reflect.New(field.Type().Elem()))
-			if utils.IsFieldHasSchema(valueOf, i) {
-				for f := range field.Elem().NumField() {
-					elem := field.Elem().Field(f)
-					elem.Set(reflect.New(elem.Type().Elem()))
-				}
-				continue
-			}
-		}
+	var dbTarget *DB
+	dbTarget, err = newDbTarget(driver, valueOf, dbId)
+	if err != nil {
+		return nil, err
 	}
-
-	var schemas []string
-	tableId := 0
-	// init Fields
-	for f := range dbId {
-		elem := valueOf.Field(f).Elem()
-		if utils.IsFieldHasSchema(valueOf, f) {
-			schema := driver.KeywordHandler(utils.ColumnNamePattern(elem.Type().Name()))
-			schemas = append(schemas, schema)
-			for i := range elem.NumField() {
-				tableId += i + 1
-				err = initField(&schema, valueOf, elem.Field(i).Elem(), dbTarget, tableId, driver)
-				if err != nil {
-					return nil, err
-				}
-			}
-			continue
-		}
-		tableId++
-		err = initField(nil, valueOf, elem, dbTarget, tableId, driver)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	dc := driver.GetDatabaseConfig()
-	dc.SetSchemas(schemas)
 	if ic := dc.InitCallback(); ic != nil {
 		if err = ic(); err != nil {
 			return nil, err
@@ -92,6 +52,54 @@ func Open[T any](driver model.Driver) (*T, error) {
 
 	dbTarget.driver = driver
 	return db, nil
+}
+
+func newDbTarget(driver model.Driver, valueOf reflect.Value, dbId int) (*DB, error) {
+	var schemas []string
+	dbTarget, tableId := new(DB), 0
+	valueOf.Field(dbId).Set(reflect.ValueOf(dbTarget))
+
+	// set value for Fields
+	for i := range dbId {
+		fieldOf := valueOf.Field(i)
+		if !fieldOf.IsNil() {
+			continue
+		}
+		fieldOf.Set(reflect.New(fieldOf.Type().Elem()))
+
+		if !utils.IsFieldHasSchema(valueOf, i) {
+			continue
+		}
+		for j := range fieldOf.Elem().NumField() {
+			elem := fieldOf.Elem().Field(j)
+			elem.Set(reflect.New(elem.Type().Elem()))
+		}
+	}
+
+	// init Fields
+	for i := range dbId {
+		elem := valueOf.Field(i).Elem()
+		if !utils.IsFieldHasSchema(valueOf, i) {
+			tableId++
+			err := initField(nil, valueOf, elem, dbTarget, tableId, driver)
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
+		schema := driver.KeywordHandler(utils.ColumnNamePattern(elem.Type().Name()))
+		schemas = append(schemas, schema)
+		for j := range elem.NumField() {
+			tableId++
+			err := initField(&schema, valueOf, elem.Field(j).Elem(), dbTarget, tableId, driver)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	driver.GetDatabaseConfig().SetSchemas(schemas)
+	return dbTarget, nil
 }
 
 type RelationFunc func(b body, typeOf reflect.Type) any
@@ -154,22 +162,18 @@ func initField(schema *string, tables reflect.Value, valueOf reflect.Value, db *
 			continue
 		}
 		addr := uintptr(valueOf.Field(fieldId).Addr().UnsafePointer())
+		mapp := &infosMap{pks: pks, db: db, tableId: tableId, addr: addr}
 		switch valueOf.Field(fieldId).Kind() {
 		case reflect.Slice:
 			err = handlerSlice(body{
+				fieldId:     fieldId,
 				fieldTypeOf: valueOf.Field(fieldId).Type().Elem(),
+				driver:      driver,
+				tables:      tables,
 				valueOf:     valueOf,
 				typeOf:      valueOf.Type(),
-				tables:      tables,
-				fieldId:     fieldId,
 				schema:      schema,
-				mapp: &infosMap{
-					pks:     pks,
-					db:      db,
-					tableId: tableId,
-					addr:    addr,
-				},
-				driver: driver,
+				mapp:        mapp,
 			}, helperAttribute)
 			if err != nil {
 				return err
@@ -177,32 +181,22 @@ func initField(schema *string, tables reflect.Value, valueOf reflect.Value, db *
 		case reflect.Struct:
 			handlerStruct(body{
 				fieldId:     fieldId,
-				driver:      driver,
 				fieldTypeOf: valueOf.Field(fieldId).Type(),
+				driver:      driver,
 				valueOf:     valueOf,
 				schema:      schema,
-				mapp: &infosMap{
-					pks:     pks,
-					db:      db,
-					tableId: tableId,
-					addr:    addr,
-				},
+				mapp:        mapp,
 			}, newAttr)
 		case reflect.Pointer:
 			helperAttribute(body{
 				fieldId:  fieldId,
 				driver:   driver,
-				nullable: true,
 				tables:   tables,
 				valueOf:  valueOf,
 				typeOf:   valueOf.Type(),
 				schema:   schema,
-				mapp: &infosMap{
-					pks:     pks,
-					db:      db,
-					tableId: tableId,
-					addr:    addr,
-				},
+				mapp:     mapp,
+				nullable: true,
 			})
 		default:
 			helperAttribute(body{
@@ -212,12 +206,7 @@ func initField(schema *string, tables reflect.Value, valueOf reflect.Value, db *
 				valueOf: valueOf,
 				typeOf:  valueOf.Type(),
 				schema:  schema,
-				mapp: &infosMap{
-					pks:     pks,
-					db:      db,
-					tableId: tableId,
-					addr:    addr,
-				},
+				mapp:    mapp,
 			})
 		}
 	}
@@ -241,6 +230,7 @@ func handlerSlice(b body, helper func(b body) error) error {
 }
 
 func newAttr(b body) error {
+	goeTag := b.valueOf.Type().Field(b.fieldId).Tag.Get("goe")
 	at := createAtt(
 		b.mapp.db,
 		b.valueOf.Type().Field(b.fieldId).Name,
@@ -248,7 +238,7 @@ func newAttr(b body) error {
 		b.mapp.pks[0].tableName,
 		b.mapp.tableId,
 		b.fieldId,
-		getTagValue(b.valueOf.Type().Field(b.fieldId).Tag.Get("goe"), "default:") != "",
+		getTagValue(goeTag, "default:") != "",
 		b.driver,
 	)
 	addrMap.set(b.mapp.addr, at)
@@ -260,7 +250,10 @@ func getPks(typeOf reflect.Type) []reflect.StructField {
 	pks = append(pks, fieldsByTags("pk", typeOf)...)
 
 	id, valid := getId(typeOf)
-	if valid && !slices.ContainsFunc(pks, func(f reflect.StructField) bool { return f.Name == id.Name }) {
+	isSameName := func(f reflect.StructField) bool {
+		return f.Name == id.Name
+	}
+	if valid && !slices.ContainsFunc(pks, isSameName) {
 		pks = append(pks, id)
 	}
 	return pks
@@ -295,11 +288,11 @@ func getFieldId(typeOf reflect.Type, fieldName string) int {
 }
 
 func isReturningId(id reflect.StructField) bool {
-	tag := id.Tag.Get("goe")
-	if strings.Contains(tag, "not_incr") {
+	geoTag := id.Tag.Get("goe")
+	if utils.TagValueExist(geoTag, "not_incr") {
 		return false
 	}
-	return getTagValue(tag, "default:") != "" || isAutoIncrement(id)
+	return getTagValue(geoTag, "default:") != "" || isAutoIncrement(id)
 }
 
 func checkAllFields(valueOf reflect.Value, table string) bool {
@@ -349,9 +342,10 @@ func primaryKeys(str reflect.Type) (pks []reflect.StructField) {
 
 func fieldsByTags(tag string, str reflect.Type) (f []reflect.StructField) {
 	f = make([]reflect.StructField, 0)
-
+	tag = ";" + tag + ";"
 	for i := 0; i < str.NumField(); i++ {
-		if strings.Contains(str.Field(i).Tag.Get("goe"), tag) {
+		goeTag := str.Field(i).Tag.Get("goe")
+		if strings.Contains(";"+goeTag+";", tag) {
 			f = append(f, str.Field(i))
 		}
 	}
@@ -377,10 +371,10 @@ func foreignKeyNamePattern(dbTables reflect.Value, fieldName string) (table, suf
 		pks := getPks(dbTables.FieldByName(table).Elem().Type())
 		for c := 1; c <= len(suffix); c++ {
 			pkName := suffix[:c]
-			isEqual := func(f reflect.StructField) bool {
+			isSameName := func(f reflect.StructField) bool {
 				return f.Name == pkName
 			}
-			if slices.ContainsFunc(pks, isEqual) {
+			if slices.ContainsFunc(pks, isSameName) {
 				return table, pkName
 			}
 		}
@@ -410,7 +404,8 @@ func helperAttribute(b body) error {
 			}
 		}
 	case OneToSomeRelation:
-		v.IsOneToOne = strings.Contains(fieldAtt.Tag.Get("goe"), "O2O")
+		goeTag := fieldAtt.Tag.Get("goe")
+		v.IsOneToMany = utils.TagValueExist(goeTag, "o2m")
 		if addrMap.get(b.mapp.addr) == nil {
 			addrMap.set(b.mapp.addr, v)
 		}

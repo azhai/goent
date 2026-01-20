@@ -247,6 +247,14 @@ func (s stateSelect[T]) AsSlice() ([]T, error) {
 	return rows, nil
 }
 
+// AsOne return the first row, if non row is found returns a [ErrNotFound].
+func (s stateSelect[T]) AsOne() (row T, err error) {
+	for row, err = range s.Rows() {
+		break
+	}
+	return
+}
+
 // AsQuery return a [model.Query] for use inside a [where.In].
 func (s stateSelect[T]) AsQuery() model.Query {
 	s.builder.buildSqlSelect()
@@ -384,7 +392,8 @@ func (s stateSelect[T]) Rows() iter.Seq2[T, error] {
 		s.conn = driver.NewConnection()
 	}
 
-	return handlerResult[T](s.ctx, s.conn, s.builder.query, len(s.builder.fieldsSelect), driver.GetDatabaseConfig())
+	dc := driver.GetDatabaseConfig()
+	return handlerResult[T](s.ctx, s.conn, s.builder.query, len(s.builder.fieldsSelect), dc)
 }
 
 func createSelectState[T any](ctx context.Context, getArgs func(args ...any) argsSelect, args ...any) stateSelect[T] {

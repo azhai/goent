@@ -117,7 +117,9 @@ func UpdateContext[T any](ctx context.Context, table *T) stateUpdate[T] {
 // Sets one or more arguments for update
 func (s stateUpdate[T]) Sets(sets ...model.Set) stateUpdate[T] {
 	for i := range sets {
-		s.builder.sets = append(s.builder.sets, set{attribute: getArg(sets[i].Attribute, addrMap.mapField, nil), value: sets[i].Value})
+		attr := getArg(sets[i].Attribute, addrMap.mapField, nil)
+		newbie := set{attribute: attr, value: sets[i].Value}
+		s.builder.sets = append(s.builder.sets, newbie)
 	}
 
 	return s
@@ -165,7 +167,8 @@ func (s stateUpdate[T]) Where(o model.Operation) error {
 		s.conn = driver.NewConnection()
 	}
 
-	return handlerValues(s.ctx, s.conn, s.builder.query, driver.GetDatabaseConfig())
+	dc := driver.GetDatabaseConfig()
+	return handlerValues(s.ctx, s.conn, s.builder.query, dc)
 }
 
 type argSave struct {

@@ -84,10 +84,11 @@ func (s stateInsert[T]) One(value *T) error {
 		s.conn = driver.NewConnection()
 	}
 
+	dc := driver.GetDatabaseConfig()
 	if s.builder.query.ReturningID != nil {
-		return handlerValuesReturning(s.ctx, s.conn, s.builder.query, valueOf, pkFieldId, driver.GetDatabaseConfig())
+		return handlerValuesReturning(s.ctx, s.conn, s.builder.query, valueOf, pkFieldId, dc)
 	}
-	return handlerValues(s.ctx, s.conn, s.builder.query, driver.GetDatabaseConfig())
+	return handlerValues(s.ctx, s.conn, s.builder.query, dc)
 }
 
 func (s stateInsert[T]) All(value []T) error {
@@ -105,7 +106,8 @@ func (s stateInsert[T]) All(value []T) error {
 		s.conn = driver.NewConnection()
 	}
 
-	return handlerValuesReturningBatch(s.ctx, s.conn, s.builder.query, valueOf, pkFieldId, driver.GetDatabaseConfig())
+	dc := driver.GetDatabaseConfig()
+	return handlerValuesReturningBatch(s.ctx, s.conn, s.builder.query, valueOf, pkFieldId, dc)
 }
 
 func createInsertState[T any](ctx context.Context, t *T) stateInsert[T] {

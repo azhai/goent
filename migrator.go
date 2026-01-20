@@ -303,16 +303,6 @@ func getIndex(field reflect.StructField) string {
 	return ""
 }
 
-func tagValueExist(tag string, subTag string) bool {
-	values := strings.Split(tag, ";")
-	for _, v := range values {
-		if v == subTag {
-			return true
-		}
-	}
-	return false
-}
-
 func getIndexValue(valueTag string, tag string) string {
 	values := strings.Split(valueTag, " ")
 	for _, v := range values {
@@ -372,7 +362,8 @@ func helperAttributeMigrate(b body) error {
 		// 	}
 		// 	return migrateAtt(b)
 		// }
-		v.IsOneToOne = strings.Contains(migField.Tag.Get("goe"), "O2O")
+		goeTag := migField.Tag.Get("goe")
+		v.IsOneToMany = utils.TagValueExist(goeTag, "o2m")
 		v.DataType = getTagType(migField)
 		migTable.OneToSomes = append(migTable.OneToSomes, *v)
 	}
@@ -415,7 +406,7 @@ func checkIndex(b body, at model.AttributeMigrate, skipUnique bool) error {
 	}
 
 	tagValue := migField.Tag.Get("goe")
-	if !skipUnique && tagValueExist(tagValue, "unique") {
+	if !skipUnique && utils.TagValueExist(tagValue, "unique") {
 		in := model.IndexMigrate{
 			Name:         migTable.Name + "_idx_" + strings.ToLower(migField.Name),
 			EscapingName: b.driver.KeywordHandler(migTable.Name + "_idx_" + strings.ToLower(migField.Name)),
@@ -425,7 +416,7 @@ func checkIndex(b body, at model.AttributeMigrate, skipUnique bool) error {
 		migTable.Indexes = append(migTable.Indexes, in)
 	}
 
-	if tagValueExist(tagValue, "index") {
+	if utils.TagValueExist(tagValue, "index") {
 		in := model.IndexMigrate{
 			Name:         migTable.Name + "_idx_" + strings.ToLower(migField.Name),
 			EscapingName: b.driver.KeywordHandler(migTable.Name + "_idx_" + strings.ToLower(migField.Name)),

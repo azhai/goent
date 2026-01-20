@@ -222,15 +222,16 @@ func checkTableChanges(b body) error {
 func primaryKeyIsForeignKey(table *model.TableMigrate, attName string) bool {
 	return slices.ContainsFunc(table.ManyToSomes, func(m model.ManyToSomeMigrate) bool {
 		return m.Name == attName
-	}) || slices.ContainsFunc(table.OneToSomes, func(o model.OneToSomeMigrate) bool {
-		return o.Name == attName
+	}) || slices.ContainsFunc(table.OneToSomes, func(m model.OneToSomeMigrate) bool {
+		return m.Name == attName
 	})
 }
 
 func foreignKeyIsPrimarykey(table *model.TableMigrate, attName string) bool {
-	return slices.ContainsFunc(table.PrimaryKeys, func(pk model.PrimaryKeyMigrate) bool {
-		return pk.Name == attName
-	})
+	isSameName := func(m model.PrimaryKeyMigrate) bool {
+		return m.Name == attName
+	}
+	return slices.ContainsFunc(table.PrimaryKeys, isSameName)
 }
 
 func createTable(tbl *model.TableMigrate, dataMap map[string]*dataType, sql *strings.Builder, tables map[string]*model.TableMigrate, skipDependency bool) {
@@ -317,7 +318,7 @@ func foreignOneToSome(att model.OneToSomeMigrate, dataMap map[string]*dataType) 
 	if !att.Nullable {
 		feature = "NOT NULL"
 	}
-	if att.IsOneToOne {
+	if !att.IsOneToMany {
 		feature = "UNIQUE " + feature
 	}
 	return fmt.Sprintf("%v %v %s REFERENCES %v(%v),",
@@ -422,10 +423,11 @@ func checkIndex(indexes []model.IndexMigrate, table *model.TableMigrate, sql *st
 	}
 
 	for _, dbIndex := range dis {
+		isSameName := func(m model.OneToSomeMigrate) bool {
+			return m.Name == dbIndex.attname
+		}
 		if !dbIndex.migrated {
-			if !slices.ContainsFunc(table.OneToSomes, func(o model.OneToSomeMigrate) bool {
-				return o.Name == dbIndex.attname
-			}) {
+			if !slices.ContainsFunc(table.OneToSomes, isSameName) {
 				sql.WriteString(fmt.Sprintf("DROP INDEX IF EXISTS %v;", keywordHandler(dbIndex.indexName)) + "\n")
 			}
 		}

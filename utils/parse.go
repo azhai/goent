@@ -6,9 +6,21 @@ import (
 	"unicode"
 )
 
+func TagValueExist(tag string, subTag string) bool {
+	return strings.Contains(";"+tag+";", ";"+subTag+";")
+	// values := strings.Split(tag, ";")
+	// for _, v := range values {
+	// 	if v == subTag {
+	// 		return true
+	// 	}
+	// }
+	// return false
+}
+
 // IsFieldHasSchema check if field has schema tag or schema suffix
 func IsFieldHasSchema(valueOf reflect.Value, i int) bool {
-	return strings.Contains(valueOf.Type().Field(i).Tag.Get("goe"), "schema") ||
+	goeTag := valueOf.Type().Field(i).Tag.Get("goe")
+	return TagValueExist(goeTag, "schema") ||
 		strings.HasSuffix(valueOf.Field(i).Elem().Type().Name(), "Schema")
 }
 

@@ -143,7 +143,8 @@ func (s stateDelete) Where(o model.Operation) error {
 		s.conn = driver.NewConnection()
 	}
 
-	return handlerValues(s.ctx, s.conn, s.builder.query, driver.GetDatabaseConfig())
+	dc := driver.GetDatabaseConfig()
+	return handlerValues(s.ctx, s.conn, s.builder.query, dc)
 }
 
 func createDeleteState(ctx context.Context) stateDelete {

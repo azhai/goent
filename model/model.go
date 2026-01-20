@@ -161,7 +161,7 @@ type AttributeMigrate struct {
 
 // OneToSomeMigrate O2M/O2O relationship
 type OneToSomeMigrate struct {
-	IsOneToOne           bool
+	IsOneToMany          bool
 	TargetTable          string
 	TargetColumn         string
 	EscapingTargetTable  string
