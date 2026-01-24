@@ -12,6 +12,76 @@ import (
 	"github.com/azhai/goent/utils"
 )
 
+func newDbTarget(driver model.Driver, valueOf reflect.Value, dbId int) (*DB, error) {
+	var schemas []string
+	dbTarget, tableId := new(DB), 0
+	valueOf.Field(dbId).Set(reflect.ValueOf(dbTarget))
+
+	// set value for Fields
+	for i := range dbId {
+		fieldOf := valueOf.Field(i)
+		if !fieldOf.IsNil() {
+			continue
+		}
+		fieldType := fieldOf.Type().Elem()
+		// Check if it's a facade.Table-like type with a Model field
+		if fieldType.NumField() > 0 {
+			modelField, hasModel := fieldType.FieldByName("Model")
+			if hasModel && modelField.Type.Kind() == reflect.Ptr {
+				// It's a Table-like type, create and initialize it
+				tableValue := reflect.New(fieldType)
+				modelType := tableValue.Elem().FieldByName("Model").Type().Elem()
+				tableValue.Elem().FieldByName("Model").Set(reflect.New(modelType))
+				fieldOf.Set(tableValue)
+			} else {
+				fieldOf.Set(reflect.New(fieldType))
+			}
+		} else {
+			fieldOf.Set(reflect.New(fieldType))
+		}
+
+		if !utils.IsFieldHasSchema(valueOf, i) {
+			continue
+		}
+		for j := range fieldOf.Elem().NumField() {
+			elem := fieldOf.Elem().Field(j)
+			elem.Set(reflect.New(elem.Type().Elem()))
+		}
+	}
+
+	// init Fields
+	for i := range dbId {
+		elem := valueOf.Field(i).Elem()
+		// Check if it's a facade.Table-like type and use the Model field
+		if elem.Type().NumField() > 0 {
+			if modelField, hasModel := elem.Type().FieldByName("Model"); hasModel && modelField.Type.Kind() == reflect.Ptr {
+				// It's a Table-like type, use the Model field
+				elem = elem.FieldByName("Model").Elem()
+			}
+		}
+		if !utils.IsFieldHasSchema(valueOf, i) {
+			tableId++
+			err := InitField(nil, valueOf, elem, dbTarget, tableId, driver)
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
+		schema := driver.KeywordHandler(utils.ColumnNamePattern(elem.Type().Name()))
+		schemas = append(schemas, schema)
+		for j := range elem.NumField() {
+			tableId++
+			err := InitField(&schema, valueOf, elem.Field(j).Elem(), dbTarget, tableId, driver)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	driver.GetDatabaseConfig().SetSchemas(schemas)
+	return dbTarget, nil
+}
+
 func init() {
 	addrMap = &goeMap{mapField: make(map[uintptr]field)}
 }
@@ -50,56 +120,8 @@ func Open[T any](driver model.Driver) (*T, error) {
 		}
 	}
 
-	dbTarget.driver = driver
+	dbTarget.SetDriver(driver)
 	return db, nil
-}
-
-func newDbTarget(driver model.Driver, valueOf reflect.Value, dbId int) (*DB, error) {
-	var schemas []string
-	dbTarget, tableId := new(DB), 0
-	valueOf.Field(dbId).Set(reflect.ValueOf(dbTarget))
-
-	// set value for Fields
-	for i := range dbId {
-		fieldOf := valueOf.Field(i)
-		if !fieldOf.IsNil() {
-			continue
-		}
-		fieldOf.Set(reflect.New(fieldOf.Type().Elem()))
-
-		if !utils.IsFieldHasSchema(valueOf, i) {
-			continue
-		}
-		for j := range fieldOf.Elem().NumField() {
-			elem := fieldOf.Elem().Field(j)
-			elem.Set(reflect.New(elem.Type().Elem()))
-		}
-	}
-
-	// init Fields
-	for i := range dbId {
-		elem := valueOf.Field(i).Elem()
-		if !utils.IsFieldHasSchema(valueOf, i) {
-			tableId++
-			err := initField(nil, valueOf, elem, dbTarget, tableId, driver)
-			if err != nil {
-				return nil, err
-			}
-			continue
-		}
-		schema := driver.KeywordHandler(utils.ColumnNamePattern(elem.Type().Name()))
-		schemas = append(schemas, schema)
-		for j := range elem.NumField() {
-			tableId++
-			err := initField(&schema, valueOf, elem.Field(j).Elem(), dbTarget, tableId, driver)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	driver.GetDatabaseConfig().SetSchemas(schemas)
-	return dbTarget, nil
 }
 
 type RelationFunc func(b body, typeOf reflect.Type) any
@@ -150,7 +172,7 @@ func skipPrimaryKey[T comparable](slice []T, value T, tables reflect.Value, fiel
 	return false
 }
 
-func initField(schema *string, tables reflect.Value, valueOf reflect.Value, db *DB, tableId int, driver model.Driver) error {
+func InitField(schema *string, tables reflect.Value, valueOf reflect.Value, db *DB, tableId int, driver model.Driver) error {
 	pks, fieldIds, err := getPk(db, schema, valueOf, tableId, driver)
 	if err != nil {
 		return err
@@ -263,7 +285,7 @@ func getPk(db *DB, schema *string, valueOf reflect.Value, tableId int, driver mo
 	typeOf := valueOf.Type()
 	fields := getPks(typeOf)
 	if len(fields) == 0 {
-		return nil, nil, fmt.Errorf("goent: struct %q don't have a primary key setted", typeOf.Name())
+		return nil, nil, fmt.Errorf("goent: getPk() struct %q don't have a primary key setted", typeOf.Name())
 	}
 
 	table := utils.ParseTableNameByValue(valueOf)
@@ -321,7 +343,7 @@ func createRelation(b body, createMany RelationFunc, createOne RelationFunc) any
 		valueOf := b.tables.FieldByName(table)
 		if valueOf.IsValid() && !valueOf.IsZero() {
 			if checkAllFields(valueOf.Elem(), b.tableName) {
-				return createMany(b, valueOf.Elem().Type().Elem()) // M2M
+				return createMany(b, valueOf.Elem().Type()) // M2M
 			}
 		}
 	}

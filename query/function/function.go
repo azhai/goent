@@ -5,56 +5,56 @@ import (
 	"github.com/azhai/goent/model"
 )
 
-// ToUpper uses database function to converts the target string to uppercase
+// ToUpper uses database Function to converts the target string to uppercase
 //
 // # Example
 //
 //	goent.Select(&struct {
-//		UpperName *function[string]
+//		UpperName *Function[string]
 //	}{
 //		UpperName: function.ToUpper(&db.Animal.Name),
 //	})
-func ToUpper(target *string) *function[string] {
-	return &function[string]{Field: target, Type: enum.UpperFunction}
+func ToUpper(target *string) *Function[string] {
+	return &Function[string]{Field: target, Type: enum.UpperFunction}
 }
 
-// ToLower uses database function to converts the target string to lowercase
+// ToLower uses database Function to converts the target string to lowercase
 //
 // # Example
 //
 //	goent.Select(&struct {
-//		LowerName *function[string]
+//		LowerName *Function[string]
 //	}{
 //		LowerName: function.ToLower(&db.Animal.Name),
 //	})
-func ToLower(target *string) *function[string] {
-	return &function[string]{Field: target, Type: enum.LowerFunction}
+func ToLower(target *string) *Function[string] {
+	return &Function[string]{Field: target, Type: enum.LowerFunction}
 }
 
-// Argument is used to pass a value to a function inside a where clause
+// Argument is used to pass a value to a Function inside a where clause
 //
 // # Example
 //
 //	goent.Select(db.Animal).Where(where.Equals(function.ToUpper(&db.Animal.Name), function.Argument("CAT"))).AsSlice()
-func Argument[T any](value T) function[T] {
-	return function[T]{Value: value}
+func Argument[T any](value T) Function[T] {
+	return Function[T]{Value: value}
 }
 
-type function[T any] struct {
+type Function[T any] struct {
 	Field *T
 	Type  enum.FunctionType
 	Value T
 }
 
-func (f function[T]) GetValue() any {
+func (f Function[T]) GetValue() any {
 	return f.Value
 }
 
-func (f function[T]) GetType() enum.FunctionType {
+func (f Function[T]) GetType() enum.FunctionType {
 	return f.Type
 }
 
-func (f function[T]) Attribute(b model.Body) model.Attribute {
+func (f Function[T]) Attribute(b model.Body) model.Attribute {
 	return model.Attribute{
 		Table:        b.Table,
 		Name:         b.Name,
@@ -62,6 +62,6 @@ func (f function[T]) Attribute(b model.Body) model.Attribute {
 	}
 }
 
-func (f function[T]) GetField() any {
+func (f Function[T]) GetField() any {
 	return f.Field
 }

@@ -6,11 +6,12 @@ import (
 	"os"
 	"time"
 
+	"crud-basic/data"
+	"crud-basic/framework"
+	ginHandler "crud-basic/handler/gin"
+	"crud-basic/repository"
+
 	"github.com/gin-gonic/gin"
-	"github.com/go-goe/examples/crud-basic/data"
-	"github.com/go-goe/examples/crud-basic/framework"
-	ginHandler "github.com/go-goe/examples/crud-basic/handler/gin"
-	"github.com/go-goe/examples/crud-basic/repository"
 )
 
 type ginStarter struct {

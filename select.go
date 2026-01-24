@@ -15,15 +15,15 @@ import (
 	"github.com/azhai/goent/query/where"
 )
 
-type stateSelect[T any] struct {
+type StateSelect[T any] struct {
 	conn    model.Connection
 	builder builder
 	ctx     context.Context
 	argsSelect
 }
 
-type find[T any] struct {
-	sSelect stateSelect[T]
+type StateFind[T any] struct {
+	sSelect StateSelect[T]
 }
 
 // Find returns a matched record,
@@ -40,9 +40,9 @@ type find[T any] struct {
 //	// two primary keys
 //	animalFood, err = goent.Find(db.AnimalFood).ByValue(AnimalFood{AnimalID: 3, FoodID: 2})
 //
-//	// find record by value, if have more than one it will returns the first
+//	// StateFind record by value, if have more than one it will returns the first
 //	cat, err = goent.Find(db.Animal).ByValue(Animal{Name: "Cat"})
-func Find[T any](table *T) find[T] {
+func Find[T any](table *T) StateFind[T] {
 	return FindContext(context.Background(), table)
 }
 
@@ -50,8 +50,18 @@ func Find[T any](table *T) find[T] {
 // if non record is found returns a [ErrNotFound].
 //
 // See [Find] for examples
-func FindContext[T any](ctx context.Context, table *T) find[T] {
-	return find[T]{sSelect: ListContext(ctx, table)}
+func FindContext[T any](ctx context.Context, table *T) StateFind[T] {
+	return StateFind[T]{sSelect: ListContext(ctx, table)}
+}
+
+// FindTable returns a matched record
+func FindTable[T any](table *Table[T]) StateFind[T] {
+	return FindTableContext(context.Background(), table)
+}
+
+// FindTableContext returns a matched record
+func FindTableContext[T any](ctx context.Context, table *Table[T]) StateFind[T] {
+	return StateFind[T]{sSelect: ListTableContext(ctx, table)}
 }
 
 // OnTransaction sets a transaction on the query.
@@ -75,15 +85,15 @@ func FindContext[T any](ctx context.Context, table *T) find[T] {
 //	if err != nil {
 //		// handler error
 //	}
-func (f find[T]) OnTransaction(tx model.Transaction) find[T] {
+func (f StateFind[T]) OnTransaction(tx model.Transaction) StateFind[T] {
 	f.sSelect = f.sSelect.OnTransaction(tx)
 	return f
 }
 
-// Finds the record by non-zero values,
+// ByValue finds the record by non-zero values,
 // if returns more than one it's returns the first
 // and ignores the rest
-func (f find[T]) ByValue(value T) (*T, error) {
+func (f StateFind[T]) ByValue(value T) (*T, error) {
 	pks, valuesPks, skip := getNonZeroFields(getArgs{
 		addrMap:   addrMap.mapField,
 		tableArgs: f.sSelect.tableArgs,
@@ -136,27 +146,26 @@ func (f find[T]) ByValue(value T) (*T, error) {
 //		//handler rows
 //		result = append(result, row)
 //	}
-func Select[T any](args ...any) stateSelect[T] {
+func Select[T any](args ...any) StateSelect[T] {
 	return SelectContext[T](context.Background(), args...)
 }
 
 // SelectContext retrieves rows from tables.
 //
 // See [Select] for examples
-func SelectContext[T any](ctx context.Context, args ...any) stateSelect[T] {
-	var state stateSelect[T] = createSelectState[T](ctx, getArgsSelect, args...)
-	return state
+func SelectContext[T any](ctx context.Context, args ...any) StateSelect[T] {
+	return createSelectState[T](ctx, getArgsSelect, args...)
 }
 
 // Where receives [model.Operation] as where operations from where sub package
-func (s stateSelect[T]) Where(o model.Operation) stateSelect[T] {
+func (s StateSelect[T]) Where(o model.Operation) StateSelect[T] {
 	s.builder.brs = nil
 	helperWhere(&s.builder, addrMap.mapField, o)
 	return s
 }
 
 // Filter creates a where on non-zero values.
-func (s stateSelect[T]) Filter(o model.Operation) stateSelect[T] {
+func (s StateSelect[T]) Filter(o model.Operation) StateSelect[T] {
 	s.builder.filters = nil
 	helperFilter(&s.builder, addrMap.mapField, o)
 	return s
@@ -164,7 +173,7 @@ func (s stateSelect[T]) Filter(o model.Operation) stateSelect[T] {
 
 // Match creates a where on non-zero values over the model T, all strings will be a LIKE operator
 // using the ToUpper function to ensure all values is matched.
-func (s stateSelect[T]) Match(value T) stateSelect[T] {
+func (s StateSelect[T]) Match(value T) StateSelect[T] {
 	args, values, skip := getNonZeroFields(getArgs{
 		addrMap:   addrMap.mapField,
 		tableArgs: s.tableArgs,
@@ -178,39 +187,52 @@ func (s stateSelect[T]) Match(value T) stateSelect[T] {
 }
 
 // Take takes i elements
-func (s stateSelect[T]) Take(i int) stateSelect[T] {
+func (s StateSelect[T]) Take(i int) StateSelect[T] {
 	s.builder.query.Limit = i
 	return s
 }
 
 // Skip skips i elements
-func (s stateSelect[T]) Skip(i int) stateSelect[T] {
+func (s StateSelect[T]) Skip(i int) StateSelect[T] {
 	s.builder.query.Offset = i
 	return s
 }
 
 // OrderByAsc makes a ordained by args ascending query
-func (s stateSelect[T]) OrderByAsc(args ...any) stateSelect[T] {
+func (s StateSelect[T]) OrderByAsc(args ...any) StateSelect[T] {
 	for _, arg := range args {
 		if a, ok := getAttribute(arg, addrMap.mapField); ok {
-			s.builder.query.OrderBy = append(s.builder.query.OrderBy, model.OrderBy{Attribute: a})
+			ord := model.OrderBy{Attribute: a, Desc: false}
+			s.builder.query.OrderBy = append(s.builder.query.OrderBy, ord)
 		}
 	}
 	return s
 }
 
 // OrderByDesc makes a ordained by args descending query
-func (s stateSelect[T]) OrderByDesc(args ...any) stateSelect[T] {
+func (s StateSelect[T]) OrderByDesc(args ...any) StateSelect[T] {
 	for _, arg := range args {
 		if a, ok := getAttribute(arg, addrMap.mapField); ok {
-			s.builder.query.OrderBy = append(s.builder.query.OrderBy, model.OrderBy{Attribute: a, Desc: true})
+			ord := model.OrderBy{Attribute: a, Desc: true}
+			s.builder.query.OrderBy = append(s.builder.query.OrderBy, ord)
 		}
 	}
 	return s
 }
 
-// GroupBy makes a group by args
-func (s stateSelect[T]) GroupBy(args ...any) stateSelect[T] {
+// StrOrderBy makes a ordained by args query
+// func (s StateSelect[T]) StrOrderBy(args ...string) StateSelect[T] {
+// 	for _, arg := range args {
+// 		if a, ok := getAttribute(arg, addrMap.mapField); ok {
+// 			ord := model.OrderBy{Attribute: a, Desc: false}
+// 			s.builder.query.OrderBy = append(s.builder.query.OrderBy, ord)
+// 		}
+// 	}
+// 	return s
+// }
+
+// GroupBy makes a group by args query
+func (s StateSelect[T]) GroupBy(args ...any) StateSelect[T] {
 	s.builder.query.GroupBy = make([]model.GroupBy, len(args))
 	for i := range args {
 		if a, ok := getAttribute(args[i], addrMap.mapField); ok {
@@ -220,23 +242,34 @@ func (s stateSelect[T]) GroupBy(args ...any) stateSelect[T] {
 	return s
 }
 
-func (s stateSelect[T]) Join(left, right any) stateSelect[T] {
+// StrGroupBy makes a group by args query
+// func (s StateSelect[T]) StrGroupBy(args ...string) StateSelect[T] {
+// 	s.builder.query.GroupBy = make([]model.GroupBy, len(args))
+// 	for i := range args {
+// 		if a, ok := getAttribute(args[i], addrMap.mapField); ok {
+// 			s.builder.query.GroupBy[i].Attribute = a
+// 		}
+// 	}
+// 	return s
+// }
+
+func (s StateSelect[T]) Join(left, right any) StateSelect[T] {
 	s.builder.buildSelectJoins(enum.Join, getArgsJoin(addrMap.mapField, left, right))
 	return s
 }
 
-func (s stateSelect[T]) LeftJoin(left, right any) stateSelect[T] {
+func (s StateSelect[T]) LeftJoin(left, right any) StateSelect[T] {
 	s.builder.buildSelectJoins(enum.LeftJoin, getArgsJoin(addrMap.mapField, left, right))
 	return s
 }
 
-func (s stateSelect[T]) RightJoin(left, right any) stateSelect[T] {
+func (s StateSelect[T]) RightJoin(left, right any) StateSelect[T] {
 	s.builder.buildSelectJoins(enum.RightJoin, getArgsJoin(addrMap.mapField, left, right))
 	return s
 }
 
 // AsSlice return all the rows as a slice.
-func (s stateSelect[T]) AsSlice() ([]T, error) {
+func (s StateSelect[T]) AsSlice() ([]T, error) {
 	rows := make([]T, 0, s.builder.query.Limit)
 	for row, err := range s.Rows() {
 		if err != nil {
@@ -248,7 +281,7 @@ func (s stateSelect[T]) AsSlice() ([]T, error) {
 }
 
 // AsOne return the first row, if non row is found returns a [ErrNotFound].
-func (s stateSelect[T]) AsOne() (row T, err error) {
+func (s StateSelect[T]) AsOne() (row T, err error) {
 	for row, err = range s.Rows() {
 		break
 	}
@@ -256,7 +289,7 @@ func (s stateSelect[T]) AsOne() (row T, err error) {
 }
 
 // AsQuery return a [model.Query] for use inside a [where.In].
-func (s stateSelect[T]) AsQuery() model.Query {
+func (s StateSelect[T]) AsQuery() model.Query {
 	s.builder.buildSqlSelect()
 	return s.builder.query
 }
@@ -282,7 +315,7 @@ type Pagination[T any] struct {
 // AsPagination return a paginated query as [Pagination].
 //
 // Default values for page and size are 1 and 10 respectively.
-func (s stateSelect[T]) AsPagination(page, size int) (*Pagination[T], error) {
+func (s StateSelect[T]) AsPagination(page, size int) (*Pagination[T], error) {
 	if size <= 0 {
 		size = 10
 	}
@@ -377,14 +410,14 @@ func (s stateSelect[T]) AsPagination(page, size int) (*Pagination[T], error) {
 //	if err != nil {
 //		// handler error
 //	}
-func (s stateSelect[T]) OnTransaction(tx model.Transaction) stateSelect[T] {
+func (s StateSelect[T]) OnTransaction(tx model.Transaction) StateSelect[T] {
 	s.builder.query.ForUpdate = true
 	s.conn = tx
 	return s
 }
 
 // Rows return a iterator on rows.
-func (s stateSelect[T]) Rows() iter.Seq2[T, error] {
+func (s StateSelect[T]) Rows() iter.Seq2[T, error] {
 	s.builder.buildSqlSelect()
 
 	driver := s.builder.fieldsSelect[0].getDb().driver
@@ -396,8 +429,8 @@ func (s stateSelect[T]) Rows() iter.Seq2[T, error] {
 	return handlerResult[T](s.ctx, s.conn, s.builder.query, len(s.builder.fieldsSelect), dc)
 }
 
-func createSelectState[T any](ctx context.Context, getArgs func(args ...any) argsSelect, args ...any) stateSelect[T] {
-	s := stateSelect[T]{builder: createBuilder(enum.SelectQuery), argsSelect: getArgs(args...), ctx: ctx}
+func createSelectState[T any](ctx context.Context, getArgs func(args ...any) argsSelect, args ...any) StateSelect[T] {
+	s := StateSelect[T]{builder: createBuilder(enum.SelectQuery), argsSelect: getArgs(args...), ctx: ctx}
 	s.builder.fieldsSelect = s.fields
 	return s
 }
@@ -415,15 +448,25 @@ func createSelectState[T any](ctx context.Context, getArgs func(args ...any) arg
 //	// pagination list
 //	var p *goent.Pagination[Animal]
 //	p, err = goent.List(db.Animal).AsPagination(1, 10)
-func List[T any](table *T) stateSelect[T] {
+func List[T any](table *T) StateSelect[T] {
 	return ListContext(context.Background(), table)
 }
 
 // ListContext is a wrapper over [Select] for more simple queries using filters, pagination and ordering.
 //
 // See [List] for examples.
-func ListContext[T any](ctx context.Context, table *T) stateSelect[T] {
+func ListContext[T any](ctx context.Context, table *T) StateSelect[T] {
 	return createSelectState[T](ctx, getArgsList, table)
+}
+
+// ListTable is a wrapper over [Select] for more simple queries using filters, pagination and ordering.
+func ListTable[T any](table *Table[T]) StateSelect[T] {
+	return ListTableContext(context.Background(), table)
+}
+
+// ListTableContext is a wrapper over [Select] for more simple queries using filters, pagination and ordering.
+func ListTableContext[T any](ctx context.Context, table *Table[T]) StateSelect[T] {
+	return createSelectState[T](ctx, getArgsList, table.Model)
 }
 
 type getArgs struct {
@@ -575,7 +618,7 @@ func getArg(arg any, addrMap map[uintptr]field, operation *model.Operation) fiel
 	if addrMap[addr] != nil {
 		return addrMap[addr]
 	}
-	// any as pointer, used on save, find, remove and list
+	// any as pointer, used on StateSave, StateFind, StateRemove and list
 	return getAnyArg(v, addrMap)
 }
 

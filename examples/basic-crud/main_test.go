@@ -9,9 +9,10 @@ import (
 	"os"
 	"testing"
 
+	"crud-basic/data"
+	"crud-basic/handler"
+
 	"github.com/azhai/goent"
-	"github.com/go-goe/examples/crud-basic/data"
-	"github.com/go-goe/examples/crud-basic/handler"
 	"github.com/stretchr/testify/assert"
 )
 

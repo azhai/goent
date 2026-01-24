@@ -21,7 +21,7 @@ func NewRepository[E any](entity *E) Repository[E] {
 }
 
 func (r repository[E]) Find(t E) (*E, error) {
-	return goent.Find(r.entity).ByID(t)
+	return goent.Find(r.entity).ByValue(t)
 }
 
 func (r repository[E]) Create(t *E) error {
@@ -33,9 +33,9 @@ func (r repository[E]) List(page, size int) (*goent.Pagination[E], error) {
 }
 
 func (r repository[E]) Save(t E) error {
-	return goent.Save(r.entity).ByID(t)
+	return goent.Save(r.entity).One(t)
 }
 
 func (r repository[E]) Remove(t E) error {
-	return goent.Remove(r.entity).ByID(t)
+	return goent.Remove(r.entity).ByValue(t)
 }

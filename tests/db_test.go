@@ -230,7 +230,6 @@ func SetupPostgres() (*Database, error) {
 }
 
 func SetupSqlite() (*Database, error) {
-	var err error
 	filename := filepath.Join(os.TempDir(), "goent.db")
 	db, err := goent.Open[Database](sqlite.Open(filename, sqlite.NewConfig(
 		sqlite.Config{

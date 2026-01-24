@@ -8,15 +8,15 @@ import (
 	"github.com/azhai/goent/model"
 )
 
-type stateDelete struct {
+type StateDelete struct {
 	conn    model.Connection
 	builder builder
 	ctx     context.Context
 }
 
-type remove[T any] struct {
+type StateRemove[T any] struct {
 	table  *T
-	delete stateDelete
+	delete StateDelete
 }
 
 // Remove is a wrapper over [Delete] for more simple deletes,
@@ -27,18 +27,28 @@ type remove[T any] struct {
 //
 // # Examples
 //
-//	// remove animal of id 2
+//	// StateRemove animal of id 2
 //	err = goent.Remove(db.Animal).ByValue(Animal{Id: 2})
-func Remove[T any](table *T) remove[T] {
+func Remove[T any](table *T) StateRemove[T] {
 	return RemoveContext(context.Background(), table)
 }
 
-// Remove is a wrapper over [Delete] for more simple deletes,
+// RemoveContext is a wrapper over [Delete] for more simple deletes,
 // uses the value for create a where matching the primary keys.
 //
 // See [Remove] for examples
-func RemoveContext[T any](ctx context.Context, table *T) remove[T] {
-	return remove[T]{table: table, delete: DeleteContext(ctx, table)}
+func RemoveContext[T any](ctx context.Context, table *T) StateRemove[T] {
+	return StateRemove[T]{table: table, delete: DeleteContext(ctx, table)}
+}
+
+// RemoveTable is a wrapper over [Delete] for more simple deletes
+func RemoveTable[T any](table *Table[T]) StateRemove[T] {
+	return RemoveTableContext(context.Background(), table)
+}
+
+// RemoveTableContext is a wrapper over [Delete] for more simple deletes
+func RemoveTableContext[T any](ctx context.Context, table *Table[T]) StateRemove[T] {
+	return StateRemove[T]{table: table.Model, delete: DeleteContext(ctx, table)}
 }
 
 // OnTransaction sets a transaction on the query.
@@ -60,13 +70,13 @@ func RemoveContext[T any](ctx context.Context, table *T) remove[T] {
 //	if err != nil {
 //		// handler error
 //	}
-func (r remove[T]) OnTransaction(tx model.Transaction) remove[T] {
+func (r StateRemove[T]) OnTransaction(tx model.Transaction) StateRemove[T] {
 	r.delete.conn = tx
 	return r
 }
 
-// Removes the record by non-zero values
-func (r remove[T]) ByValue(value T) error {
+// ByValue removes the record by non-zero values
+func (r StateRemove[T]) ByValue(value T) error {
 	args, valuesArgs, skip := getNonZeroFields(getArgs{
 		addrMap:   addrMap.mapField,
 		tableArgs: getRemoveTableArgs(r.table),
@@ -79,7 +89,7 @@ func (r remove[T]) ByValue(value T) error {
 	return r.delete.Where(operations(args, valuesArgs))
 }
 
-// Delete remove records in the given table
+// Delete StateRemove records in the given table
 //
 // Delete uses [context.Background] internally;
 // to specify the context, use [DeleteContext].
@@ -90,16 +100,28 @@ func (r remove[T]) ByValue(value T) error {
 //	err = goent.Delete(db.UserRole).All()
 //	// delete one record
 //	err = goent.Delete(db.Animal).Where(where.Equals(&db.Animal.ID, 2))
-func Delete[T any](table *T) stateDelete {
+func Delete[T any](table *T) StateDelete {
 	return DeleteContext(context.Background(), table)
 }
 
-// Delete remove records in the given table
+// DeleteContext StateRemove records in the given table
 //
 // See [Delete] for examples
-func DeleteContext[T any](ctx context.Context, table *T) stateDelete {
-	var state stateDelete = createDeleteState(ctx)
+func DeleteContext[T any](ctx context.Context, table *T) StateDelete {
+	var state = createDeleteState(ctx)
 	state.builder.fields = append(state.builder.fields, getArgDelete(table, addrMap.mapField))
+	return state
+}
+
+// DeleteTable StateRemove records in the given table
+func DeleteTable[T any](table *Table[T]) StateDelete {
+	return DeleteTableContext(context.Background(), table)
+}
+
+// DeleteTableContext StateRemove records in the given table
+func DeleteTableContext[T any](ctx context.Context, table *Table[T]) StateDelete {
+	var state = createDeleteState(ctx)
+	state.builder.fields = append(state.builder.fields, getArgDelete(table.Model, addrMap.mapField))
 	return state
 }
 
@@ -122,18 +144,18 @@ func DeleteContext[T any](ctx context.Context, table *T) stateDelete {
 //	if err != nil {
 //		// handler error
 //	}
-func (s stateDelete) OnTransaction(tx model.Transaction) stateDelete {
+func (s StateDelete) OnTransaction(tx model.Transaction) StateDelete {
 	s.conn = tx
 	return s
 }
 
-// Delete all records
-func (s stateDelete) All() error {
+// All delete all records
+func (s StateDelete) All() error {
 	return s.Where(model.Operation{})
 }
 
 // Where receives [model.Operation] as where operations from where sub package
-func (s stateDelete) Where(o model.Operation) error {
+func (s StateDelete) Where(o model.Operation) error {
 	helperWhere(&s.builder, addrMap.mapField, o)
 
 	s.builder.buildSqlDelete()
@@ -147,8 +169,8 @@ func (s stateDelete) Where(o model.Operation) error {
 	return handlerValues(s.ctx, s.conn, s.builder.query, dc)
 }
 
-func createDeleteState(ctx context.Context) stateDelete {
-	return stateDelete{builder: createBuilder(enum.DeleteQuery), ctx: ctx}
+func createDeleteState(ctx context.Context) StateDelete {
+	return StateDelete{builder: createBuilder(enum.DeleteQuery), ctx: ctx}
 }
 
 func getArgDelete(arg any, addrMap map[uintptr]field) field {

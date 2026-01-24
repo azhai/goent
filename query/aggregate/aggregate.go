@@ -10,7 +10,7 @@ import (
 // # Example
 //
 //	goent.Select[struct {
-//		Count count
+//		Count int64
 //	}](aggregate.Count(&db.Animal.Id))...
 func Count(t any) *count {
 	return &count{Field: t}

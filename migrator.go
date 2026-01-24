@@ -42,7 +42,11 @@ func newDbMigrator(db any, driver model.Driver) *dbMigrator {
 	}
 
 	for i := range count {
-		desc := &fieldDesc{Field: valueOf.Field(i)}
+		fieldOf := valueOf.Field(i)
+		if strings.HasPrefix(fieldOf.Type().Elem().Name(), "Table") {
+			fieldOf = fieldOf.Elem().FieldByName("Model")
+		}
+		desc := &fieldDesc{Field: fieldOf}
 		elem := desc.Field.Elem()
 
 		desc.FieldName = elem.Type().Name()
@@ -245,7 +249,7 @@ func createOneToSomeMigrate(b body, typeOf reflect.Type) any {
 func migratePk(typeOf reflect.Type, driver model.Driver) ([]*model.PrimaryKeyMigrate, []string, error) {
 	fields := getPks(typeOf)
 	if len(fields) == 0 {
-		return nil, nil, fmt.Errorf("goent: struct %q don't have a primary key setted", typeOf.Name())
+		return nil, nil, fmt.Errorf("goent: migratePk() struct %q don't have a primary key setted", typeOf.Name())
 	}
 
 	pks := make([]*model.PrimaryKeyMigrate, len(fields))

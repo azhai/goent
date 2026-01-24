@@ -9,9 +9,9 @@ import (
 	"github.com/azhai/goent/model"
 )
 
-type stateInsert[T any] struct {
+type StateInsert[T any] struct {
 	conn    model.Connection
-	table   *T
+	table   *Table[T]
 	builder builder
 	ctx     context.Context
 }
@@ -32,16 +32,25 @@ type stateInsert[T any] struct {
 //
 //	persons := []Person{{Name: "John"}, {Name: "Mary"}}
 //	err = goent.Insert(db.Person).All(persons)
-func Insert[T any](table *T) stateInsert[T] {
+func Insert[T any](table *T) StateInsert[T] {
 	return InsertContext(context.Background(), table)
 }
 
 // InsertContext inserts a new record into the given table.
 //
 // See [Insert] for examples.
-func InsertContext[T any](ctx context.Context, table *T) stateInsert[T] {
-	var state stateInsert[T] = createInsertState(ctx, table)
-	return state
+func InsertContext[T any](ctx context.Context, table *T) StateInsert[T] {
+	return createInsertState(ctx, NewTableModel(table))
+}
+
+// InsertTable inserts a new record into the given table.
+func InsertTable[T any](ctx context.Context, table *Table[T]) StateInsert[T] {
+	return InsertTableContext(context.Background(), table)
+}
+
+// InsertTableContext inserts a new record into the given table.
+func InsertTableContext[T any](ctx context.Context, table *Table[T]) StateInsert[T] {
+	return createInsertState(ctx, table)
 }
 
 // OnTransaction sets a transaction on the query.
@@ -64,18 +73,18 @@ func InsertContext[T any](ctx context.Context, table *T) stateInsert[T] {
 //	if err != nil {
 //		// handler error
 //	}
-func (s stateInsert[T]) OnTransaction(tx model.Transaction) stateInsert[T] {
+func (s StateInsert[T]) OnTransaction(tx model.Transaction) StateInsert[T] {
 	s.conn = tx
 	return s
 }
 
-func (s stateInsert[T]) One(value *T) error {
+func (s StateInsert[T]) One(value *T) error {
 	if value == nil {
 		return errors.New("goent: invalid insert value. try sending a pointer to a struct as value")
 	}
 	valueOf := reflect.ValueOf(value).Elem()
 
-	s.builder.fields = getArgsTable(addrMap.mapField, s.table, valueOf)
+	s.builder.fields = getArgsTable(addrMap.mapField, s.table.Model, valueOf)
 
 	pkFieldId := s.builder.buildSqlInsert(valueOf)
 
@@ -91,13 +100,13 @@ func (s stateInsert[T]) One(value *T) error {
 	return handlerValues(s.ctx, s.conn, s.builder.query, dc)
 }
 
-func (s stateInsert[T]) All(value []T) error {
+func (s StateInsert[T]) All(value []T) error {
 	if len(value) == 0 {
 		return errors.New("goent: can't insert a empty batch value")
 	}
 	valueOf := reflect.ValueOf(value)
 
-	s.builder.fields = getArgsTable(addrMap.mapField, s.table, valueOf)
+	s.builder.fields = getArgsTable(addrMap.mapField, s.table.Model, valueOf)
 
 	pkFieldId := s.builder.buildSqlInsertBatch(valueOf)
 
@@ -110,8 +119,8 @@ func (s stateInsert[T]) All(value []T) error {
 	return handlerValuesReturningBatch(s.ctx, s.conn, s.builder.query, valueOf, pkFieldId, dc)
 }
 
-func createInsertState[T any](ctx context.Context, t *T) stateInsert[T] {
-	return stateInsert[T]{builder: createBuilder(enum.InsertQuery), ctx: ctx, table: t}
+func createInsertState[T any](ctx context.Context, t *Table[T]) StateInsert[T] {
+	return StateInsert[T]{builder: createBuilder(enum.InsertQuery), ctx: ctx, table: t}
 }
 
 func getArgsTable(addrMap map[uintptr]field, table any, valueOf reflect.Value) []field {

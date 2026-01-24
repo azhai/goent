@@ -3,11 +3,12 @@ package main
 import (
 	"os"
 
+	"crud-basic/data"
+	"crud-basic/framework"
+	ginFramework "crud-basic/framework/gin"
+	"crud-basic/framework/standard"
+
 	"github.com/azhai/goent"
-	"github.com/go-goe/examples/crud-basic/data"
-	"github.com/go-goe/examples/crud-basic/framework"
-	ginFramework "github.com/go-goe/examples/crud-basic/framework/gin"
-	"github.com/go-goe/examples/crud-basic/framework/standard"
 )
 
 var frameworks map[string]func(db *data.Database) framework.Starter = map[string]func(db *data.Database) framework.Starter{

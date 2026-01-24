@@ -7,10 +7,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/go-goe/examples/crud-basic/data"
-	"github.com/go-goe/examples/crud-basic/framework"
-	"github.com/go-goe/examples/crud-basic/handler/standard"
-	"github.com/go-goe/examples/crud-basic/repository"
+	"crud-basic/data"
+	"crud-basic/framework"
+	"crud-basic/handler/standard"
+	"crud-basic/repository"
 )
 
 type standardStarter struct {

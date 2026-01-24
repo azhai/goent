@@ -39,14 +39,19 @@ type DB struct {
 	driver model.Driver
 }
 
-// Stats Return the database stats as [sql.DBStats].
-func (db *DB) Stats() sql.DBStats {
-	return db.driver.Stats()
+// SetDriver Set the database driver.
+func (db *DB) SetDriver(driver model.Driver) {
+	db.driver = driver
 }
 
 // Name Get the database name; SQLite, PostgreSQL...
 func (db *DB) Name() string {
 	return db.driver.Name()
+}
+
+// Stats Return the database stats as [sql.DBStats].
+func (db *DB) Stats() sql.DBStats {
+	return db.driver.Stats()
 }
 
 func (db *DB) RawQueryContext(ctx context.Context, rawSql string, args ...any) (model.Rows, error) {
