@@ -6,24 +6,6 @@ import (
 	"unicode"
 )
 
-func TagValueExist(tag string, subTag string) bool {
-	return strings.Contains(";"+tag+";", ";"+subTag+";")
-	// values := strings.Split(tag, ";")
-	// for _, v := range values {
-	// 	if v == subTag {
-	// 		return true
-	// 	}
-	// }
-	// return false
-}
-
-// IsFieldHasSchema check if field has schema tag or schema suffix
-func IsFieldHasSchema(valueOf reflect.Value, i int) bool {
-	goeTag := valueOf.Type().Field(i).Tag.Get("goe")
-	return TagValueExist(goeTag, "schema") ||
-		strings.HasSuffix(valueOf.Field(i).Elem().Type().Name(), "Schema")
-}
-
 // ParseTableNameByValue parse table name by value
 func ParseTableNameByValue(valueOf reflect.Value) string {
 	if tableName := TableNameMethod(valueOf); tableName != "" {
@@ -41,8 +23,8 @@ func ParseTableNameByType(typeOf reflect.Type) string {
 	return TableNamePattern(typeOf.Name())
 }
 
-// TableNameMethod try to get table name from method TableName
-// If method TableName is not found, return empty string
+// TableNameMethod try to get table name from method TableNames
+// If method TableNames is not found, return empty string
 func TableNameMethod(valueOf reflect.Value) string {
 	var method reflect.Value
 	if method = valueOf.MethodByName("TableName"); method.IsValid() {
@@ -104,4 +86,46 @@ func ToSnakeCase(name string) string {
 	}
 
 	return result.String()
+}
+
+func TagValueExist(tag string, subTag string) bool {
+	return strings.Contains(";"+tag+";", ";"+subTag+";")
+	// values := strings.Split(tag, ";")
+	// for _, v := range values {
+	// 	if v == subTag {
+	// 		return true
+	// 	}
+	// }
+	// return false
+}
+
+// IsFieldHasSchema check if field has schema tag or schema suffix
+func IsFieldHasSchema(valueOf reflect.Value, i int) bool {
+	goeTag := valueOf.Type().Field(i).Tag.Get("goe")
+	return TagValueExist(goeTag, "schema") ||
+		strings.HasSuffix(valueOf.Field(i).Elem().Type().Name(), "Schema")
+}
+
+func GetFieldNames(typeOf reflect.Type) (names []string) {
+	for i := 0; i < typeOf.NumField(); i++ {
+		names = append(names, typeOf.Field(i).Name)
+	}
+	return
+}
+
+func IsTableModel(fieldOf reflect.Value) bool {
+	return strings.HasPrefix(fieldOf.Type().Elem().Name(), "Table")
+}
+
+func GetTableModel(fieldOf reflect.Value) reflect.Value {
+	if IsTableModel(fieldOf) {
+		return fieldOf.Elem().FieldByName("Model")
+	}
+	return fieldOf
+}
+
+func GetTableID(typeOf reflect.Type) (reflect.StructField, bool) {
+	return typeOf.FieldByNameFunc(func(s string) bool {
+		return strings.ToUpper(s) == "ID"
+	})
 }

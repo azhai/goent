@@ -25,7 +25,7 @@ type body struct {
 	dbTable
 }
 
-func (db *Driver) MigrateContext(ctx context.Context, migrator *model.Migrator) error {
+func (dr *Driver) MigrateContext(ctx context.Context, migrator *model.Migrator) error {
 	dataMap := map[string]*dataType{
 		"string":    {"text", "''"},
 		"int16":     {"integer", "0"},
@@ -47,16 +47,16 @@ func (db *Driver) MigrateContext(ctx context.Context, migrator *model.Migrator) 
 		err = checkTableChanges(body{
 			table:   t,
 			dataMap: dataMap,
-			driver:  db,
+			driver:  dr,
 			sql:     sql,
-			conn:    db.sql,
+			conn:    dr.sql,
 			tables:  migrator.Tables,
 		})
 		if err != nil {
 			return err
 		}
 
-		err = checkIndex(t.Indexes, t, sqlColumns, db.sql)
+		err = checkIndex(t.Indexes, t, sqlColumns, dr.sql)
 		if err != nil {
 			return err
 		}
@@ -71,28 +71,28 @@ func (db *Driver) MigrateContext(ctx context.Context, migrator *model.Migrator) 
 	sql.WriteString(sqlColumns.String())
 
 	if sql.Len() != 0 {
-		return db.rawExecContext(ctx, sql.String())
+		return dr.rawExecContext(ctx, sql.String())
 	}
 	return nil
 }
 
-func (db *Driver) rawExecContext(ctx context.Context, rawSql string, args ...any) error {
-	if db.config.MigratePath == "" {
+func (dr *Driver) rawExecContext(ctx context.Context, rawSql string, args ...any) error {
+	if dr.config.MigratePath == "" {
 		query := model.Query{Type: enum.RawQuery, RawSql: rawSql, Arguments: args}
-		query.Header.Err = wrapperExec(ctx, db.NewConnection(), &query)
+		query.Header.Err = wrapperExec(ctx, dr.NewConnection(), &query)
 		if query.Header.Err != nil {
-			return db.GetDatabaseConfig().ErrorQueryHandler(ctx, query)
+			return dr.GetDatabaseConfig().ErrorQueryHandler(ctx, query)
 		}
-		db.GetDatabaseConfig().InfoHandler(ctx, query)
+		dr.GetDatabaseConfig().InfoHandler(ctx, query)
 		return nil
 	}
-	root, err := os.OpenRoot(db.config.MigratePath)
+	root, err := os.OpenRoot(dr.config.MigratePath)
 	if err != nil {
 		return err
 	}
 	defer root.Close()
 
-	file, err := root.OpenFile(db.Name()+"_"+strconv.FormatInt(time.Now().Unix(), 10)+".sql", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
+	file, err := root.OpenFile(dr.Name()+"_"+strconv.FormatInt(time.Now().Unix(), 10)+".sql", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		return err
 	}
@@ -108,36 +108,36 @@ func wrapperExec(ctx context.Context, conn model.Connection, query *model.Query)
 	return conn.ExecContext(ctx, query)
 }
 
-func (db *Driver) DropTable(schema, table string) error {
+func (dr *Driver) DropTable(schema, table string) error {
 	if len(schema) > 2 {
 		table = schema + "." + table
-		checkAttach(db.sql, db.dsn, map[string]bool{schema[1 : len(schema)-1]: true})
+		checkAttach(dr.sql, dr.dsn, map[string]bool{schema[1 : len(schema)-1]: true})
 	}
-	return db.rawExecContext(context.TODO(), fmt.Sprintf("DROP TABLE IF EXISTS %v;", table))
+	return dr.rawExecContext(context.TODO(), fmt.Sprintf("DROP TABLE IF EXISTS %v;", table))
 }
 
-func (db *Driver) RenameTable(schema, table, newTable string) error {
+func (dr *Driver) RenameTable(schema, table, newTable string) error {
 	if len(schema) > 2 {
 		table = schema + "." + table
 		newTable = schema + "." + newTable
 	}
-	return db.rawExecContext(context.TODO(), fmt.Sprintf("ALTER TABLE %v RENAME TO %v;", table, newTable))
+	return dr.rawExecContext(context.TODO(), fmt.Sprintf("ALTER TABLE %v RENAME TO %v;", table, newTable))
 }
 
-func (db *Driver) RenameColumn(schema, table, oldColumn, newColumn string) error {
+func (dr *Driver) RenameColumn(schema, table, oldColumn, newColumn string) error {
 	if len(schema) > 2 {
 		table = schema + "." + table
-		checkAttach(db.sql, db.dsn, map[string]bool{schema[1 : len(schema)-1]: true})
+		checkAttach(dr.sql, dr.dsn, map[string]bool{schema[1 : len(schema)-1]: true})
 	}
-	return db.rawExecContext(context.TODO(), renameColumn(table, oldColumn, newColumn))
+	return dr.rawExecContext(context.TODO(), renameColumn(table, oldColumn, newColumn))
 }
 
-func (db *Driver) DropColumn(schema, table, column string) error {
+func (dr *Driver) DropColumn(schema, table, column string) error {
 	if len(schema) > 2 {
 		table = schema + "." + table
-		checkAttach(db.sql, db.dsn, map[string]bool{schema[1 : len(schema)-1]: true})
+		checkAttach(dr.sql, dr.dsn, map[string]bool{schema[1 : len(schema)-1]: true})
 	}
-	return db.rawExecContext(context.TODO(), dropColumn(table, column))
+	return dr.rawExecContext(context.TODO(), dropColumn(table, column))
 }
 
 func renameColumn(table, oldColumnName, newColumnName string) string {

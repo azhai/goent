@@ -153,6 +153,7 @@ type PrimaryKeyMigrate struct {
 
 type AttributeMigrate struct {
 	Nullable     bool
+	FieldName    string
 	Name         string
 	EscapingName string
 	DataType     string

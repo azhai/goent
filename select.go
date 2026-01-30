@@ -220,11 +220,16 @@ func (s StateSelect[T]) OrderByDesc(args ...any) StateSelect[T] {
 	return s
 }
 
-// StrOrderBy makes a ordained by args query
-// func (s StateSelect[T]) StrOrderBy(args ...string) StateSelect[T] {
+// OrderBys makes a ordained by args query
+// func (s StateSelect[T]) OrderBys(args ...string) StateSelect[T] {
+// 	var desc bool
 // 	for _, arg := range args {
-// 		if a, ok := getAttribute(arg, addrMap.mapField); ok {
-// 			ord := model.OrderBy{Attribute: a, Desc: false}
+// 		pieces := strings.Fields(arg)
+// 		if len(pieces) == 2 {
+// 			arg, desc = pieces[0], true
+// 		}
+// 		if fld := s.table.FieldInfo(arg); fld != nil {
+// 			ord := model.OrderBy{Attribute: fld, Desc: desc}
 // 			s.builder.query.OrderBy = append(s.builder.query.OrderBy, ord)
 // 		}
 // 	}

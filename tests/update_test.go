@@ -69,10 +69,10 @@ func TestUpdate(t *testing.T) {
 					Price:   price,
 				}
 				u := goent.Update(db.Flag).
-					Sets(
+					Set(
 						update.Set(&db.Flag.Name, ff.Name),
 						update.Set(&db.Flag.Bool, ff.Bool))
-				err = u.Sets(
+				err = u.Set(
 					update.Set(&db.Flag.Float64, ff.Float64),
 					update.Set(&db.Flag.Float32, ff.Float32),
 					update.Set(&db.Flag.Price, ff.Price),
@@ -266,7 +266,7 @@ func TestUpdate(t *testing.T) {
 				}
 
 				aselect.HabitatId = nil
-				err = goent.Update(db.Animal).Sets(update.Set(&db.Animal.HabitatId, aselect.HabitatId)).
+				err = goent.Update(db.Animal).Set(update.Set(&db.Animal.HabitatId, aselect.HabitatId)).
 					Where(where.Equals(&db.Animal.Id, aselect.Id))
 				if err != nil {
 					t.Fatalf("Expected a update, got error: %v", err)
@@ -444,7 +444,7 @@ func TestUpdate(t *testing.T) {
 				if len(pj) != 2 {
 					t.Errorf("Expected %v, got : %v", 2, len(pj))
 				}
-				err = goent.Update(db.PersonJobTitle).OnTransaction(tx).Sets(update.Set(&db.PersonJobTitle.JobTitleId, jobs[0].Id)).
+				err = goent.Update(db.PersonJobTitle).OnTransaction(tx).Set(update.Set(&db.PersonJobTitle.JobTitleId, jobs[0].Id)).
 					Where(
 						where.And(
 							where.Equals(&db.PersonJobTitle.PersonId, persons[2].Id),
@@ -650,7 +650,7 @@ func TestUpdate(t *testing.T) {
 					t.Errorf("Expected %v, got : %v", 2, len(pj))
 				}
 
-				err = goent.Update(db.PersonJobTitle).Sets(update.Set(&db.PersonJobTitle.JobTitleId, jobs[0].Id)).Where(
+				err = goent.Update(db.PersonJobTitle).Set(update.Set(&db.PersonJobTitle.JobTitleId, jobs[0].Id)).Where(
 					where.And(where.Equals(&db.PersonJobTitle.PersonId, persons[2].Id), where.Equals(&db.PersonJobTitle.JobTitleId, jobs[1].Id)))
 				if err != nil {
 					t.Fatalf("Expected a update, got error: %v", err)
@@ -684,7 +684,7 @@ func TestUpdate(t *testing.T) {
 				}
 				ctx, cancel := context.WithCancel(context.Background())
 				cancel()
-				err = goent.UpdateContext(ctx, db.Animal).Sets(update.Set(&db.Animal.Name, a.Name)).Where(where.Equals(&db.Animal.Id, a.Id))
+				err = goent.UpdateContext(ctx, db.Animal).Set(update.Set(&db.Animal.Name, a.Name)).Where(where.Equals(&db.Animal.Id, a.Id))
 				if !errors.Is(err, context.Canceled) {
 					t.Errorf("Expected a context.Canceled, got error: %v", err)
 				}
@@ -698,7 +698,7 @@ func TestUpdate(t *testing.T) {
 				}
 				ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond*1)
 				defer cancel()
-				err = goent.UpdateContext(ctx, db.Animal).Sets(update.Set(&db.Animal.Name, a.Name)).Where(where.Equals(&db.Animal.Id, a.Id))
+				err = goent.UpdateContext(ctx, db.Animal).Set(update.Set(&db.Animal.Name, a.Name)).Where(where.Equals(&db.Animal.Id, a.Id))
 				if !errors.Is(err, context.DeadlineExceeded) {
 					t.Errorf("Expected a context.DeadlineExceeded, got error: %v", err)
 				}

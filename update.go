@@ -2,7 +2,9 @@ package goent
 
 import (
 	"context"
+	"fmt"
 	"reflect"
+	"slices"
 
 	"github.com/azhai/goent/enum"
 	"github.com/azhai/goent/model"
@@ -75,7 +77,7 @@ func (s StateSave[T]) OnTransaction(tx model.Transaction) StateSave[T] {
 }
 
 func (s StateSave[T]) One(v T) error {
-	argsSave := getArgsSave(addrMap.mapField, s.table.Model, v)
+	argsSave := getArgsSave(addrMap.mapField, s.table.Model, v, nil, s.table.Ignore)
 	// skip queries on empty models
 	if argsSave.skip {
 		return nil
@@ -83,6 +85,31 @@ func (s StateSave[T]) One(v T) error {
 
 	s.update.builder.sets = argsSave.sets
 	return s.update.Where(operations(argsSave.argsWhere, argsSave.valuesWhere))
+}
+
+// Sets receives a map of attribute names and values for update
+func (s StateSave[T]) Sets(changes map[string]any) StateSave[T] {
+	for key, val := range changes {
+		if fld := s.table.FieldInfo(key); fld != nil {
+			newbie := set{attribute: fld, value: val}
+			s.update.builder.sets = append(s.update.builder.sets, newbie)
+		}
+	}
+	return s
+}
+
+// ByPK receives primary key values as arguments for update
+func (s StateSave[T]) ByPK(args ...any) error {
+	if len(s.update.builder.sets) == 0 {
+		return fmt.Errorf("no sets for update")
+	}
+	var pkeys []any
+	for _, k := range s.table.pkeys {
+		if v, ok := s.table.FieldAddr(k); ok {
+			pkeys = append(pkeys, v.Interface())
+		}
+	}
+	return s.update.Where(operations(pkeys, args))
 }
 
 type StateUpdate[T any] struct {
@@ -103,7 +130,7 @@ type StateUpdate[T any] struct {
 //
 //	// update only the attribute JobTitleID from PersonJobTitle with the value 3
 //	err = goent.Update(db.PersonJobTitle).
-//	Sets(update.Set(&db.PersonJobTitle.JobTitleID, 3)).
+//	Sets(update.Sets(&db.PersonJobTitle.JobTitleID, 3)).
 //	Where(
 //		where.And(
 //			where.Equals(&db.PersonJobTitle.PersonID, 2),
@@ -112,7 +139,7 @@ type StateUpdate[T any] struct {
 //	)
 //
 //	// update all animals name to Cat
-//	goent.Update(db.Animal).Sets(update.Set(&db.Animal.Name, "Cat")).All()
+//	goent.Update(db.Animal).Sets(update.Sets(&db.Animal.Name, "Cat")).All()
 func Update[T any](table *T) StateUpdate[T] {
 	return UpdateContext(context.Background(), table)
 }
@@ -124,8 +151,8 @@ func UpdateContext[T any](ctx context.Context, _ *T) StateUpdate[T] {
 	return createUpdateState[T](ctx)
 }
 
-// Sets one or more arguments for update
-func (s StateUpdate[T]) Sets(sets ...model.Set) StateUpdate[T] {
+// Set one or more arguments for update
+func (s StateUpdate[T]) Set(sets ...model.Set) StateUpdate[T] {
 	for i := range sets {
 		attr := getArg(sets[i].Attribute, addrMap.mapField, nil)
 		newbie := set{attribute: attr, value: sets[i].Value}
@@ -146,7 +173,7 @@ func (s StateUpdate[T]) Sets(sets ...model.Set) StateUpdate[T] {
 //	defer tx.Rollback()
 //
 //	err = goent.Update(db.Animal).OnTransaction(tx).
-//	  		Sets(update.Set(&db.Animal.HabitatID, 44)).
+//	  		Sets(update.Sets(&db.Animal.HabitatID, 44)).
 //	  		Where(where.Equals(&db.Animal.ID, 2))
 //	if err != nil {
 //		// handler error
@@ -188,7 +215,7 @@ type argSave struct {
 	skip        bool
 }
 
-func getArgsSave[T any](addrMap map[uintptr]field, table *T, value T) argSave {
+func getArgsSave[T any](addrMap map[uintptr]field, table *T, value T, only, ignore []string) argSave {
 	if table == nil {
 		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
 	}
@@ -204,18 +231,30 @@ func getArgsSave[T any](addrMap map[uintptr]field, table *T, value T) argSave {
 	sets := make([]set, 0)
 	pksWhere, valuesWhere := make([]any, 0, valueOf.NumField()), make([]any, 0, valueOf.NumField())
 
-	var addr uintptr
+	fld, ok := field(nil), false
 	for i := 0; i < valueOf.NumField(); i++ {
-		if !valueOf.Field(i).IsZero() {
-			addr = uintptr(tableOf.Field(i).Addr().UnsafePointer())
-			if addrMap[addr] != nil {
-				if addrMap[addr].isPrimaryKey() {
-					pksWhere = append(pksWhere, tableOf.Field(i).Addr().Interface())
-					valuesWhere = append(valuesWhere, valueOf.Field(i).Interface())
-					continue
-				}
-				sets = append(sets, set{attribute: addrMap[addr], value: valueOf.Field(i).Interface()})
+		if valueOf.Field(i).IsZero() {
+			continue
+		}
+		fieldName := tableOf.Type().Field(i).Name
+		if len(only) > 0 { // only update fields, opposite ignore
+			if !slices.Contains(only, fieldName) {
+				continue
 			}
+		} else if slices.Contains(ignore, fieldName) {
+			continue
+		}
+
+		addr := uintptr(tableOf.Field(i).Addr().UnsafePointer())
+		if fld, ok = addrMap[addr]; !ok || fld == nil {
+			continue
+		}
+		if fld.isPrimaryKey() {
+			pksWhere = append(pksWhere, tableOf.Field(i).Addr().Interface())
+			valuesWhere = append(valuesWhere, valueOf.Field(i).Interface())
+		} else {
+			val := valueOf.Field(i).Interface()
+			sets = append(sets, set{attribute: fld, value: val})
 		}
 	}
 	if len(pksWhere) == 0 || len(valuesWhere) == 0 {

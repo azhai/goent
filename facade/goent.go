@@ -85,7 +85,7 @@ func newDbTarget(driver model.Driver, valueOf reflect.Value, dbId int) (*goent.D
 	dbTarget, tableId := new(goent.DB), 0
 	valueOf.Field(dbId).Set(reflect.ValueOf(dbTarget))
 
-	// set value for Fields
+	// set value for fields
 	for i := range dbId {
 		fieldOf := valueOf.Field(i)
 		if !fieldOf.IsNil() {
@@ -105,7 +105,7 @@ func newDbTarget(driver model.Driver, valueOf reflect.Value, dbId int) (*goent.D
 		}
 	}
 
-	// init Fields
+	// init fields
 	var mValue reflect.Value
 	for i := range dbId {
 		elem := valueOf.Field(i).Elem()

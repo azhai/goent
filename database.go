@@ -39,7 +39,7 @@ type DB struct {
 	driver model.Driver
 }
 
-// SetDriver Set the database driver.
+// SetDriver Sets the database driver.
 func (db *DB) SetDriver(driver model.Driver) {
 	db.driver = driver
 }

@@ -17,7 +17,7 @@ func newDbTarget(driver model.Driver, valueOf reflect.Value, dbId int) (*DB, err
 	dbTarget, tableId := new(DB), 0
 	valueOf.Field(dbId).Set(reflect.ValueOf(dbTarget))
 
-	// set value for Fields
+	// set value for fields
 	for i := range dbId {
 		fieldOf := valueOf.Field(i)
 		if !fieldOf.IsNil() {
@@ -49,12 +49,13 @@ func newDbTarget(driver model.Driver, valueOf reflect.Value, dbId int) (*DB, err
 		}
 	}
 
-	// init Fields
+	// init fields
 	for i := range dbId {
 		elem := valueOf.Field(i).Elem()
 		// Check if it's a facade.Table-like type and use the Model field
 		if elem.Type().NumField() > 0 {
-			if modelField, hasModel := elem.Type().FieldByName("Model"); hasModel && modelField.Type.Kind() == reflect.Ptr {
+			modelField, hasModel := elem.Type().FieldByName("Model")
+			if hasModel && modelField.Type.Kind() == reflect.Ptr {
 				// It's a Table-like type, use the Model field
 				elem = elem.FieldByName("Model").Elem()
 			}
@@ -271,7 +272,7 @@ func getPks(typeOf reflect.Type) []reflect.StructField {
 	var pks []reflect.StructField
 	pks = append(pks, fieldsByTags("pk", typeOf)...)
 
-	id, valid := getId(typeOf)
+	id, valid := utils.GetTableID(typeOf)
 	isSameName := func(f reflect.StructField) bool {
 		return f.Name == id.Name
 	}
@@ -331,27 +332,27 @@ func checkAllFields(valueOf reflect.Value, table string) bool {
 }
 
 func createRelation(b body, createMany RelationFunc, createOne RelationFunc) any {
-	fieldByName := b.tables.FieldByName(b.tableName).Elem()
-	if !fieldByName.IsValid() {
+	fieldOf := utils.GetTableModel(b.tables.FieldByName(b.tableName)).Elem()
+	if !fieldOf.IsValid() {
 		return nil
 	}
 	typeName := b.typeOf.Name()
-	if checkAllFields(fieldByName, typeName) {
-		return createMany(b, fieldByName.Type()) // M2O
+	if checkAllFields(fieldOf, typeName) {
+		return createMany(b, fieldOf.Type()) // M2O
 	}
 	if table := strings.ReplaceAll(typeName, b.tableName, ""); table != typeName {
-		valueOf := b.tables.FieldByName(table)
+		valueOf := utils.GetTableModel(b.tables.FieldByName(table))
 		if valueOf.IsValid() && !valueOf.IsZero() {
 			if checkAllFields(valueOf.Elem(), b.tableName) {
 				return createMany(b, valueOf.Elem().Type()) // M2M
 			}
 		}
 	}
-	return createOne(b, fieldByName.Type()) // O2M/O2O
+	return createOne(b, fieldOf.Type()) // O2M/O2O
 }
 
 func primaryKeys(str reflect.Type) (pks []reflect.StructField) {
-	field, exists := getId(str)
+	field, exists := utils.GetTableID(str)
 	if exists {
 		pks := make([]reflect.StructField, 1)
 		pks[0] = field
@@ -385,23 +386,46 @@ func getTagValue(FieldTag string, subTag string) string {
 }
 
 func foreignKeyNamePattern(dbTables reflect.Value, fieldName string) (table, suffix string) {
-	for r := 1; r <= len(fieldName); r++ {
+	var pks []reflect.StructField
+	tableNames := utils.GetFieldNames(dbTables.Type())
+	for r := 1; r < len(fieldName); r++ {
 		table, suffix = fieldName[:r], fieldName[r:]
-		if !dbTables.FieldByName(table).IsValid() {
+		if !slices.Contains(tableNames, table) {
 			continue
 		}
-		pks := getPks(dbTables.FieldByName(table).Elem().Type())
-		for c := 1; c <= len(suffix); c++ {
-			pkName := suffix[:c]
-			isSameName := func(f reflect.StructField) bool {
-				return f.Name == pkName
-			}
-			if slices.ContainsFunc(pks, isSameName) {
-				return table, pkName
-			}
+		foreign := utils.GetTableModel(dbTables.FieldByName(table))
+		if pks = getPks(foreign.Elem().Type()); len(pks) == 0 {
+			continue
+		}
+		pkName := compareForeignKey(suffix, pks)
+		if pkName != "" {
+			return table, pkName
 		}
 	}
 	return "", ""
+}
+
+func compareForeignKey(suffix string, pks []reflect.StructField) string {
+	if len(pks) == 0 {
+		return ""
+	}
+	if len(pks) == 1 {
+		pkName := pks[0].Name
+		if strings.HasPrefix(suffix, pkName) {
+			return pkName
+		}
+		return ""
+	}
+	for c := 1; c <= len(suffix); c++ {
+		pkName := suffix[:c]
+		isSameName := func(f reflect.StructField) bool {
+			return f.Name == pkName
+		}
+		if slices.ContainsFunc(pks, isSameName) {
+			return pkName
+		}
+	}
+	return ""
 }
 
 func helperAttribute(b body) error {
@@ -433,10 +457,4 @@ func helperAttribute(b body) error {
 		}
 	}
 	return nil
-}
-
-func getId(typeOf reflect.Type) (reflect.StructField, bool) {
-	return typeOf.FieldByNameFunc(func(s string) bool {
-		return strings.ToUpper(s) == "ID"
-	})
 }

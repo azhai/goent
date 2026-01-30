@@ -20,11 +20,11 @@ func (m Migration) AutoMigrate() error {
 }
 
 func (m Migration) AutoMigrateContext(ctx context.Context) error {
-	data, err := MigrateFrom(m.dbTarget, m.db.driver)
+	mig, err := MigrateFrom(m.dbTarget, m.db.driver)
 	if err != nil {
 		return err
 	}
-	return m.db.driver.MigrateContext(ctx, data)
+	return m.db.driver.MigrateContext(ctx, mig)
 }
 
 func (m Migration) OnSchema(schema string) SchemaMigration {

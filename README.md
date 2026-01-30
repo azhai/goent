@@ -105,45 +105,32 @@ go get github.com/azhai/goent
 As any database/sql support in go, you have to get a specific driver for your database, check [Available Drivers](#available-drivers)
 
 ## Available Drivers
-### PostgreSQL
+* PostgreSQL
+* SQLite
 ```
-go get github.com/azhai/goent/drivers/pgsql
+go get github.com/azhai/goent
 ```
+
 #### Usage
 ```go
+import (
+	"github.com/azhai/goent"
+	"github.com/azhai/goent/facade"
+)
+
 type Animal struct {
 	// animal fields
 }
 
 type Database struct {
-	Animal         *Animal
+	Animal         *goent.Table[Animal]
 	*goent.DB
 }
 
 dsn := "user=postgres password=postgres host=localhost port=5432 database=postgres"
-db, err := goent.Open[Database](pgsql.Open(dsn, pgsql.NewConfig(pgsql.Config{})))
+db, err := facade.QuickOpen[Database]("pgsql", dsn, "")
+// db, err := facade.QuickOpen[Database]("sqlite", "goent.db", "stdout")
 ```
-
-### SQLite
-```
-go get github.com/azhai/goent/drivers/sqlite
-```
-
-#### Usage
-```go
-type Animal struct {
-	// animal fields
-}
-
-type Database struct {
-	Animal         *Animal
-	*goent.DB
-}
-
-db, err := goent.Open[Database](sqlite.Open("goent.db", sqlite.NewConfig(sqlite.Config{})))
-```
-
-Checkout the exclusive features of sqlite on [goe-sqlite](https://github.com/azhai/goent/drivers/sqlite)
 
 ## Quick Start
 ```go
@@ -155,6 +142,7 @@ import (
 	"github.com/azhai/goent"
 	"github.com/azhai/goent/drivers"
 	"github.com/azhai/goent/drivers/sqlite"
+	"github.com/azhai/facade"
 )
 
 type Animal struct {
@@ -164,12 +152,12 @@ type Animal struct {
 }
 
 type Database struct {
-	Animal *Animal
+	Animal *goent.Table[Animal]
 	*goent.DB
 }
 
 func main() {
-	db, err := drivers.QuickOpen[Database]("sqlite", "goent.db", "")
+	db, err := facade.QuickOpen[Database]("sqlite", "goent.db", "")
 	if err != nil {
 		panic(err)
 	}
@@ -180,7 +168,7 @@ func main() {
 		panic(err)
 	}
 
-	err = goent.Delete(db.Animal).All()
+	err = db.Animal.Delete().All()
 	if err != nil {
 		panic(err)
 	}
@@ -195,12 +183,12 @@ func main() {
 		{Name: "Bird", Emoji: "🐦"},
 	}
 
-	err = goent.Insert(db.Animal).All(animals)
+	err = db.Animal.Insert().All(animals)
 	if err != nil {
 		panic(err)
 	}
 
-	animals, err = goent.List(db.Animal).AsSlice()
+	animals, err = db.Animal.List().AsSlice()
 	if err != nil {
 		panic(err)
 	}
@@ -233,9 +221,9 @@ To run the quick start follow this steps:
 ## Database
 ```go
 type Database struct {
-	User    	*User
-	Role    	*Role
-	UserLog 	*UserLog
+	User    	*goent.Table[User]
+	Role    	*goent.Table[Role]
+	UserLog 	*goent.Table[UserLog]
 	*goent.DB
 }
 ```
@@ -326,7 +314,7 @@ A default value is used when the field is inserted with no value.
 
 ```go
 // CreatedAt will have the default value
-err = goent.Insert(db.User).One(&User{Name: "Rose"})
+err = db.User.Insert().One(&User{Name: "Rose"})
 
 if err != nil {
 	// handler error
@@ -603,14 +591,14 @@ If you don't need the database connection anymore, call `goent.Close` to ensure 
 
 ```go
 type Database struct {
-	Animal         *Animal
-	AnimalFood     *AnimalFood
-	Food           *Food
+	Animal         *goent.Table[Animal]
+	AnimalFood     *goent.Table[AnimalFood]
+	Food           *goent.Table[Food]
 	*goent.DB
 }
 
 dsn := "user=postgres password=postgres host=localhost port=5432 database=postgres"
-db, err := drivers.QuickOpen[Database]("pgsql", dsn, "")
+db, err := facade.QuickOpen[Database]("pgsql", dsn, "")
 
 if err != nil {
 	// handler error
@@ -641,7 +629,7 @@ type Select struct {
 }
 
 type Database struct {
-	Select         *Select
+	Select         *goent.Table[Select]
 	*goent.DB
 }
 
@@ -703,13 +691,13 @@ go.mod
 Find is used when you want to return a single result.
 ```go
 // one primary key
-animal, err = goent.Find(db.Animal).ByValue(Animal{ID: 2})
+animal, err = db.Animal.Find().ByValue(Animal{ID: 2})
 
 // two primary keys
-animalFood, err = goent.Find(db.AnimalFood).ByValue(AnimalFood{IDAnimal: 3, IDFood: 2})
+animalFood, err = db.AnimalFood.Find().ByValue(AnimalFood{IDAnimal: 3, IDFood: 2})
 
 // find record by value, if have more than one it will returns the first
-cat, err = goent.Find(db.Animal).ByValue(Animal{Name: "Cat"})
+cat, err = db.Animal.Find().ByValue(Animal{Name: "Cat"})
 ```
 
 > [!TIP]
@@ -722,13 +710,13 @@ List has support for [OrderBy](#orderby), [Pagination](#pagination) and [Join](#
 
 ```go
 // list all animals
-animals, err = goent.List(db.Animal).AsSlice()
+animals, err = db.Animal.List().AsSlice()
 
 // list the animals with name "Cat", ID "3" and IDHabitat "4"
-animals, err = goent.List(db.Animal).Filter(Animal{Name: "Cat", ID: 3, IDHabitat: 4}).AsSlice()
+animals, err = db.Animal.List().Filter(Animal{Name: "Cat", ID: 3, IDHabitat: 4}).AsSlice()
 
 // when using % on filter, goe makes a like operation
-animals, err = goent.List(db.Animal).Filter(Animal{Name: "%Cat%"}).AsSlice()
+animals, err = db.Animal.List().Filter(Animal{Name: "%Cat%"}).AsSlice()
 ```
 
 > [!TIP]
@@ -739,7 +727,7 @@ animals, err = goent.List(db.Animal).Filter(Animal{Name: "%Cat%"}).AsSlice()
 
 Iterate over the rows
 ```go
-for row, err := range goent.List(db.Animal).Rows() {
+for row, err := range db.Animal.List().Rows() {
 	// iterator rows
  }
 ```
@@ -779,7 +767,7 @@ For specific field is used a new struct, each new field guards the reference for
 ### Where
 For where, goe uses a sub-package where, on where package you have all the goe available where operations.
 ```go
-animals, err = goent.List(db.Animal).Where(where.Equals(&db.Animal.ID, 2)).AsSlice()
+animals, err = db.Animal.List().Where(where.Equals(&db.Animal.ID, 2)).AsSlice()
 
 if err != nil {
 	//handler error
@@ -789,7 +777,7 @@ if err != nil {
 It's possible to group a list of where operations inside Where()
 
 ```go
-animals, err = goent.List(db.Animal).Where(
+animals, err = db.Animal.List().Where(
 					where.And(
 						where.LessEquals(&db.Animal.ID, 2), 
 						where.In(&db.Animal.Name, []string{"Cat", "Dog"}),
@@ -803,7 +791,7 @@ if err != nil {
 
 You can use a if to call a where operation only if it's match
 ```go
-selectQuery := goent.List(db.Animal).Where(where.LessEquals(&db.Animal.ID, 30))
+selectQuery := db.Animal.List().Where(where.LessEquals(&db.Animal.ID, 30))
 
 if filter.In {
 	selectQuery = selectQuery.Where(
@@ -833,7 +821,7 @@ querySelect := goent.Select[any](&db.Animal.Name).
 					AsQuery()
 
 // where in with another query
-a, err := goent.List(db.Animal).Where(where.In(&db.Animal.Name, querySelect)).AsSlice()
+a, err := db.Animal.List().Where(where.In(&db.Animal.Name, querySelect)).AsSlice()
 
 if err != nil {
 	//handler error
@@ -844,7 +832,7 @@ On where, GOE supports operations on two columns, all where operations that have
 In the example, the operator greater (>) on the columns Score and Minimum is used to return all exams that have a score greater than the minimum.
 
 ```go
-err = goent.List(db.Exam).
+err = db.Exam.List().
 	Where(where.GreaterArg[float32](&db.Exam.Score, &db.Exam.Minimum)).AsSlice()
 ```
 
@@ -857,7 +845,7 @@ Filter creates where operations on non-zero values, so if you want a dynamic whe
 
 ```go
 var s []string
-a, err = goent.List(db.Animal).
+a, err = db.Animal.List().
 	Filter(
 		where.And(where.In(&db.Animal.Name, s),
 			where.And(where.Equals(&db.Animal.Id, 0),
@@ -886,7 +874,7 @@ Match creates where operations on non-zero values using the query model. Match u
 
 ```go
 // SELECT * FROM "status" where UPPER("status"."name") LIKE '%A%'
-result, err := goent.List(db.Status).Match(Status{Name: "a"}).AsSlice()
+result, err := db.Status.List().Match(Status{Name: "a"}).AsSlice()
 if err != nil {
 	//handler error
 }
@@ -924,7 +912,7 @@ On join, goe uses a sub-package join, on join package you have all the goe avail
 
 For the join operations, you need to specify the type, this make the joins operations more safe. So if you change a type from a field, the compiler will throw a error.
 ```go
-animals, err = goent.List(db.Animal).
+animals, err = db.Animal.List().
 				Join(&db.Animal.ID, &db.AnimalFood.IDAnimal).
 				Join(&db.Food.ID, &db.AnimalFood.IDFood).
 			   AsSlice()
@@ -943,7 +931,7 @@ For OrderBy you need to pass a reference to a mapped database field.
 It's possible to OrderBy desc and asc. List and Select has support for OrderBy queries.
 #### List
 ```go
-animals, err = goent.List(db.Animal).OrderByDesc(&db.Animal.ID).AsSlice()
+animals, err = db.Animal.List().OrderByDesc(&db.Animal.ID).AsSlice()
 
 if err != nil {
 	//handler error
@@ -951,7 +939,7 @@ if err != nil {
 ```
 #### Select
 ```go
-animals, err = goent.List(db.Animal).OrderByAsc(&db.Animal.ID).AsSlice()
+animals, err = db.Animal.List().OrderByAsc(&db.Animal.ID).AsSlice()
 
 if err != nil {
 	//handler error
@@ -983,7 +971,7 @@ For pagination, it's possible to run on Select and List functions
 #### Select Pagination
 ```go
 // page 1 of size 10
-page, err = goent.List(db.Animal).AsPagination(1, 10)
+page, err = db.Animal.List().AsPagination(1, 10)
 
 if err != nil {
 	//handler error
@@ -993,7 +981,7 @@ if err != nil {
 #### List Pagination
 ```go
 // page 1 of size 10
-page, err = goent.List(db.Animal).AsPagination(1, 10)
+page, err = db.Animal.List().AsPagination(1, 10)
 
 if err != nil {
 	//handler error
@@ -1008,16 +996,17 @@ if err != nil {
 For aggregates goe uses a sub-package aggregate, on aggregate package you have all the goe available aggregates.
 
 ```go
-result, err := goent.Select[struct {
-					Count int64
-				}](aggregate.Count(&db.Animal.ID)).AsSlice()
-
-if err != nil {
-	// handler error
-}
-
+// result, err := goent.Select[struct {
+// 					Count int64
+// 				}](aggregate.Count(&db.Animal.ID)).AsSlice()
+//
+// if err != nil { // handler error
+// }
+//
 // count value as int64
-result[0].Count.Value
+//  result[0].Count.Value
+
+count, err := db.Animal.Count(&db.Animal.ID) // (int64, error)
 ```
 
 [Back to Contents](#content)
@@ -1025,20 +1014,22 @@ result[0].Count.Value
 For functions goe uses a sub-package function, on function package you have all the goe available functions. 
 
 ```go
-for row, err := range goent.Select[struct {
-					UpperName string
-				}](function.ToUpper(&db.Animal.Name)).Rows() {
-					if err != nil {
-						//handler error
-					}
-					//function result value
-					row.UpperName.Value
-				}
+// for row, err := range goent.Select[struct {
+// 					UpperName string
+// 				}](function.ToUpper(&db.Animal.Name)).Rows() {
+// 					if err != nil {
+// 						//handler error
+// 					}
+// 					//function result value
+// 					row.UpperName.Value
+// 				}
+
+names, err := db.Animal.ToUpper(&db.Animal.Name) // ([]string, error)
 ```
 
 Functions can be used inside where.
 ```go
-animals, err = goent.List(db.Animal).
+animals, err = db.Animal.List().
 Where(
 	where.Like(function.ToUpper(&db.Animal.Name), "%CAT%")
 ).AsSlice()
@@ -1052,7 +1043,7 @@ if err != nil {
 > where like expected a second argument always as string.
 
 ```go
-animals, err = goent.List(db.Animal).
+animals, err = db.Animal.List().
 			   Where(
 					where.Equals(function.ToUpper(&db.Animal.Name), function.Argument("CAT")),
 			   ).AsSlice()
@@ -1072,7 +1063,7 @@ On Insert if the primary key value is auto-increment, the new ID will be stored 
 ### Insert One
 ```go
 a := Animal{Name: "Cat", Emoji: "🐘"}
-err = goent.Insert(db.Animal).One(&a)
+err = db.Animal.Insert().One(&a)
 
 if err != nil {
 	//handler error
@@ -1093,7 +1084,7 @@ foods := []Food{
 		{Name: "Hotdog", Emoji: "🌭"},
 		{Name: "Cookie", Emoji: "🍪"},
 	}
-err = goent.Insert(db.Food).All(foods)
+err = db.Food.Insert().All(foods)
 
 if err != nil {
 	//handler error
@@ -1113,7 +1104,11 @@ a := Animal{ID: 2}
 a.Name = "Update Cat"
 
 // update animal of id 2
-err = goent.Save(db.Animal).One(a)
+err = db.Animal.Save().One(a)
+changes := map[string]any{
+	"name": a.Name,
+}
+err = db.Animal.Save().Sets(changes).ByPk(a.ID)
 
 if err != nil {
 	//handler error
@@ -1132,8 +1127,8 @@ Update with set uses update sub-package. This is used for more complex updates, 
 a := Animal{ID: 2}
 
 // a.IDHabitat is nil, so is ignored by Save
-err = goent.Update(db.Animal).
-	  Sets(update.Set(&db.Animal.IDHabitat, a.IDHabitat)).
+err = db.Animal.Update().
+	  Set(update.Set(&db.Animal.IDHabitat, a.IDHabitat)).
 	  Where(where.Equals(&db.Animal.ID, a.ID))
 
 if err != nil {
@@ -1155,7 +1150,7 @@ Check out the [Where](#where) section for more information about where operation
 Remove is used for remove only one record by primary key
 ```go
 // remove animal of id 2
-err = goent.Remove(db.Animal).ByValue(Animal{ID: 2})
+err = db.Animal.Remove().ByValue(Animal{ID: 2})
 
 if err != nil {
 	//handler error
@@ -1170,7 +1165,7 @@ if err != nil {
 ### Delete Batch
 Delete all records from Animal
 ```go
-err = goent.Delete(db.Animal).All()
+err = db.Animal.Delete().All()
 
 if err != nil {
 	//handler error
@@ -1179,7 +1174,7 @@ if err != nil {
 
 Delete all matched records
 ```go
-err = goent.Delete(db.Animal).Where(where.Like(&db.Animal.Name, "%Cat%"))
+err = db.Animal.Delete().Where(where.Like(&db.Animal.Name, "%Cat%"))
 
 if err != nil {
 	//handler error
@@ -1205,14 +1200,14 @@ Check out the [Where](#where) section for more information about where operation
 		cat := Animal{
 			Name: "Cat",
 		}
-		if err = goent.Insert(db.Animal).OnTransaction(tx).One(&cat); err != nil {
+		if err = db.Animal.Insert().OnTransaction(tx).One(&cat); err != nil {
 			return err // try a rollback
 		}
 
 		dog := Animal{
 			Name: "Dog",
 		}
-		if err = goent.Insert(db.Animal).OnTransaction(tx).One(&dog); err != nil {
+		if err = db.Animal.Insert().OnTransaction(tx).One(&dog); err != nil {
 			return err // try a rollback
 		}
 		return nil // try a commit
@@ -1230,7 +1225,7 @@ err = db.BeginTransaction(func(tx goent.Transaction) error {
 	cat := Animal{
 		Name: "Cat",
 	}
-	if err = goent.Insert(db.Animal).OnTransaction(tx).One(&cat); err != nil {
+	if err = db.Animal.Insert().OnTransaction(tx).One(&cat); err != nil {
 		return err // try a rollback
 	}
 
@@ -1238,7 +1233,7 @@ err = db.BeginTransaction(func(tx goent.Transaction) error {
 		meat := Food{
 			Name: "meat",
 		}
-		if err := goent.Insert(db.Food).OnTransaction(tx2).One(&meat); err != nil {
+		if err := db.Food.Insert().OnTransaction(tx2).One(&meat); err != nil {
 			return err // try a rollback in nested transaction
 		}
 		return nil // try a commit in nested transaction
@@ -1247,7 +1242,7 @@ err = db.BeginTransaction(func(tx goent.Transaction) error {
 	dog := Animal{
 		Name: "Dog",
 	}
-	if err = goent.Insert(db.Animal).OnTransaction(tx).One(&dog); err != nil {
+	if err = db.Animal.Insert().OnTransaction(tx).One(&dog); err != nil {
 		return err // try a rollback
 	}
 	return nil // try a commit

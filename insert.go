@@ -10,8 +10,8 @@ import (
 )
 
 type StateInsert[T any] struct {
-	conn    model.Connection
 	table   *Table[T]
+	conn    model.Connection
 	builder builder
 	ctx     context.Context
 }

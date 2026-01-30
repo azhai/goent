@@ -5,17 +5,18 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/azhai/goent/query/aggregate"
-	"github.com/azhai/goent/query/function"
 	"github.com/azhai/goent/utils"
 )
 
 type Table[T any] struct {
-	Model    *T
-	fields   *utils.CoMap
-	exists   sync.Map
-	deleteds sync.Map
-	newbies  []*T
+	Model     *T
+	TableName string
+	Ignore    []string
+	pkeys     []string
+	fields    *utils.CoMap
+	exists    sync.Map
+	removes   sync.Map
+	newbies   []*T
 }
 
 // ------------------------------
@@ -28,10 +29,10 @@ func NewTable[T any]() *Table[T] {
 
 func NewTableModel[T any](m *T) *Table[T] {
 	return &Table[T]{
-		Model:    m,
-		fields:   utils.NewCoMap(),
-		exists:   sync.Map{},
-		deleteds: sync.Map{},
+		Model:   m,
+		fields:  utils.NewCoMap(),
+		exists:  sync.Map{},
+		removes: sync.Map{},
 	}
 }
 
@@ -40,6 +41,25 @@ func NewTableReflect(typeOf reflect.Type) reflect.Value {
 	modelType := tb.Elem().FieldByName("Model").Type().Elem()
 	tb.Elem().FieldByName("Model").Set(reflect.New(modelType))
 	return tb
+}
+
+func (t *Table[T]) PrimaryNames() []string {
+	return t.pkeys
+}
+
+func (t *Table[T]) FieldAddr(name string) (reflect.Value, bool) {
+	if val, ok := t.fields.Get(name); ok {
+		return val.(reflect.Value), ok
+	}
+	return reflect.Value{}, false
+}
+
+func (t *Table[T]) FieldInfo(name string) field {
+	if v, ok := t.FieldAddr(name); ok {
+		addr := uintptr(v.UnsafePointer())
+		return addrMap.get(addr)
+	}
+	return nil
 }
 
 // ------------------------------
@@ -118,40 +138,24 @@ func (t *Table[T]) FindContext(ctx context.Context) StateFind[T] {
 // Count ...
 // ------------------------------
 
-type ResultCount struct {
-	Count int64
-}
-
 func (t *Table[T]) Count(col any) (int64, error) {
 	return t.CountContext(context.Background(), col)
 }
 
 func (t *Table[T]) CountContext(ctx context.Context, col any) (int64, error) {
-	result, err := SelectContext[ResultCount](ctx, aggregate.Count(col)).AsOne()
-	if err != nil {
-		return 0, err
-	}
-	return result.Count, nil
+	return CountContext(ctx, col)
 }
 
 // ------------------------------
 // Max/Min/Sum/Avg ...
 // ------------------------------
 
-type ResultAggr struct {
-	Aggr float64
-}
-
 func (t *Table[T]) Max(col any) (float64, error) {
 	return t.MaxContext(context.Background(), col)
 }
 
 func (t *Table[T]) MaxContext(ctx context.Context, col any) (float64, error) {
-	result, err := SelectContext[ResultAggr](ctx, aggregate.Max(col)).AsOne()
-	if err != nil {
-		return 0, err
-	}
-	return result.Aggr, nil
+	return MaxContext(ctx, col)
 }
 
 func (t *Table[T]) Min(col any) (float64, error) {
@@ -159,11 +163,7 @@ func (t *Table[T]) Min(col any) (float64, error) {
 }
 
 func (t *Table[T]) MinContext(ctx context.Context, col any) (float64, error) {
-	result, err := SelectContext[ResultAggr](ctx, aggregate.Min(col)).AsOne()
-	if err != nil {
-		return 0, err
-	}
-	return result.Aggr, nil
+	return MinContext(ctx, col)
 }
 
 func (t *Table[T]) Sum(col any) (float64, error) {
@@ -171,11 +171,7 @@ func (t *Table[T]) Sum(col any) (float64, error) {
 }
 
 func (t *Table[T]) SumContext(ctx context.Context, col any) (float64, error) {
-	result, err := SelectContext[ResultAggr](ctx, aggregate.Sum(col)).AsOne()
-	if err != nil {
-		return 0, err
-	}
-	return result.Aggr, nil
+	return SumContext(ctx, col)
 }
 
 func (t *Table[T]) Avg(col any) (float64, error) {
@@ -183,39 +179,25 @@ func (t *Table[T]) Avg(col any) (float64, error) {
 }
 
 func (t *Table[T]) AvgContext(ctx context.Context, col any) (float64, error) {
-	result, err := SelectContext[ResultAggr](ctx, aggregate.Avg(col)).AsOne()
-	if err != nil {
-		return 0, err
-	}
-	return result.Aggr, nil
+	return AvgContext(ctx, col)
 }
 
 // ------------------------------
 // ToUpper/ToLower ...
 // ------------------------------
 
-type FuncString *function.Function[string]
-
-func (t *Table[T]) ToUpper(col *string) (string, error) {
+func (t *Table[T]) ToUpper(col *string) ([]string, error) {
 	return t.ToUpperContext(context.Background(), col)
 }
 
-func (t *Table[T]) ToUpperContext(ctx context.Context, col *string) (string, error) {
-	result, err := SelectContext[FuncString](ctx, function.ToUpper(col)).AsOne()
-	if err != nil {
-		return "", err
-	}
-	return result.Value, nil
+func (t *Table[T]) ToUpperContext(ctx context.Context, col *string) (res []string, err error) {
+	return ToUpperContext(ctx, col)
 }
 
-func (t *Table[T]) ToLower(col *string) (string, error) {
+func (t *Table[T]) ToLower(col *string) ([]string, error) {
 	return t.ToLowerContext(context.Background(), col)
 }
 
-func (t *Table[T]) ToLowerContext(ctx context.Context, col *string) (string, error) {
-	result, err := SelectContext[FuncString](ctx, function.ToLower(col)).AsOne()
-	if err != nil {
-		return "", err
-	}
-	return result.Value, nil
+func (t *Table[T]) ToLowerContext(ctx context.Context, col *string) (res []string, err error) {
+	return ToLowerContext(ctx, col)
 }

@@ -42,10 +42,7 @@ func newDbMigrator(db any, driver model.Driver) *dbMigrator {
 	}
 
 	for i := range count {
-		fieldOf := valueOf.Field(i)
-		if strings.HasPrefix(fieldOf.Type().Elem().Name(), "Table") {
-			fieldOf = fieldOf.Elem().FieldByName("Model")
-		}
+		fieldOf := utils.GetTableModel(valueOf.Field(i))
 		desc := &fieldDesc{Field: fieldOf}
 		elem := desc.Field.Elem()
 
@@ -55,13 +52,14 @@ func newDbMigrator(db any, driver model.Driver) *dbMigrator {
 		if desc.HasSchema {
 			desc.SchemaName = driver.KeywordHandler(utils.ColumnNamePattern(desc.FieldName))
 			for f := range elem.NumField() {
-				schElem := elem.Field(f).Elem()
+				schElem := utils.GetTableModel(elem.Field(f).Elem())
 				dm.schemasMap[schElem.Type().Name()] = &desc.SchemaName
 			}
 		}
 		dm.fieldDescs[i] = desc
 	}
 
+	var tm *model.TableMigrate
 	for i := range count {
 		desc := dm.fieldDescs[i]
 		elem := desc.Field.Elem()
@@ -69,33 +67,37 @@ func newDbMigrator(db any, driver model.Driver) *dbMigrator {
 		if desc.HasSchema {
 			dm.Schemas = append(dm.Schemas, desc.SchemaName)
 			for f := range elem.NumField() {
-				tableElem := elem.Field(f).Elem()
-				dm.Error = dm.typeField(valueOf, tableElem, driver, &desc.SchemaName)
+				fieldOf := elem.Field(f).Elem()
+				tableElem := utils.GetTableModel(fieldOf)
+				tm, dm.Error = dm.typeField(valueOf, tableElem, driver, &desc.SchemaName)
 				if dm.Error != nil {
 					return dm
 				}
+				if utils.IsTableModel(fieldOf) {
+					_ = setTableFields(fieldOf, tm)
+				}
 			}
 		} else {
-			dm.Error = dm.typeField(valueOf, elem, driver, nil)
+			tm, dm.Error = dm.typeField(valueOf, elem, driver, nil)
 			if dm.Error != nil {
 				return dm
+			}
+			fieldOf := valueOf.Field(i)
+			if utils.IsTableModel(fieldOf) {
+				_ = setTableFields(fieldOf.Elem(), tm)
 			}
 		}
 
 	}
 
-	// fmt.Printf("dm: %#v\n\n", dm.Migrator)
-	// for name, table := range dm.Migrator.Tables {
-	// 	fmt.Printf("table: %s\n%#v\n\n", name, table)
-	// }
 	return dm
 }
 
-func (dm *dbMigrator) typeField(tables reflect.Value, elem reflect.Value, driver model.Driver, schema *string) error {
+func (dm *dbMigrator) typeField(tables reflect.Value, elem reflect.Value, driver model.Driver, schema *string) (*model.TableMigrate, error) {
 	elemType := elem.Type()
 	pks, fieldNames, err := migratePk(elemType, driver)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	table := &model.TableMigrate{Schema: schema}
@@ -124,7 +126,7 @@ func (dm *dbMigrator) typeField(tables reflect.Value, elem reflect.Value, driver
 				schemasMap: dm.schemasMap,
 			}, helperAttributeMigrate)
 			if err != nil {
-				return err
+				return nil, err
 			}
 		case reflect.Struct:
 			err = handlerStruct(body{
@@ -140,7 +142,7 @@ func (dm *dbMigrator) typeField(tables reflect.Value, elem reflect.Value, driver
 				schemasMap: dm.schemasMap,
 			}, migrateAtt)
 			if err != nil {
-				return err
+				return nil, err
 			}
 		case reflect.Pointer:
 			err = helperAttributeMigrate(body{
@@ -158,7 +160,7 @@ func (dm *dbMigrator) typeField(tables reflect.Value, elem reflect.Value, driver
 				schemasMap: dm.schemasMap,
 			})
 			if err != nil {
-				return err
+				return nil, err
 			}
 		default:
 			err = helperAttributeMigrate(body{
@@ -175,7 +177,7 @@ func (dm *dbMigrator) typeField(tables reflect.Value, elem reflect.Value, driver
 				schemasMap: dm.schemasMap,
 			})
 			if err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
@@ -184,8 +186,41 @@ func (dm *dbMigrator) typeField(tables reflect.Value, elem reflect.Value, driver
 		table.PrimaryKeys = append(table.PrimaryKeys, *pk)
 	}
 
+	// fmt.Printf("Migrate: %s\n%#v\n%#v\n\n", table.Name, table.OneToSomes, table.ManyToSomes)
+
 	table.EscapingName = driver.KeywordHandler(table.Name)
 	dm.Tables[table.Name] = table
+	return table, nil
+}
+
+func setTableFields(elem reflect.Value, tm *model.TableMigrate) error {
+	if elem.Kind() == reflect.Ptr {
+		elem = elem.Elem()
+	}
+	if tableNameField := elem.FieldByName("TableName"); tableNameField.IsValid() {
+		tableNameField.SetString(tm.Name)
+	}
+	modelOf := utils.GetTableModel(elem.FieldByName("Model")).Elem()
+
+	var pks []string
+	fields := utils.NewCoMap()
+	for _, pk := range tm.PrimaryKeys {
+		pks = append(pks, pk.Name)
+		if f := modelOf.FieldByName(pk.FieldName); f.IsValid() {
+			fields.Set(pk.Name, f.Addr())
+		}
+	}
+	for _, attr := range tm.Attributes {
+		if f := modelOf.FieldByName(attr.FieldName); f.IsValid() {
+			fields.Set(attr.Name, f.Addr())
+		}
+	}
+	if pkeysField := elem.FieldByName("pkeys"); pkeysField.IsValid() {
+		pkeysField.Set(reflect.ValueOf(pks))
+	}
+	if fieldsField := elem.FieldByName("fields"); fieldsField.IsValid() {
+		fieldsField.Set(reflect.ValueOf(fields))
+	}
 	return nil
 }
 
@@ -320,6 +355,7 @@ func getIndexValue(valueTag string, tag string) string {
 func createMigratePk(attributeName string, autoIncrement bool, dataType, defaultTag string, driver model.Driver) *model.PrimaryKeyMigrate {
 	return &model.PrimaryKeyMigrate{
 		AttributeMigrate: model.AttributeMigrate{
+			FieldName:    attributeName,
 			Name:         utils.ColumnNamePattern(attributeName),
 			EscapingName: driver.KeywordHandler(utils.ColumnNamePattern(attributeName)),
 			DataType:     dataType,
@@ -331,6 +367,7 @@ func createMigratePk(attributeName string, autoIncrement bool, dataType, default
 
 func createMigrateAtt(attributeName string, dataType string, nullable bool, defaultValue string, driver model.Driver) model.AttributeMigrate {
 	return model.AttributeMigrate{
+		FieldName:    attributeName,
 		Name:         utils.ColumnNamePattern(attributeName),
 		EscapingName: driver.KeywordHandler(utils.ColumnNamePattern(attributeName)),
 		DataType:     dataType,
@@ -345,6 +382,8 @@ func helperAttributeMigrate(b body) error {
 	if table == "" {
 		return migrateAtt(b)
 	}
+	// fmt.Printf("\n# Foreign: %s, %s\n\n", table, prefix)
+
 	b.stringInfos = stringInfos{prefixName: prefix, tableName: table, fieldName: migField.Name}
 	rel := createRelation(b, createManyToSomeMigrate, createOneToSomeMigrate)
 	if rel == nil {
@@ -361,7 +400,7 @@ func helperAttributeMigrate(b body) error {
 		migTable.ManyToSomes = append(migTable.ManyToSomes, *v)
 	case *model.OneToSomeMigrate:
 		// if v == nil {
-		// 	if slices.Contains(b.Migration.fieldNames, b.Migration.field.Name) {
+		// 	if slices.Contains(b.migrate.fieldNames, b.migrate.field.Name) {
 		// 		return nil
 		// 	}
 		// 	return migrateAtt(b)

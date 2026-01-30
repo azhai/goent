@@ -1,82 +1,74 @@
 package main
 
 import (
-	"log"
+	"fmt"
 
 	"github.com/azhai/goent"
-	"github.com/azhai/goent/facade"
-	"github.com/go-fuego/fuego"
-	"github.com/go-fuego/fuego/option"
-	"github.com/go-fuego/fuego/param"
 )
 
-type Animal struct {
-	ID      int    `json:"id"`
-	Name    string `json:"name"`
-	Habitat string `json:"habitat"`
-	Food    string `json:"food"`
-	Emoji   string `json:"emoji"`
-}
-
-type Database struct {
-	Animal *goent.Table[Animal]
-	*goent.DB
-}
-
-type RequestAnimal struct {
-	Name    string `json:"name" validate:"required"`
-	Emoji   string `json:"emoji" validate:"required"`
-	Habitat string `json:"habitat" validate:"required"`
-	Food    string `json:"food" validate:"required"`
-}
+var (
+	// dbType = "sqlite"
+	// dbDSN  = "table-crud.db"
+	dbType = "pgsql"
+	dbDSN  = "postgres://dba:pass@127.0.0.1:5432/test?sslmode=disable"
+)
 
 func main() {
-	db, err := facade.QuickOpen[Database]("sqlite", "table-crud.db", "stdout")
+	newMain()
+}
+
+func oldMain() {
+	db, err := Connect(dbType, dbDSN)
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
+	}
+	defer goent.Close(db)
+
+	if err = goent.Migrate(db).AutoMigrate(); err != nil {
+		panic(err)
 	}
 
-	goent.Migrate(db).AutoMigrate()
+	if err = seedData(db); err != nil {
+		panic(err)
+	}
 
-	s := fuego.NewServer()
+	if err = createOrder(db, TestOrderNo); err != nil {
+		fmt.Println(err)
+	}
 
-	fuego.Get(s, "/animals/{id}", func(c fuego.ContextNoBody) (*Animal, error) {
-		return db.Animal.Find().ByValue(Animal{ID: c.PathParamInt("id")})
-	}, option.Path("id", "animal id", param.Integer()))
+	var order *Order
+	if order, err = findOrder(db, TestOrderNo); err != nil {
+		fmt.Println(err)
+	}
+	if order != nil {
+		fmt.Printf("\n%+v\n%+v\n", order, order.Products)
+	}
+}
 
-	fuego.Get(s, "/animals", func(c fuego.ContextNoBody) (*goent.Pagination[Animal], error) {
-		return db.Animal.List().OrderByAsc(&db.Animal.Model.ID).Match(Animal{
-			Name:    c.QueryParam("name"),
-			Food:    c.QueryParam("food"),
-			Habitat: c.QueryParam("habitat"),
-		}).AsPagination(c.QueryParamInt("page"), c.QueryParamInt("size"))
-	}, option.QueryInt("page", "current page"), option.QueryInt("size", "page size"),
-		option.Query("name", "animal name"), option.Query("habitat", "animal habitat"),
-		option.Query("food", "animal food"))
+func newMain() {
+	db, err := ConnectII(dbType, dbDSN)
+	if err != nil {
+		panic(err)
+	}
+	defer goent.Close(db)
 
-	fuego.Post(s, "/animals", func(c fuego.ContextWithBody[RequestAnimal]) (any, error) {
-		request, err := c.Body()
-		if err != nil {
-			return nil, fuego.BadRequestError{}
-		}
-		return nil, db.Animal.Insert().One(&Animal{
-			Name: request.Name, Emoji: request.Emoji,
-			Habitat: request.Habitat, Food: request.Food})
-	})
+	if err = goent.Migrate(db).AutoMigrate(); err != nil {
+		panic(err)
+	}
 
-	fuego.Put(s, "/animals/{id}", func(c fuego.ContextWithBody[RequestAnimal]) (any, error) {
-		request, err := c.Body()
-		if err != nil {
-			return nil, fuego.BadRequestError{}
-		}
-		return nil, db.Animal.Save().One(Animal{ID: c.PathParamInt("id"),
-			Name: request.Name, Emoji: request.Emoji,
-			Habitat: request.Habitat, Food: request.Food})
-	}, option.Path("id", "animal id", param.Integer()))
+	if err = seedDataII(db); err != nil {
+		panic(err)
+	}
 
-	fuego.Delete(s, "/animals/{id}", func(c fuego.ContextNoBody) (any, error) {
-		return nil, db.Animal.Remove().ByValue(Animal{ID: c.PathParamInt("id")})
-	}, option.Path("id", "animal id", param.Integer()))
+	if err = createOrderII(db, TestOrderNo); err != nil {
+		fmt.Println(err)
+	}
 
-	s.Run()
+	var order *Order
+	if order, err = findOrderII(db, TestOrderNo); err != nil {
+		fmt.Println(err)
+	}
+	if order != nil {
+		fmt.Printf("\n%+v\n%+v\n", order, order.Products)
+	}
 }

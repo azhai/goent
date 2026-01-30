@@ -22,8 +22,8 @@ type Driver struct {
 	config
 }
 
-func (d *Driver) GetDatabaseConfig() *model.DatabaseConfig {
-	return &d.config.DatabaseConfig
+func (dr *Driver) GetDatabaseConfig() *model.DatabaseConfig {
+	return &dr.config.DatabaseConfig
 }
 
 type ExecQuerierContext interface {
@@ -87,7 +87,7 @@ func OpenDSN(dsn string) (driver *Driver) {
 func (dr *Driver) AddLogger(logger model.Logger, err error) error {
 	if logger != nil {
 		dr.config.Logger = logger
-		// dr.config.IncludeArguments = true
+		dr.config.IncludeArguments = true
 	}
 	return err
 }
