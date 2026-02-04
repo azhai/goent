@@ -26,59 +26,59 @@ func TestSelect(t *testing.T) {
 		t.Fatalf("Expected goe database, got error: %v", err)
 	}
 
-	err = goent.Delete(db.AnimalFood).All()
+	err = db.AnimalFood.Delete().Exec()
 	if err != nil {
 		t.Fatalf("Expected delete AnimalFood, got error: %v", err)
 	}
-	err = goent.Delete(db.Flag).All()
+	err = db.Flag.Delete().Exec()
 	if err != nil {
 		t.Fatalf("Expected delete flags, got error: %v", err)
 	}
-	err = goent.Delete(db.Animal).All()
+	err = db.Animal.Delete().Exec()
 	if err != nil {
 		t.Fatalf("Expected delete animals, got error: %v", err)
 	}
-	err = goent.Delete(db.Food).All()
+	err = db.Food.Delete().Exec()
 	if err != nil {
 		t.Fatalf("Expected delete foods, got error: %v", err)
 	}
-	err = goent.Delete(db.Habitat).All()
+	err = db.Habitat.Delete().Exec()
 	if err != nil {
 		t.Fatalf("Expected delete habitats, got error: %v", err)
 	}
-	err = goent.Delete(db.Info).All()
+	err = db.Info.Delete().Exec()
 	if err != nil {
 		t.Fatalf("Expected delete infos, got error: %v", err)
 	}
-	err = goent.Delete(db.Status).All()
+	err = db.Status.Delete().Exec()
 	if err != nil {
 		t.Fatalf("Expected delete status, got error: %v", err)
 	}
-	err = goent.Delete(db.UserRole).All()
+	err = db.UserRole.Delete().Exec()
 	if err != nil {
 		t.Fatalf("Expected delete user roles, got error: %v", err)
 	}
-	err = goent.Delete(db.User).All()
+	err = db.User.Delete().Exec()
 	if err != nil {
 		t.Fatalf("Expected delete users, got error: %v", err)
 	}
-	err = goent.Delete(db.Role).All()
+	err = db.Role.Delete().Exec()
 	if err != nil {
 		t.Fatalf("Expected delete roles, got error: %v", err)
 	}
-	err = goent.Delete(db.PersonJobTitle).All()
+	err = db.PersonJobTitle.Delete().Exec()
 	if err != nil {
 		t.Fatalf("Expected delete personJobs, got error: %v", err)
 	}
-	err = goent.Delete(db.JobTitle).All()
+	err = db.JobTitle.Delete().Exec()
 	if err != nil {
 		t.Fatalf("Expected delete jobs, got error: %v", err)
 	}
-	err = goent.Delete(db.Person).All()
+	err = db.Person.Delete().Exec()
 	if err != nil {
 		t.Fatalf("Expected delete persons, got error: %v", err)
 	}
-	err = goent.Delete(db.Exam).All()
+	err = db.Exam.Delete().Exec()
 	if err != nil {
 		t.Fatalf("Expected delete exams, got error: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestSelect(t *testing.T) {
 		{Name: "Nice"},
 		{Name: "Ocean"},
 	}
-	err = goent.Insert(db.Weather).All(weathers)
+	err = db.Weather.Insert().All(weathers)
 	if err != nil {
 		t.Fatalf("Expected insert weathers, got error: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestSelect(t *testing.T) {
 		{Id: uuid.New(), Name: "Savannah", WeatherId: weathers[0].Id},
 		{Id: uuid.New(), Name: "Ocean", WeatherId: weathers[2].Id},
 	}
-	err = goent.Insert(db.Habitat).All(habitats)
+	err = db.Habitat.Insert().All(habitats)
 	if err != nil {
 		t.Fatalf("Expected insert habitats, got error: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestSelect(t *testing.T) {
 		{Name: "Big Dog Alive"},
 	}
 
-	err = goent.Insert(db.Status).All(status)
+	err = db.Status.Insert().All(status)
 	if err != nil {
 		t.Fatalf("Expected insert habitats, got error: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestSelect(t *testing.T) {
 		{Id: uuid.New().NodeID(), Name: "Little Cat", StatusId: status[0].Id, NameStatus: "Test"},
 		{Id: uuid.New().NodeID(), Name: "Big Dog", StatusId: status[2].Id},
 	}
-	err = goent.Insert(db.Info).All(infos)
+	err = db.Info.Insert().All(infos)
 	if err != nil {
 		t.Fatalf("Expected insert infos, got error: %v", err)
 	}

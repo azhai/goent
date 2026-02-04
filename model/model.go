@@ -98,8 +98,7 @@ type Operation struct {
 	AttributeValue      string
 	AttributeValueTable Table
 	AttributeTableId    int
-	FirstOperation      *Operation
-	SecondOperation     *Operation
+	Branches            []Operation
 }
 
 type Set struct {
@@ -153,6 +152,7 @@ type PrimaryKeyMigrate struct {
 
 type AttributeMigrate struct {
 	Nullable     bool
+	FieldName    string
 	Name         string
 	EscapingName string
 	DataType     string
@@ -259,6 +259,10 @@ func (c DatabaseConfig) Schemas() []string {
 
 func (c *DatabaseConfig) SetSchemas(s []string) {
 	c.schemas = s
+}
+
+func (c *DatabaseConfig) AddSchema(s string) {
+	c.schemas = append(c.schemas, s)
 }
 
 func (c *DatabaseConfig) SetInitCallback(f func() error) {

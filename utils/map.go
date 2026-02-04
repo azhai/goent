@@ -1,6 +1,9 @@
 package utils
 
-import "sync"
+import (
+	"iter"
+	"sync"
+)
 
 type CoMap struct {
 	mu   sync.RWMutex
@@ -31,5 +34,27 @@ func (m *CoMap) Update(data map[string]any) {
 	defer m.mu.Unlock()
 	for k, v := range data {
 		m.data[k] = v
+	}
+}
+
+func (m *CoMap) Keys() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	keys := make([]string, 0, len(m.data))
+	for k := range m.data {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func (m *CoMap) Each() iter.Seq2[string, any] {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return func(yield func(string, any) bool) {
+		for k, v := range m.data {
+			if !yield(k, v) {
+				return
+			}
+		}
 	}
 }

@@ -10,6 +10,16 @@ import (
 	"github.com/azhai/goent/model"
 )
 
+var (
+	addrMap       = &goeMap{mapField: make(map[uintptr]field)}
+	schemasMap    = make(map[string]*string)
+	tableRegistry = make(map[uintptr]*TableInfo)
+)
+
+// func init() {
+// 	addrMap = &goeMap{mapField: make(map[uintptr]field)}
+// }
+
 type goeMap struct {
 	mu       sync.Mutex
 	mapField map[uintptr]field
@@ -33,13 +43,11 @@ func (am *goeMap) delete(key uintptr) {
 	delete(am.mapField, key)
 }
 
-var addrMap *goeMap
-
 type DB struct {
 	driver model.Driver
 }
 
-// SetDriver Set the database driver.
+// SetDriver Sets the database driver.
 func (db *DB) SetDriver(driver model.Driver) {
 	db.driver = driver
 }
@@ -167,18 +175,24 @@ func (db *DB) BeginTransactionContext(ctx context.Context, isolation sql.Isolati
 }
 
 // Close Closes the database connection.
-func Close(dbTarget any) error {
-	goeDb := getDatabase(dbTarget)
+func Close(ent any) error {
+	goeDb := getDatabase(ent)
 	err := goeDb.driver.Close()
 	if err != nil {
 		dc := goeDb.driver.GetDatabaseConfig()
 		return dc.ErrorHandler(context.TODO(), err)
 	}
 
-	valueOf := reflect.ValueOf(dbTarget).Elem()
+	valueOf := reflect.ValueOf(ent).Elem()
 
 	for i := range valueOf.NumField() - 1 {
-		fieldOf := valueOf.Field(i).Elem()
+		fieldOf := valueOf.Field(i)
+		if fieldOf.Kind() == reflect.Ptr {
+			if fieldOf.IsNil() {
+				continue
+			}
+			fieldOf = fieldOf.Elem()
+		}
 		for fieldId := range fieldOf.NumField() {
 			addrMap.delete(uintptr(fieldOf.Field(fieldId).Addr().UnsafePointer()))
 		}
@@ -187,7 +201,7 @@ func Close(dbTarget any) error {
 	return nil
 }
 
-func getDatabase(dbTarget any) *DB {
-	valueOf := reflect.ValueOf(dbTarget).Elem()
+func getDatabase(ent any) *DB {
+	valueOf := reflect.ValueOf(ent).Elem()
 	return valueOf.Field(valueOf.NumField() - 1).Interface().(*DB)
 }

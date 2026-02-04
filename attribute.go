@@ -37,6 +37,10 @@ func (r OneToSomeRelation) getAttributeName() string {
 	return r.attributeName
 }
 
+func (r OneToSomeRelation) Field(name string) field {
+	return r
+}
+
 func createOneToSome(b body, typeOf reflect.Type) any {
 	rel := OneToSomeRelation{}
 	targetPks := primaryKeys(typeOf)
@@ -92,6 +96,10 @@ func (r ManyToSomeRelation) getAttributeName() string {
 	return r.attributeName
 }
 
+func (r ManyToSomeRelation) Field(name string) field {
+	return r
+}
+
 func createManyToSome(b body, typeOf reflect.Type) any {
 	rel := ManyToSomeRelation{}
 	targetPks := primaryKeys(typeOf)
@@ -128,7 +136,7 @@ type attributeStrings struct {
 }
 
 func createAttributeStrings(db *DB, schema *string, table string, attributeName string, tableId, fieldId int, Driver model.Driver) attributeStrings {
-	name := Driver.KeywordHandler(utils.ColumnNamePattern(attributeName))
+	name := Driver.KeywordHandler(utils.ToSnakeCase(attributeName))
 	return attributeStrings{
 		db:            db,
 		tableName:     table,
@@ -168,6 +176,15 @@ func (p pk) getAttributeName() string {
 	return p.attributeName
 }
 
+func (p pk) Field(name string) field {
+	return p
+}
+
+func createPkFromColumn(db *DB, col *Column, tableId int, isAutoIncr bool) pk {
+	attStr := createAttributeStrings(db, col.schemaName, col.tableName, col.FieldName, tableId, col.FieldId, db.driver)
+	return pk{attributeStrings: attStr, autoIncrement: isAutoIncr}
+}
+
 func createPk(db *DB, schema *string, table string, attributeName string, autoIncrement bool, tableId, fieldId int, Driver model.Driver) pk {
 	table = Driver.KeywordHandler(table)
 	attStr := createAttributeStrings(db, schema, table, attributeName, tableId, fieldId, Driver)
@@ -201,6 +218,15 @@ func (a att) table() string {
 
 func (a att) getAttributeName() string {
 	return a.attributeName
+}
+
+func (a att) Field(name string) field {
+	return a
+}
+
+func createAttFromColumn(db *DB, col *Column, tableId int) att {
+	attStr := createAttributeStrings(db, col.schemaName, col.tableName, col.FieldName, tableId, col.FieldId, db.driver)
+	return att{attributeStrings: attStr, isDefault: col.HasDefault}
 }
 
 func createAtt(db *DB, attributeName string, schema *string, table string, tableId, fieldId int, isDefault bool, d model.Driver) att {

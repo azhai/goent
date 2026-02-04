@@ -10,13 +10,6 @@ import (
 	"github.com/azhai/goent/utils"
 )
 
-func MigrateFrom(db any, driver model.Driver) (*model.Migrator, error) {
-	if m := newDbMigrator(db, driver); m != nil {
-		return m.Migrator, m.Error
-	}
-	return nil, fmt.Errorf("MigrateFrom: driver not found")
-}
-
 type fieldDesc struct {
 	Field      reflect.Value
 	FieldName  string
@@ -27,87 +20,67 @@ type fieldDesc struct {
 type dbMigrator struct {
 	fieldDescs []*fieldDesc
 	schemasMap map[string]*string
+	db         *DB
 	*model.Migrator
 }
 
-func newDbMigrator(db any, driver model.Driver) *dbMigrator {
-	valueOf := reflect.ValueOf(db).Elem()
-	count := valueOf.NumField() - 1
+func migrateFrom(ent any, db *DB) *dbMigrator {
+	valueOf := reflect.ValueOf(ent).Elem()
+	dc := db.driver.GetDatabaseConfig()
 	dm := &dbMigrator{
 		Migrator: &model.Migrator{
-			Tables: make(map[string]*model.TableMigrate),
+			Tables:  make(map[string]*model.TableMigrate),
+			Schemas: dc.Schemas(),
 		},
-		fieldDescs: make([]*fieldDesc, count),
-		schemasMap: make(map[string]*string),
+		fieldDescs: make([]*fieldDesc, 0),
+		schemasMap: schemasMap,
+		db:         db,
 	}
 
-	for i := range count {
-		fieldOf := valueOf.Field(i)
-		if strings.HasPrefix(fieldOf.Type().Elem().Name(), "Table") {
-			fieldOf = fieldOf.Elem().FieldByName("Model")
-		}
-		desc := &fieldDesc{Field: fieldOf}
-		elem := desc.Field.Elem()
+	for _, info := range tableRegistry {
+		elem := valueOf.Field(info.SchemaId).FieldByName(info.FieldName)
+		desc := &fieldDesc{Field: elem, HasSchema: true}
+		desc.FieldName, desc.SchemaName = info.FieldName, info.SchemaName
+		dm.fieldDescs = append(dm.fieldDescs, desc)
 
-		desc.FieldName = elem.Type().Name()
-		desc.HasSchema = utils.IsFieldHasSchema(valueOf, i)
-
-		if desc.HasSchema {
-			desc.SchemaName = driver.KeywordHandler(utils.ColumnNamePattern(desc.FieldName))
-			for f := range elem.NumField() {
-				schElem := elem.Field(f).Elem()
-				dm.schemasMap[schElem.Type().Name()] = &desc.SchemaName
-			}
+		elem = reflect.Indirect(elem)
+		tm := &model.TableMigrate{Schema: &desc.SchemaName, Name: info.TableName}
+		tm, dm.Error = dm.typeField(tm, valueOf, elem, db.driver)
+		if dm.Error != nil {
+			return dm
 		}
-		dm.fieldDescs[i] = desc
+		tm.EscapingName = db.driver.KeywordHandler(tm.Name)
+		dm.Tables[tm.Name] = tm
 	}
 
-	for i := range count {
-		desc := dm.fieldDescs[i]
-		elem := desc.Field.Elem()
-
-		if desc.HasSchema {
-			dm.Schemas = append(dm.Schemas, desc.SchemaName)
-			for f := range elem.NumField() {
-				tableElem := elem.Field(f).Elem()
-				dm.Error = dm.typeField(valueOf, tableElem, driver, &desc.SchemaName)
-				if dm.Error != nil {
-					return dm
-				}
-			}
-		} else {
-			dm.Error = dm.typeField(valueOf, elem, driver, nil)
-			if dm.Error != nil {
-				return dm
-			}
-		}
-
-	}
-
-	// fmt.Printf("dm: %#v\n\n", dm.Migrator)
-	// for name, table := range dm.Migrator.Tables {
-	// 	fmt.Printf("table: %s\n%#v\n\n", name, table)
-	// }
 	return dm
 }
 
-func (dm *dbMigrator) typeField(tables reflect.Value, elem reflect.Value, driver model.Driver, schema *string) error {
+func (dm *dbMigrator) typeField(tm *model.TableMigrate, tables, elem reflect.Value, driver model.Driver) (*model.TableMigrate, error) {
+	elem = utils.GetTableModel(elem)
 	elemType := elem.Type()
-	pks, fieldNames, err := migratePk(elemType, driver)
-	if err != nil {
-		return err
+	if elemType.Kind() == reflect.Ptr {
+		elemType = elemType.Elem()
+		elem = elem.Elem()
 	}
 
-	table := &model.TableMigrate{Schema: schema}
-	table.Name = utils.ParseTableNameByValue(elem)
+	pks, fieldNames, err := migratePk(elemType, driver)
+	if err != nil {
+		return nil, err
+	}
 
 	for fieldId := range elem.NumField() {
 		field := elemType.Field(fieldId)
 		if skipPrimaryKey(fieldNames, field.Name, tables, field) {
 			continue
 		}
+
 		elemField := elem.Field(fieldId)
 		switch elemField.Kind() {
+
+		case reflect.Interface, reflect.Func:
+			continue
+
 		case reflect.Slice:
 			err = handlerSlice(body{
 				fieldId:     fieldId,
@@ -117,16 +90,20 @@ func (dm *dbMigrator) typeField(tables reflect.Value, elem reflect.Value, driver
 				typeOf:      elemType,
 				valueOf:     elem,
 				migrate: &infosMigrate{
-					table:      table,
+					table:      tm,
 					field:      field,
 					fieldNames: fieldNames,
 				},
 				schemasMap: dm.schemasMap,
 			}, helperAttributeMigrate)
 			if err != nil {
-				return err
+				return nil, err
 			}
+
 		case reflect.Struct:
+			if field.Anonymous {
+				continue
+			}
 			err = handlerStruct(body{
 				fieldId:     fieldId,
 				driver:      driver,
@@ -134,14 +111,15 @@ func (dm *dbMigrator) typeField(tables reflect.Value, elem reflect.Value, driver
 				fieldTypeOf: elemField.Type(),
 				valueOf:     elem,
 				migrate: &infosMigrate{
-					table: table,
+					table: tm,
 					field: field,
 				},
 				schemasMap: dm.schemasMap,
 			}, migrateAtt)
 			if err != nil {
-				return err
+				return nil, err
 			}
+
 		case reflect.Pointer:
 			err = helperAttributeMigrate(body{
 				fieldId:  fieldId,
@@ -151,15 +129,16 @@ func (dm *dbMigrator) typeField(tables reflect.Value, elem reflect.Value, driver
 				valueOf:  elem,
 				typeOf:   elemType,
 				migrate: &infosMigrate{
-					table:      table,
+					table:      tm,
 					field:      field,
 					fieldNames: fieldNames,
 				},
 				schemasMap: dm.schemasMap,
 			})
 			if err != nil {
-				return err
+				return nil, err
 			}
+
 		default:
 			err = helperAttributeMigrate(body{
 				fieldId: fieldId,
@@ -168,24 +147,94 @@ func (dm *dbMigrator) typeField(tables reflect.Value, elem reflect.Value, driver
 				valueOf: elem,
 				typeOf:  elemType,
 				migrate: &infosMigrate{
-					table:      table,
+					table:      tm,
 					field:      field,
 					fieldNames: fieldNames,
 				},
 				schemasMap: dm.schemasMap,
 			})
 			if err != nil {
-				return err
+				return nil, err
 			}
+
 		}
 	}
 
 	for _, pk := range pks {
-		table.PrimaryKeys = append(table.PrimaryKeys, *pk)
+		tm.PrimaryKeys = append(tm.PrimaryKeys, *pk)
+	}
+	// fmt.Printf("Migrate: %s\n%#v\n%#v\n\n", tm.Name, tm.OneToSomes, tm.ManyToSomes)
+	return tm, nil
+}
+
+func setTableFields(elem reflect.Value, tm *model.TableMigrate, db *DB, schema *string) error {
+	if elem.Kind() == reflect.Ptr {
+		elem = elem.Elem()
+	}
+	if tableNameField := elem.FieldByName("TableName"); tableNameField.IsValid() {
+		tableNameField.SetString(tm.Name)
+	}
+	modelField := elem.FieldByName("Model")
+	if !modelField.IsValid() {
+		return nil
+	}
+	modelOf := modelField
+	if modelOf.Kind() == reflect.Ptr {
+		if modelOf.IsNil() {
+			modelOf = reflect.New(modelOf.Type().Elem())
+			modelField.Set(modelOf)
+			modelOf = modelOf.Elem()
+		} else {
+			modelOf = modelOf.Elem()
+		}
 	}
 
-	table.EscapingName = driver.KeywordHandler(table.Name)
-	dm.Tables[table.Name] = table
+	var pks []string
+	fields := utils.NewCoMap()
+	for _, pk := range tm.PrimaryKeys {
+		pks = append(pks, pk.Name)
+		if f := modelOf.FieldByName(pk.FieldName); f.IsValid() {
+			fields.Set(pk.Name, f.Addr())
+		}
+	}
+	for _, attr := range tm.Attributes {
+		if f := modelOf.FieldByName(attr.FieldName); f.IsValid() {
+			fields.Set(attr.Name, f.Addr())
+		}
+	}
+	if pkeysField := elem.FieldByName("PrimaryNames"); pkeysField.IsValid() {
+		pkeysField.Set(reflect.ValueOf(pks))
+	}
+	if columnsField := elem.FieldByName("Columns"); columnsField.IsValid() {
+		columns := make(map[string]*Column)
+		for _, pk := range tm.PrimaryKeys {
+			columns[pk.Name] = &Column{
+				FieldName:  pk.FieldName,
+				ColumnName: pk.Name,
+				ColumnType: pk.DataType,
+			}
+		}
+		for _, attr := range tm.Attributes {
+			columns[attr.Name] = &Column{
+				FieldName:  attr.FieldName,
+				ColumnName: attr.Name,
+				ColumnType: attr.DataType,
+				AllowNull:  attr.Nullable,
+			}
+		}
+		columnsField.Set(reflect.ValueOf(columns))
+	}
+	if schemaNameField := elem.FieldByName("SchemaName"); schemaNameField.IsValid() {
+		if schema != nil {
+			schemaNameField.SetString(*schema)
+		}
+	}
+	if schemaIdField := elem.FieldByName("SchemaId"); schemaIdField.IsValid() {
+		schemaIdField.SetInt(0)
+	}
+	if tableIdField := elem.FieldByName("TableId"); tableIdField.IsValid() {
+		tableIdField.SetInt(0)
+	}
 	return nil
 }
 
@@ -203,12 +252,12 @@ func createManyToSomeMigrate(b body, typeOf reflect.Type) any {
 
 	rel := new(model.ManyToSomeMigrate)
 	rel.TargetTable = utils.ParseTableNameByType(typeOf)
-	rel.TargetColumn = utils.ColumnNamePattern(b.prefixName)
+	rel.TargetColumn = utils.ToSnakeCase(b.prefixName)
 	rel.TargetSchema = b.schemasMap[typeOf.Name()]
 	rel.EscapingTargetTable = b.driver.KeywordHandler(rel.TargetTable)
 	rel.EscapingTargetColumn = b.driver.KeywordHandler(rel.TargetColumn)
 
-	rel.Name = utils.ColumnNamePattern(b.fieldName)
+	rel.Name = utils.ToSnakeCase(b.fieldName)
 	rel.EscapingName = b.driver.KeywordHandler(rel.Name)
 	rel.Nullable = b.nullable
 	rel.Default = getTagValue(b.migrate.field.Tag.Get("goe"), "default:")
@@ -232,12 +281,12 @@ func createOneToSomeMigrate(b body, typeOf reflect.Type) any {
 
 	rel := new(model.OneToSomeMigrate)
 	rel.TargetTable = utils.ParseTableNameByType(typeOf)
-	rel.TargetColumn = utils.ColumnNamePattern(b.prefixName)
+	rel.TargetColumn = utils.ToSnakeCase(b.prefixName)
 	rel.TargetSchema = b.schemasMap[typeOf.Name()]
 	rel.EscapingTargetTable = b.driver.KeywordHandler(rel.TargetTable)
 	rel.EscapingTargetColumn = b.driver.KeywordHandler(rel.TargetColumn)
 
-	rel.Name = utils.ColumnNamePattern(b.fieldName)
+	rel.Name = utils.ToSnakeCase(b.fieldName)
 	rel.EscapingName = b.driver.KeywordHandler(rel.Name)
 	rel.Nullable = b.nullable
 	if err := checkIndex(b, rel.AttributeMigrate, true); err != nil {
@@ -247,9 +296,34 @@ func createOneToSomeMigrate(b body, typeOf reflect.Type) any {
 }
 
 func migratePk(typeOf reflect.Type, driver model.Driver) ([]*model.PrimaryKeyMigrate, []string, error) {
+	if typeOf.Kind() == reflect.Ptr {
+		typeOf = typeOf.Elem()
+	}
+
+	if typeOf.Kind() == reflect.Slice {
+		return nil, nil, fmt.Errorf("goent: migratePk() cannot migrate slice type %v", typeOf)
+	}
+
+	if strings.HasPrefix(typeOf.Name(), "Table[") && strings.HasSuffix(typeOf.Name(), "]") {
+		if typeOf.Kind() == reflect.Struct {
+			modelField, ok := typeOf.FieldByName("Model")
+			if ok {
+				modelType := modelField.Type
+				if modelType.Kind() == reflect.Ptr {
+					modelType = modelType.Elem()
+				}
+				typeOf = modelType
+			}
+		}
+	}
+
 	fields := getPks(typeOf)
 	if len(fields) == 0 {
 		return nil, nil, fmt.Errorf("goent: migratePk() struct %q don't have a primary key setted", typeOf.Name())
+	}
+
+	if typeOf.Name() == "" {
+		return nil, nil, fmt.Errorf("goent: migratePk() struct %q don't have a primary key setted", typeOf.String())
 	}
 
 	pks := make([]*model.PrimaryKeyMigrate, len(fields))
@@ -320,8 +394,9 @@ func getIndexValue(valueTag string, tag string) string {
 func createMigratePk(attributeName string, autoIncrement bool, dataType, defaultTag string, driver model.Driver) *model.PrimaryKeyMigrate {
 	return &model.PrimaryKeyMigrate{
 		AttributeMigrate: model.AttributeMigrate{
-			Name:         utils.ColumnNamePattern(attributeName),
-			EscapingName: driver.KeywordHandler(utils.ColumnNamePattern(attributeName)),
+			FieldName:    attributeName,
+			Name:         utils.ToSnakeCase(attributeName),
+			EscapingName: driver.KeywordHandler(utils.ToSnakeCase(attributeName)),
 			DataType:     dataType,
 			Default:      defaultTag,
 		},
@@ -331,8 +406,9 @@ func createMigratePk(attributeName string, autoIncrement bool, dataType, default
 
 func createMigrateAtt(attributeName string, dataType string, nullable bool, defaultValue string, driver model.Driver) model.AttributeMigrate {
 	return model.AttributeMigrate{
-		Name:         utils.ColumnNamePattern(attributeName),
-		EscapingName: driver.KeywordHandler(utils.ColumnNamePattern(attributeName)),
+		FieldName:    attributeName,
+		Name:         utils.ToSnakeCase(attributeName),
+		EscapingName: driver.KeywordHandler(utils.ToSnakeCase(attributeName)),
 		DataType:     dataType,
 		Nullable:     nullable,
 		Default:      defaultValue,
@@ -345,6 +421,8 @@ func helperAttributeMigrate(b body) error {
 	if table == "" {
 		return migrateAtt(b)
 	}
+	// fmt.Printf("\n# Foreign: %s, %s\n\n", table, prefix)
+
 	b.stringInfos = stringInfos{prefixName: prefix, tableName: table, fieldName: migField.Name}
 	rel := createRelation(b, createManyToSomeMigrate, createOneToSomeMigrate)
 	if rel == nil {
@@ -361,13 +439,13 @@ func helperAttributeMigrate(b body) error {
 		migTable.ManyToSomes = append(migTable.ManyToSomes, *v)
 	case *model.OneToSomeMigrate:
 		// if v == nil {
-		// 	if slices.Contains(b.Migration.fieldNames, b.Migration.field.Name) {
+		// 	if slices.Contains(b.migrate.fieldNames, b.migrate.field.Name) {
 		// 		return nil
 		// 	}
 		// 	return migrateAtt(b)
 		// }
 		goeTag := migField.Tag.Get("goe")
-		v.IsOneToMany = utils.TagValueExist(goeTag, "o2m")
+		v.IsOneToMany = utils.HasTagValue(goeTag, "o2m")
 		v.DataType = getTagType(migField)
 		migTable.OneToSomes = append(migTable.OneToSomes, *v)
 	}
@@ -410,7 +488,7 @@ func checkIndex(b body, at model.AttributeMigrate, skipUnique bool) error {
 	}
 
 	tagValue := migField.Tag.Get("goe")
-	if !skipUnique && utils.TagValueExist(tagValue, "unique") {
+	if !skipUnique && utils.HasTagValue(tagValue, "unique") {
 		in := model.IndexMigrate{
 			Name:         migTable.Name + "_idx_" + strings.ToLower(migField.Name),
 			EscapingName: b.driver.KeywordHandler(migTable.Name + "_idx_" + strings.ToLower(migField.Name)),
@@ -420,7 +498,7 @@ func checkIndex(b body, at model.AttributeMigrate, skipUnique bool) error {
 		migTable.Indexes = append(migTable.Indexes, in)
 	}
 
-	if utils.TagValueExist(tagValue, "index") {
+	if utils.HasTagValue(tagValue, "index") {
 		in := model.IndexMigrate{
 			Name:         migTable.Name + "_idx_" + strings.ToLower(migField.Name),
 			EscapingName: b.driver.KeywordHandler(migTable.Name + "_idx_" + strings.ToLower(migField.Name)),

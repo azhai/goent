@@ -12,95 +12,28 @@ import (
 	"github.com/azhai/goent/utils"
 )
 
-func newDbTarget(driver model.Driver, valueOf reflect.Value, dbId int) (*DB, error) {
-	var schemas []string
-	dbTarget, tableId := new(DB), 0
-	valueOf.Field(dbId).Set(reflect.ValueOf(dbTarget))
-
-	// set value for Fields
-	for i := range dbId {
-		fieldOf := valueOf.Field(i)
-		if !fieldOf.IsNil() {
-			continue
-		}
-		fieldType := fieldOf.Type().Elem()
-		// Check if it's a facade.Table-like type with a Model field
-		if fieldType.NumField() > 0 {
-			modelField, hasModel := fieldType.FieldByName("Model")
-			if hasModel && modelField.Type.Kind() == reflect.Ptr {
-				// It's a Table-like type, create and initialize it
-				tableValue := reflect.New(fieldType)
-				modelType := tableValue.Elem().FieldByName("Model").Type().Elem()
-				tableValue.Elem().FieldByName("Model").Set(reflect.New(modelType))
-				fieldOf.Set(tableValue)
-			} else {
-				fieldOf.Set(reflect.New(fieldType))
-			}
-		} else {
-			fieldOf.Set(reflect.New(fieldType))
-		}
-
-		if !utils.IsFieldHasSchema(valueOf, i) {
-			continue
-		}
-		for j := range fieldOf.Elem().NumField() {
-			elem := fieldOf.Elem().Field(j)
-			elem.Set(reflect.New(elem.Type().Elem()))
-		}
-	}
-
-	// init Fields
-	for i := range dbId {
-		elem := valueOf.Field(i).Elem()
-		// Check if it's a facade.Table-like type and use the Model field
-		if elem.Type().NumField() > 0 {
-			if modelField, hasModel := elem.Type().FieldByName("Model"); hasModel && modelField.Type.Kind() == reflect.Ptr {
-				// It's a Table-like type, use the Model field
-				elem = elem.FieldByName("Model").Elem()
-			}
-		}
-		if !utils.IsFieldHasSchema(valueOf, i) {
-			tableId++
-			err := InitField(nil, valueOf, elem, dbTarget, tableId, driver)
-			if err != nil {
-				return nil, err
-			}
-			continue
-		}
-		schema := driver.KeywordHandler(utils.ColumnNamePattern(elem.Type().Name()))
-		schemas = append(schemas, schema)
-		for j := range elem.NumField() {
-			tableId++
-			err := InitField(&schema, valueOf, elem.Field(j).Elem(), dbTarget, tableId, driver)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	driver.GetDatabaseConfig().SetSchemas(schemas)
-	return dbTarget, nil
-}
-
-func init() {
-	addrMap = &goeMap{mapField: make(map[uintptr]field)}
-}
-
 // Open opens a database connection
 //
 // # Example
 //
 //	goent.Open[Database](pgsql.Open("user=postgres password=postgres host=localhost port=5432 database=postgres", pgsql.Config{}))
-func Open[T any](driver model.Driver) (*T, error) {
-	dc := driver.GetDatabaseConfig()
-	dc.Init(driver.Name(), driver.ErrorTranslator())
-	err := driver.Init()
+func Open[T any](drv model.Driver, logFile string) (*T, error) {
+	if logFile != "" {
+		err := drv.AddLogger(utils.CreateLogger(logFile))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	dc := drv.GetDatabaseConfig()
+	dc.Init(drv.Name(), drv.ErrorTranslator())
+	err := drv.Init()
 	if err != nil {
 		return nil, dc.ErrorHandler(context.TODO(), err)
 	}
 
-	db := new(T)
-	valueOf := reflect.ValueOf(db).Elem()
+	ent := new(T)
+	valueOf := reflect.ValueOf(ent).Elem()
 	if valueOf.Kind() != reflect.Struct {
 		return nil, errors.New("goent: invalid database, the target needs to be a struct")
 	}
@@ -109,8 +42,10 @@ func Open[T any](driver model.Driver) (*T, error) {
 		return nil, errors.New("goent: invalid database, last struct field needs to be goent.DB")
 	}
 
-	var dbTarget *DB
-	dbTarget, err = newDbTarget(driver, valueOf, dbId)
+	db, schemas := new(DB), make([]string, 0)
+	db.SetDriver(drv)
+	schemas, err = travelSchemas(db, dbId, valueOf)
+	dc.SetSchemas(schemas)
 	if err != nil {
 		return nil, err
 	}
@@ -119,9 +54,53 @@ func Open[T any](driver model.Driver) (*T, error) {
 			return nil, err
 		}
 	}
+	return ent, nil
+}
 
-	dbTarget.SetDriver(driver)
-	return db, nil
+func travelSchemas(db *DB, dbId int, valueOf reflect.Value) ([]string, error) {
+	var schemas []string
+	valueOf.Field(dbId).Set(reflect.ValueOf(db))
+
+	// set value for fields
+	for i := range dbId { // Schema
+		schemaOf := reflect.Indirect(valueOf.Field(i))
+
+		schema := valueOf.Type().Field(i).Tag.Get("goe")
+		if schema == "-" {
+			continue
+		}
+		SchemaName := schemaOf.Type().Name()
+		if schema == "" {
+			schema = utils.ToSnakeCase(SchemaName)
+		}
+		schemas = append(schemas, schema)
+		schemasMap[SchemaName] = &schema
+
+		for j := range schemaOf.NumField() { // Table
+			tableField := schemaOf.Field(j)
+			tableType := utils.GetElemType(tableField)
+			fieldName := schemaOf.Type().Field(j).Name
+			tableOf, info := NewTableReflect(db, tableType, fieldName, schema, i, j)
+			info.FieldAddr = uintptr(tableField.Addr().UnsafePointer())
+			tableRegistry[info.FieldAddr] = &info
+			setDBMethod := tableOf.MethodByName("SetDB")
+			if setDBMethod.IsValid() {
+				setDBMethod.Call([]reflect.Value{reflect.ValueOf(db)})
+			}
+			schemaOf.Field(j).Set(tableOf)
+		}
+	}
+
+	// init fields
+	// for i := range tableId {
+	// 	schema := schemaMap[i]
+	// 	err := InitField(db, &schema, i, valueOf, models[i])
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// }
+
+	return schemas, nil
 }
 
 type RelationFunc func(b body, typeOf reflect.Type) any
@@ -172,28 +151,28 @@ func skipPrimaryKey[T comparable](slice []T, value T, tables reflect.Value, fiel
 	return false
 }
 
-func InitField(schema *string, tables reflect.Value, valueOf reflect.Value, db *DB, tableId int, driver model.Driver) error {
-	pks, fieldIds, err := getPk(db, schema, valueOf, tableId, driver)
+func InitField(db *DB, schema *string, tableId int, tables, modelOf reflect.Value) error {
+	pks, fieldIds, err := getPk(db, schema, modelOf, tableId, db.driver)
 	if err != nil {
 		return err
 	}
 
-	for fieldId := range valueOf.NumField() {
-		field := valueOf.Type().Field(fieldId)
+	for fieldId := range modelOf.NumField() {
+		field := modelOf.Type().Field(fieldId)
 		if skipPrimaryKey(fieldIds, fieldId, tables, field) {
 			continue
 		}
-		addr := uintptr(valueOf.Field(fieldId).Addr().UnsafePointer())
+		addr := uintptr(modelOf.Field(fieldId).Addr().UnsafePointer())
 		mapp := &infosMap{pks: pks, db: db, tableId: tableId, addr: addr}
-		switch valueOf.Field(fieldId).Kind() {
+		switch modelOf.Field(fieldId).Kind() {
 		case reflect.Slice:
 			err = handlerSlice(body{
 				fieldId:     fieldId,
-				fieldTypeOf: valueOf.Field(fieldId).Type().Elem(),
-				driver:      driver,
+				fieldTypeOf: modelOf.Field(fieldId).Type().Elem(),
+				driver:      db.driver,
 				tables:      tables,
-				valueOf:     valueOf,
-				typeOf:      valueOf.Type(),
+				valueOf:     modelOf,
+				typeOf:      modelOf.Type(),
 				schema:      schema,
 				mapp:        mapp,
 			}, helperAttribute)
@@ -203,19 +182,19 @@ func InitField(schema *string, tables reflect.Value, valueOf reflect.Value, db *
 		case reflect.Struct:
 			handlerStruct(body{
 				fieldId:     fieldId,
-				fieldTypeOf: valueOf.Field(fieldId).Type(),
-				driver:      driver,
-				valueOf:     valueOf,
+				fieldTypeOf: modelOf.Field(fieldId).Type(),
+				driver:      db.driver,
+				valueOf:     modelOf,
 				schema:      schema,
 				mapp:        mapp,
 			}, newAttr)
 		case reflect.Pointer:
 			helperAttribute(body{
 				fieldId:  fieldId,
-				driver:   driver,
+				driver:   db.driver,
 				tables:   tables,
-				valueOf:  valueOf,
-				typeOf:   valueOf.Type(),
+				valueOf:  modelOf,
+				typeOf:   modelOf.Type(),
 				schema:   schema,
 				mapp:     mapp,
 				nullable: true,
@@ -223,17 +202,17 @@ func InitField(schema *string, tables reflect.Value, valueOf reflect.Value, db *
 		default:
 			helperAttribute(body{
 				fieldId: fieldId,
-				driver:  driver,
+				driver:  db.driver,
 				tables:  tables,
-				valueOf: valueOf,
-				typeOf:  valueOf.Type(),
+				valueOf: modelOf,
+				typeOf:  modelOf.Type(),
 				schema:  schema,
 				mapp:    mapp,
 			})
 		}
 	}
 	for i := range pks {
-		addr := uintptr(valueOf.Field(fieldIds[i]).Addr().UnsafePointer())
+		addr := uintptr(modelOf.Field(fieldIds[i]).Addr().UnsafePointer())
 		addrMap.set(addr, pks[i])
 	}
 	return nil
@@ -271,7 +250,7 @@ func getPks(typeOf reflect.Type) []reflect.StructField {
 	var pks []reflect.StructField
 	pks = append(pks, fieldsByTags("pk", typeOf)...)
 
-	id, valid := getId(typeOf)
+	id, valid := utils.GetTableID(typeOf)
 	isSameName := func(f reflect.StructField) bool {
 		return f.Name == id.Name
 	}
@@ -311,7 +290,7 @@ func getFieldId(typeOf reflect.Type, fieldName string) int {
 
 func isReturningId(id reflect.StructField) bool {
 	geoTag := id.Tag.Get("goe")
-	if utils.TagValueExist(geoTag, "not_incr") {
+	if utils.HasTagValue(geoTag, "not_incr") {
 		return false
 	}
 	return getTagValue(geoTag, "default:") != "" || isAutoIncrement(id)
@@ -331,27 +310,27 @@ func checkAllFields(valueOf reflect.Value, table string) bool {
 }
 
 func createRelation(b body, createMany RelationFunc, createOne RelationFunc) any {
-	fieldByName := b.tables.FieldByName(b.tableName).Elem()
-	if !fieldByName.IsValid() {
+	fieldOf := utils.GetTableModel(b.tables.FieldByName(b.tableName)).Elem()
+	if !fieldOf.IsValid() {
 		return nil
 	}
 	typeName := b.typeOf.Name()
-	if checkAllFields(fieldByName, typeName) {
-		return createMany(b, fieldByName.Type()) // M2O
+	if checkAllFields(fieldOf, typeName) {
+		return createMany(b, fieldOf.Type()) // M2O
 	}
 	if table := strings.ReplaceAll(typeName, b.tableName, ""); table != typeName {
-		valueOf := b.tables.FieldByName(table)
+		valueOf := utils.GetTableModel(b.tables.FieldByName(table))
 		if valueOf.IsValid() && !valueOf.IsZero() {
 			if checkAllFields(valueOf.Elem(), b.tableName) {
 				return createMany(b, valueOf.Elem().Type()) // M2M
 			}
 		}
 	}
-	return createOne(b, fieldByName.Type()) // O2M/O2O
+	return createOne(b, fieldOf.Type()) // O2M/O2O
 }
 
 func primaryKeys(str reflect.Type) (pks []reflect.StructField) {
-	field, exists := getId(str)
+	field, exists := utils.GetTableID(str)
 	if exists {
 		pks := make([]reflect.StructField, 1)
 		pks[0] = field
@@ -364,6 +343,9 @@ func primaryKeys(str reflect.Type) (pks []reflect.StructField) {
 
 func fieldsByTags(tag string, str reflect.Type) (f []reflect.StructField) {
 	f = make([]reflect.StructField, 0)
+	if str.Kind() != reflect.Struct {
+		return f
+	}
 	tag = ";" + tag + ";"
 	for i := 0; i < str.NumField(); i++ {
 		goeTag := str.Field(i).Tag.Get("goe")
@@ -385,23 +367,46 @@ func getTagValue(FieldTag string, subTag string) string {
 }
 
 func foreignKeyNamePattern(dbTables reflect.Value, fieldName string) (table, suffix string) {
-	for r := 1; r <= len(fieldName); r++ {
+	var pks []reflect.StructField
+	tableNames := utils.GetFieldNames(dbTables.Type())
+	for r := 1; r < len(fieldName); r++ {
 		table, suffix = fieldName[:r], fieldName[r:]
-		if !dbTables.FieldByName(table).IsValid() {
+		if !slices.Contains(tableNames, table) {
 			continue
 		}
-		pks := getPks(dbTables.FieldByName(table).Elem().Type())
-		for c := 1; c <= len(suffix); c++ {
-			pkName := suffix[:c]
-			isSameName := func(f reflect.StructField) bool {
-				return f.Name == pkName
-			}
-			if slices.ContainsFunc(pks, isSameName) {
-				return table, pkName
-			}
+		foreign := utils.GetTableModel(dbTables.FieldByName(table))
+		if pks = getPks(foreign.Elem().Type()); len(pks) == 0 {
+			continue
+		}
+		pkName := compareForeignKey(suffix, pks)
+		if pkName != "" {
+			return table, pkName
 		}
 	}
 	return "", ""
+}
+
+func compareForeignKey(suffix string, pks []reflect.StructField) string {
+	if len(pks) == 0 {
+		return ""
+	}
+	if len(pks) == 1 {
+		pkName := pks[0].Name
+		if strings.HasPrefix(suffix, pkName) {
+			return pkName
+		}
+		return ""
+	}
+	for c := 1; c <= len(suffix); c++ {
+		pkName := suffix[:c]
+		isSameName := func(f reflect.StructField) bool {
+			return f.Name == pkName
+		}
+		if slices.ContainsFunc(pks, isSameName) {
+			return pkName
+		}
+	}
+	return ""
 }
 
 func helperAttribute(b body) error {
@@ -427,16 +432,10 @@ func helperAttribute(b body) error {
 		}
 	case OneToSomeRelation:
 		goeTag := fieldAtt.Tag.Get("goe")
-		v.IsOneToMany = utils.TagValueExist(goeTag, "o2m")
+		v.IsOneToMany = utils.HasTagValue(goeTag, "o2m")
 		if addrMap.get(b.mapp.addr) == nil {
 			addrMap.set(b.mapp.addr, v)
 		}
 	}
 	return nil
-}
-
-func getId(typeOf reflect.Type) (reflect.StructField, bool) {
-	return typeOf.FieldByNameFunc(func(s string) bool {
-		return strings.ToUpper(s) == "ID"
-	})
 }

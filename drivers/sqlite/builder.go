@@ -69,15 +69,14 @@ func buildSql(query *model.Query) {
 func buildSelect(query *model.Query) string {
 	builder := strings.Builder{}
 
-	builder.WriteString("SELECT")
-
+	builder.WriteString("SELECT ")
 	builder.WriteString(writeAttributes(query.Attributes[0]))
 	for _, a := range query.Attributes[1:] {
 		builder.WriteByte(',')
 		builder.WriteString(writeAttributes(a))
 	}
 
-	builder.WriteString("FROM")
+	builder.WriteString(" FROM ")
 	builder.WriteString(query.Tables[0].String())
 	for _, t := range query.Tables[1:] {
 		builder.WriteByte(',')
@@ -99,7 +98,7 @@ func buildSelect(query *model.Query) string {
 	if len(query.GroupBy) != 0 {
 		builder.WriteByte('\n')
 		gp := query.GroupBy[0]
-		builder.WriteString("GROUP BY" + writeAttributes(gp.Attribute))
+		builder.WriteString("GROUP BY " + writeAttributes(gp.Attribute))
 		for _, gp = range query.GroupBy[1:] {
 			builder.WriteString("," + writeAttributes(gp.Attribute))
 		}
@@ -109,15 +108,15 @@ func buildSelect(query *model.Query) string {
 		builder.WriteByte('\n')
 		ob := query.OrderBy[0]
 		if ob.Desc {
-			builder.WriteString("ORDER BY" + writeAttributes(ob.Attribute) + "DESC")
+			builder.WriteString("ORDER BY " + writeAttributes(ob.Attribute) + " DESC")
 		} else {
-			builder.WriteString("ORDER BY" + writeAttributes(ob.Attribute) + "ASC")
+			builder.WriteString("ORDER BY " + writeAttributes(ob.Attribute) + " ASC")
 		}
 		for _, ob = range query.OrderBy[1:] {
 			if ob.Desc {
-				builder.WriteString("," + writeAttributes(ob.Attribute) + "DESC")
+				builder.WriteString("," + writeAttributes(ob.Attribute) + " DESC")
 			} else {
-				builder.WriteString("," + writeAttributes(ob.Attribute) + "ASC")
+				builder.WriteString("," + writeAttributes(ob.Attribute) + " ASC")
 			}
 		}
 	}
@@ -179,9 +178,9 @@ func buildInsert(query *model.Query) string {
 func buildUpdate(query *model.Query) string {
 	builder := strings.Builder{}
 
-	builder.WriteString("UPDATE")
+	builder.WriteString("UPDATE ")
 	builder.WriteString(query.Tables[0].String())
-	builder.WriteString("SET")
+	builder.WriteString(" SET ")
 
 	i := 1
 	builder.WriteString(query.Attributes[0].Name + "=$" + strconv.Itoa(i))
@@ -198,7 +197,7 @@ func buildUpdate(query *model.Query) string {
 func buildDelete(query *model.Query) string {
 	builder := strings.Builder{}
 
-	builder.WriteString("DELETE FROM")
+	builder.WriteString("DELETE FROM ")
 	builder.WriteString(query.Tables[0].String())
 	writeWhere(query, &builder)
 
@@ -207,11 +206,11 @@ func buildDelete(query *model.Query) string {
 
 func writeAttributes(a model.Attribute) string {
 	if a.FunctionType != 0 {
-		return " " + functions[a.FunctionType] + "(" + a.Table + "." + a.Name + ")"
+		return functions[a.FunctionType] + "(" + a.Table + "." + a.Name + ")"
 	}
 
 	if a.AggregateType != 0 {
-		return " " + aggregates[a.AggregateType] + "(" + a.Table + "." + a.Name + ")"
+		return aggregates[a.AggregateType] + "(" + a.Table + "." + a.Name + ")"
 	}
 
 	return a.Table + "." + a.Name
@@ -220,7 +219,7 @@ func writeAttributes(a model.Attribute) string {
 func writeWhere(query *model.Query, builder *strings.Builder) {
 	if query.WhereOperations != nil {
 		builder.WriteByte('\n')
-		builder.WriteString("WHERE")
+		builder.WriteString("WHERE ")
 
 		for _, w := range query.WhereOperations {
 			switch w.Type {

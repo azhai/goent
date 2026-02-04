@@ -1,156 +1,264 @@
 package goent
 
 import (
-	"context"
-	"errors"
 	"reflect"
+	"strings"
 
 	"github.com/azhai/goent/enum"
 	"github.com/azhai/goent/model"
 )
 
+type dict = map[string]any
+
 type StateInsert[T any] struct {
-	conn    model.Connection
-	table   *Table[T]
-	builder builder
-	ctx     context.Context
+	table *Table[T]
+	*StateWhere
 }
 
-// Insert inserts a new record into the given table.
-//
-// Insert can return [ErrUniqueValue, ErrForeignKey and ErrBadRequest];
-// use ErrBadRequest as a generic error for any user interaction.
-//
-// Insert uses [context.Background] internally;
-// to specify the context, use [InsertContext].
-//
-// # Examples
-//
-//	// insert one record
-//	err = goent.Insert(db.Person).One(&Person{Name: "John"})
-//	// insert a list of records
-//
-//	persons := []Person{{Name: "John"}, {Name: "Mary"}}
-//	err = goent.Insert(db.Person).All(persons)
-func Insert[T any](table *T) StateInsert[T] {
-	return InsertContext(context.Background(), table)
+func (s *StateInsert[T]) One(obj *T) error {
+	schemaName := s.table.SchemaName
+	if schemaName == "" {
+		schemaName = "public"
+	}
+
+	// Collect and sort all columns by FieldId
+	columns := make([]*Column, 0, len(s.table.Columns))
+	for _, col := range s.table.Columns {
+		col.tableName = s.table.TableName
+		col.schemaName = &schemaName
+		columns = append(columns, col)
+	}
+
+	// Sort by FieldId
+	for i := 0; i < len(columns)-1; i++ {
+		for j := i + 1; j < len(columns); j++ {
+			if columns[i].FieldId > columns[j].FieldId {
+				columns[i], columns[j] = columns[j], columns[i]
+			}
+		}
+	}
+
+	s.builder.fields = make([]field, 0, len(columns))
+	for _, col := range columns {
+		s.builder.fields = append(s.builder.fields, col)
+	}
+
+	s.builder.buildInsert()
+	s.builder.buildValues(reflect.ValueOf(obj).Elem())
+
+	// 如果有 ReturningID，使用 handlerValuesReturning 处理返回值
+	if s.builder.query.ReturningID != nil {
+		dc := s.prepare(s.table.db.driver)
+		return handlerValuesReturning(s.ctx, s.conn, s.builder.query, reflect.ValueOf(obj).Elem(), s.builder.pkFieldId, dc)
+	}
+
+	return s.exec(s.table.db.driver)
 }
 
-// InsertContext inserts a new record into the given table.
-//
-// See [Insert] for examples.
-func InsertContext[T any](ctx context.Context, table *T) StateInsert[T] {
-	return createInsertState(ctx, NewTableModel(table))
+func (s *StateInsert[T]) All(data []*T) error {
+	schemaName := s.table.SchemaName
+	if schemaName == "" {
+		schemaName = "public"
+	}
+
+	// 收集所有列
+	columns := make([]*Column, 0, len(s.table.Columns))
+	for _, col := range s.table.Columns {
+		col.tableName = s.table.TableName
+		col.schemaName = &schemaName
+		columns = append(columns, col)
+	}
+
+	// Sort by FieldId
+	for i := 0; i < len(columns)-1; i++ {
+		for j := i + 1; j < len(columns); j++ {
+			if columns[i].FieldId > columns[j].FieldId {
+				columns[i], columns[j] = columns[j], columns[i]
+			}
+		}
+	}
+
+	s.builder.fields = make([]field, 0, len(columns))
+	for _, col := range columns {
+		s.builder.fields = append(s.builder.fields, col)
+	}
+
+	s.builder.buildInsert()
+	s.builder.buildBatchValues(reflect.ValueOf(data))
+	return s.exec(s.table.db.driver)
 }
 
-// InsertTable inserts a new record into the given table.
-func InsertTable[T any](ctx context.Context, table *Table[T]) StateInsert[T] {
-	return InsertTableContext(context.Background(), table)
-}
-
-// InsertTableContext inserts a new record into the given table.
-func InsertTableContext[T any](ctx context.Context, table *Table[T]) StateInsert[T] {
-	return createInsertState(ctx, table)
-}
-
-// OnTransaction sets a transaction on the query.
-//
-// # Example
-//
-//	tx, err = db.NewTransaction()
-//	if err != nil {
-//		// handler error
-//	}
-//	defer tx.Rollback()
-//
-//	a := Animal{Name: "Cat"}
-//	err = goent.Insert(db.Animal).OnTransaction(tx).One(&a)
-//	if err != nil {
-//		// handler error
-//	}
-//
-//	err = tx.Commit()
-//	if err != nil {
-//		// handler error
-//	}
-func (s StateInsert[T]) OnTransaction(tx model.Transaction) StateInsert[T] {
-	s.conn = tx
+func (s *StateInsert[T]) OnTransaction(tx model.Transaction) *StateInsert[T] {
+	s.StateWhere.conn = tx
 	return s
 }
 
-func (s StateInsert[T]) One(value *T) error {
-	if value == nil {
-		return errors.New("goent: invalid insert value. try sending a pointer to a struct as value")
+type StateSave[T any] struct {
+	table *Table[T]
+	*StateWhere
+}
+
+type valueOp struct {
+	value any
+}
+
+func (vo valueOp) GetValue() any {
+	return vo.value
+}
+
+func (s *StateSave[T]) One(obj *T) error {
+	argSave := getArgsSave(addrMap.mapField, s.table.Model, *obj, nil, nil)
+	if argSave.skip {
+		return nil
 	}
-	valueOf := reflect.ValueOf(value).Elem()
 
-	s.builder.fields = getArgsTable(addrMap.mapField, s.table.Model, valueOf)
-
-	pkFieldId := s.builder.buildSqlInsert(valueOf)
-
-	driver := s.builder.fields[0].getDb().driver
-	if s.conn == nil {
-		s.conn = driver.NewConnection()
+	// Check if primary key value is zero (0 or nil), then use INSERT instead of UPDATE
+	var pkValue any
+	if len(argSave.valuesWhere) > 0 {
+		pkValue = argSave.valuesWhere[0]
 	}
 
-	dc := driver.GetDatabaseConfig()
-	if s.builder.query.ReturningID != nil {
-		return handlerValuesReturning(s.ctx, s.conn, s.builder.query, valueOf, pkFieldId, dc)
+	isZeroValue := pkValue == nil || pkValue == 0
+	if isZeroValue {
+		// Use INSERT for new records
+		s.builder.query.Type = enum.InsertQuery
+
+		// Collect and sort all columns by fieldId
+		schemaName := s.table.SchemaName
+		if schemaName == "" {
+			schemaName = "public"
+		}
+		columns := make([]*Column, 0, len(s.table.Columns))
+		for _, col := range s.table.Columns {
+			col.tableName = s.table.TableName
+			col.schemaName = &schemaName
+			columns = append(columns, col)
+		}
+
+		// Sort by FieldId
+		for i := 0; i < len(columns)-1; i++ {
+			for j := i + 1; j < len(columns); j++ {
+				if columns[i].FieldId > columns[j].FieldId {
+					columns[i], columns[j] = columns[j], columns[i]
+				}
+			}
+		}
+
+		s.builder.fields = make([]field, 0, len(columns))
+		for _, col := range columns {
+			s.builder.fields = append(s.builder.fields, col)
+		}
+
+		s.builder.buildInsert()
+		s.builder.buildValues(reflect.ValueOf(obj).Elem())
+
+		// If has ReturningID, use handlerValuesReturning to handle return value
+		if s.builder.query.ReturningID != nil {
+			dc := s.prepare(s.table.db.driver)
+			return handlerValuesReturning(s.ctx, s.conn, s.builder.query, reflect.ValueOf(obj).Elem(), s.builder.pkFieldId, dc)
+		}
+
+		dc := s.prepare(s.table.db.driver)
+		return handlerValues(s.ctx, s.conn, s.builder.query, dc)
 	}
+
+	// Use UPDATE for existing records
+	s.builder.query.Type = enum.UpdateQuery
+	s.builder.sets = argSave.sets
+
+	// Build WHERE conditions
+	if len(argSave.valuesWhere) > 0 {
+		tableOf := reflect.ValueOf(s.table.Model).Elem()
+		for i, pkValue := range argSave.valuesWhere {
+			fld := addrMap.mapField[uintptr(tableOf.Field(i).Addr().UnsafePointer())]
+			if fld != nil {
+				filter := model.Operation{
+					Type:      enum.OperationWhere,
+					Operator:  enum.Equals,
+					Attribute: fld.getAttributeName(),
+					Table:     model.Table{Schema: fld.schema(), Name: fld.table()},
+					Value:     valueOp{value: pkValue},
+				}
+				s.builder.filters = append(s.builder.filters, filter)
+			}
+		}
+		// Add AND connector
+		if len(s.builder.filters) > 1 {
+			for i := len(s.builder.filters) - 1; i > 0; i-- {
+				andOp := model.Operation{
+					Operator: enum.And,
+					Type:     enum.LogicalWhere,
+				}
+				s.builder.filters = append(s.builder.filters[:i], append([]model.Operation{andOp}, s.builder.filters[i:]...)...)
+			}
+		}
+	}
+
+	s.builder.buildUpdate()
+	dc := s.prepare(s.table.db.driver)
 	return handlerValues(s.ctx, s.conn, s.builder.query, dc)
 }
 
-func (s StateInsert[T]) All(value []T) error {
-	if len(value) == 0 {
-		return errors.New("goent: can't insert a empty batch value")
-	}
-	valueOf := reflect.ValueOf(value)
-
-	s.builder.fields = getArgsTable(addrMap.mapField, s.table.Model, valueOf)
-
-	pkFieldId := s.builder.buildSqlInsertBatch(valueOf)
-
-	driver := s.builder.fields[0].getDb().driver
-	if s.conn == nil {
-		s.conn = driver.NewConnection()
-	}
-
-	dc := driver.GetDatabaseConfig()
-	return handlerValuesReturningBatch(s.ctx, s.conn, s.builder.query, valueOf, pkFieldId, dc)
+func (s *StateSave[T]) All(data []*T) error {
+	// TODO: add table to builder
+	return s.exec(s.table.db.driver)
 }
 
-func createInsertState[T any](ctx context.Context, t *Table[T]) StateInsert[T] {
-	return StateInsert[T]{builder: createBuilder(enum.InsertQuery), ctx: ctx, table: t}
-}
-
-func getArgsTable(addrMap map[uintptr]field, table any, valueOf reflect.Value) []field {
-	if table == nil {
-		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
+func (s *StateSave[T]) OneMap(val dict) error {
+	s.builder.query.Type = enum.UpdateQuery
+	if len(val) == 0 {
+		return nil
 	}
-	fields := make([]field, 0)
-
-	tableValueOf := reflect.ValueOf(table).Elem()
-	if tableValueOf.Kind() != reflect.Struct {
-		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
-	}
-
-	var fieldOf reflect.Value
-	for i := 0; i < tableValueOf.NumField(); i++ {
-		fieldOf = tableValueOf.Field(i)
-		if fieldOf.Kind() == reflect.Slice && fieldOf.Type().Elem().Kind() == reflect.Struct {
-			continue
+	sets := make([]set, 0, len(val))
+	var pkValue any
+	for k, v := range val {
+		col := s.table.Columns[k]
+		if col == nil {
+			col = s.table.Columns[strings.Title(k)]
 		}
-		field := addrMap[uintptr(fieldOf.Addr().UnsafePointer())]
-		if field != nil {
-			if field.getDefault() && valueOf.Field(field.getFieldId()).IsZero() {
-				continue
+		if col != nil {
+			sets = append(sets, set{attribute: col, value: v})
+			if k == "id" || k == "ID" {
+				pkValue = v
 			}
-			fields = append(fields, field)
+		}
+	}
+	if len(sets) == 0 {
+		return nil
+	}
+	s.builder.sets = sets
+
+	// 构建 WHERE 条件（使用 id 字段）
+	if pkValue != nil && len(s.table.PrimaryKeys) > 0 {
+		for _, pk := range s.table.PrimaryKeys {
+			filter := model.Operation{
+				Type:      enum.OperationWhere,
+				Operator:  enum.Equals,
+				Attribute: pk.Column.getAttributeName(),
+				Table:     model.Table{Schema: pk.Column.schema(), Name: pk.Column.table()},
+				Value:     valueOp{value: pkValue},
+			}
+			s.builder.filters = append(s.builder.filters, filter)
+			break
 		}
 	}
 
-	if len(fields) == 0 {
-		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
-	}
-	return fields
+	s.builder.buildUpdate()
+	dc := s.prepare(s.table.db.driver)
+	return handlerValues(s.ctx, s.conn, s.builder.query, dc)
+}
+
+func (s *StateSave[T]) AllMap(data []dict) error {
+	// TODO: add table to builder
+	return s.exec(s.table.db.driver)
+}
+
+func (s *StateSave[T]) OnTransaction(tx model.Transaction) *StateSave[T] {
+	s.StateWhere.conn = tx
+	return s
+}
+
+func (s *StateSave[T]) Match(obj T) *StateSave[T] {
+	s.StateWhere = MatchWhere[T](s.StateWhere, s.table, obj)
+	return s
 }

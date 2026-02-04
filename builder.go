@@ -12,6 +12,7 @@ type builder struct {
 	query        model.Query
 	modelStart   time.Time
 	pkFieldId    int // insert
+	table        *TableInfo
 	fields       []field
 	fieldsSelect []fieldSelect
 	fieldIds     []int           // insert and update
@@ -35,6 +36,22 @@ func createBuilder(typeQuery enum.QueryType) builder {
 }
 
 func (b *builder) buildSelect() {
+	if len(b.fieldsSelect) == 0 && b.table != nil {
+		columns := make([]*Column, 0, len(b.table.Columns))
+		for _, col := range b.table.Columns {
+			columns = append(columns, col)
+		}
+		for i := 0; i < len(columns)-1; i++ {
+			for j := i + 1; j < len(columns); j++ {
+				if columns[i].FieldId > columns[j].FieldId {
+					columns[i], columns[j] = columns[j], columns[i]
+				}
+			}
+		}
+		for _, col := range columns {
+			b.fieldsSelect = append(b.fieldsSelect, col)
+		}
+	}
 	b.query.Attributes = make([]model.Attribute, len(b.fieldsSelect))
 	for i := range b.fieldsSelect {
 		b.fieldsSelect[i].buildAttributeSelect(b.query.Attributes, i)
@@ -167,9 +184,8 @@ func (b *builder) buildWhere() {
 }
 
 func (b *builder) buildTables() {
-	var tables map[int]int
 	if len(b.joins) != 0 {
-		tables = make(map[int]int)
+		tables := make(map[int]int)
 		tables[b.joinsArgs[0].getTableId()] = 1
 		b.query.Tables = append(b.query.Tables, model.Table{Schema: b.joinsArgs[0].schema(), Name: b.joinsArgs[0].table()})
 
@@ -181,18 +197,60 @@ func (b *builder) buildTables() {
 		}
 		return
 	}
-	tables = make(map[int]int)
+
+	tables := make(map[int]int)
+
+	// 当fieldsSelect为空时，从table中获取表信息
+	if len(b.fieldsSelect) == 0 {
+		if b.table != nil {
+			tableId := b.table.TableId
+			if tableId == 0 {
+				tableId = b.table.SchemaId<<16 | b.table.TableId
+			}
+			tables[tableId] = 1
+			schema := b.table.SchemaName
+			b.query.Tables = append(b.query.Tables, model.Table{Schema: &schema, Name: b.table.TableName})
+		}
+		for i := range b.brs {
+			if b.brs[i].TableId != 0 && tables[b.brs[i].TableId] == 0 {
+				// 跳过与主表相同的表（通过名称判断）
+				isSameTable := b.table != nil && b.brs[i].Table.Name == b.table.TableName
+				if !isSameTable {
+					tables[b.brs[i].TableId] = 1
+					b.query.Tables = append(b.query.Tables, b.brs[i].Table)
+				}
+			}
+			if b.brs[i].AttributeTableId != 0 && tables[b.brs[i].AttributeTableId] == 0 {
+				// 跳过与主表相同的表（通过名称判断）
+				isSameTable := b.table != nil && b.brs[i].AttributeValueTable.Name == b.table.TableName
+				if !isSameTable {
+					tables[b.brs[i].AttributeTableId] = 1
+					b.query.Tables = append(b.query.Tables, b.brs[i].AttributeValueTable)
+				}
+			}
+		}
+		return
+	}
+
 	tables[b.fieldsSelect[0].getTableId()] = 1
 	b.query.Tables = append(b.query.Tables, model.Table{Schema: b.fieldsSelect[0].schema(), Name: b.fieldsSelect[0].table()})
 
 	for i := range b.brs {
 		if b.brs[i].TableId != 0 && tables[b.brs[i].TableId] == 0 {
-			tables[b.brs[i].TableId] = 1
-			b.query.Tables = append(b.query.Tables, b.brs[i].Table)
+			// 跳过与第一个字段相同的表（通过名称判断）
+			isSameTable := b.brs[i].Table.Name == b.fieldsSelect[0].table()
+			if !isSameTable {
+				tables[b.brs[i].TableId] = 1
+				b.query.Tables = append(b.query.Tables, b.brs[i].Table)
+			}
 		}
 		if b.brs[i].AttributeTableId != 0 && tables[b.brs[i].AttributeTableId] == 0 {
-			tables[b.brs[i].AttributeTableId] = 1
-			b.query.Tables = append(b.query.Tables, b.brs[i].AttributeValueTable)
+			// 跳过与第一个字段相同的表（通过名称判断）
+			isSameTable := b.brs[i].AttributeValueTable.Name == b.fieldsSelect[0].table()
+			if !isSameTable {
+				tables[b.brs[i].AttributeTableId] = 1
+				b.query.Tables = append(b.query.Tables, b.brs[i].AttributeValueTable)
+			}
 		}
 	}
 }
@@ -221,15 +279,21 @@ func (b *builder) buildInsert() {
 	b.fieldIds = make([]int, 0, len(b.fields))
 	b.query.Attributes = make([]model.Attribute, 0, len(b.fields))
 
-	b.query.Tables = make([]model.Table, 1)
-	b.query.Tables[0] = model.Table{Schema: b.fields[0].schema(), Name: b.fields[0].table()}
-	for i := range b.fields {
-		b.fields[i].buildAttributeInsert(b)
+	if len(b.fields) > 0 {
+		b.query.Tables = make([]model.Table, 1)
+		b.query.Tables[0] = model.Table{Schema: b.fields[0].schema(), Name: b.fields[0].table()}
+		for i := range b.fields {
+			b.fields[i].buildAttributeInsert(b)
+		}
 	}
 }
 
 func (b *builder) buildValues(value reflect.Value) int {
 	b.query.Arguments = make([]any, len(b.fieldIds))
+
+	if value.Kind() == reflect.Ptr {
+		value = value.Elem()
+	}
 
 	for c, i := range b.fieldIds {
 		b.query.Arguments[c] = value.Field(i).Interface()
@@ -253,6 +317,9 @@ func (b *builder) buildBatchValues(value reflect.Value) int {
 }
 
 func buildBatchValues(value reflect.Value, b *builder, c int) int {
+	if value.Kind() == reflect.Ptr {
+		value = value.Elem()
+	}
 	for _, i := range b.fieldIds {
 		b.query.Arguments[c] = value.Field(i).Interface()
 		c++

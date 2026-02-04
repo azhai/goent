@@ -5,7 +5,6 @@ import (
 	"iter"
 	"math"
 	"reflect"
-	"slices"
 	"strings"
 
 	"github.com/azhai/goent/enum"
@@ -15,224 +14,115 @@ import (
 	"github.com/azhai/goent/query/where"
 )
 
-type StateSelect[T any] struct {
-	conn    model.Connection
-	builder builder
-	ctx     context.Context
-	argsSelect
+type StateSelect[T, R any] struct {
+	fields []fieldSelect
+	table  *Table[T]
+	others []*Table[T]
+	*StateWhere
 }
 
-type StateFind[T any] struct {
-	sSelect StateSelect[T]
-}
-
-// Find returns a matched record,
-// if non record is found returns a [ErrNotFound].
-//
-// Find uses [context.Background] internally;
-// to specify the context, use [FindContext].
-//
-// # Example
-//
-//	// one primary key
-//	animal, err = goent.Find(db.Animal).ByValue(Animal{ID: 2})
-//
-//	// two primary keys
-//	animalFood, err = goent.Find(db.AnimalFood).ByValue(AnimalFood{AnimalID: 3, FoodID: 2})
-//
-//	// StateFind record by value, if have more than one it will returns the first
-//	cat, err = goent.Find(db.Animal).ByValue(Animal{Name: "Cat"})
-func Find[T any](table *T) StateFind[T] {
-	return FindContext(context.Background(), table)
-}
-
-// FindContext returns a matched record,
-// if non record is found returns a [ErrNotFound].
-//
-// See [Find] for examples
-func FindContext[T any](ctx context.Context, table *T) StateFind[T] {
-	return StateFind[T]{sSelect: ListContext(ctx, table)}
-}
-
-// FindTable returns a matched record
-func FindTable[T any](table *Table[T]) StateFind[T] {
-	return FindTableContext(context.Background(), table)
-}
-
-// FindTableContext returns a matched record
-func FindTableContext[T any](ctx context.Context, table *Table[T]) StateFind[T] {
-	return StateFind[T]{sSelect: ListTableContext(ctx, table)}
-}
-
-// OnTransaction sets a transaction on the query.
-//
-// # Example
-//
-//	tx, err = db.NewTransaction()
-//	if err != nil {
-//		// handler error
-//	}
-//	defer tx.Rollback()
-//
-//	var animals []Animal
-//
-//	animals, err = goent.List(db.Animal).OnTransaction(tx).AsSlice()
-//	if err != nil {
-//		// handler error
-//	}
-//
-//	err = tx.Commit()
-//	if err != nil {
-//		// handler error
-//	}
-func (f StateFind[T]) OnTransaction(tx model.Transaction) StateFind[T] {
-	f.sSelect = f.sSelect.OnTransaction(tx)
-	return f
-}
-
-// ByValue finds the record by non-zero values,
-// if returns more than one it's returns the first
-// and ignores the rest
-func (f StateFind[T]) ByValue(value T) (*T, error) {
-	pks, valuesPks, skip := getNonZeroFields(getArgs{
-		addrMap:   addrMap.mapField,
-		tableArgs: f.sSelect.tableArgs,
-		value:     value})
-
-	if skip {
-		return nil, ErrNotFound
-	}
-
-	f.sSelect = f.sSelect.Where(operations(pks, valuesPks))
-
-	for row, err := range f.sSelect.Rows() {
-		if err != nil {
-			return nil, err
+func NewStateSelect[T, R any](ctx context.Context, table *Table[T], col any) *StateSelect[T, R] {
+	s := NewStateWhere(ctx)
+	s.builder.query.Type = enum.SelectQuery
+	s.builder.table = &table.TableInfo
+	sel := &StateSelect[T, R]{table: table, StateWhere: s}
+	if col != nil {
+		if a, ok := col.(model.Aggregate); ok {
+			if f, ok := a.(interface{ GetField() any }).GetField().(*Column); ok {
+				agg := createAggregateFromTable(table, f, a.Aggregate())
+				sel.fields = append(sel.fields, agg)
+				s.builder.fieldsSelect = append(s.builder.fieldsSelect, agg)
+			}
 		}
-		return &row, nil
 	}
+	return sel
+}
 
+func (s *StateSelect[T, R]) CopyFrom(ob builder, conn model.Connection) *StateSelect[T, R] {
+	// copy joins
+	s.builder.joins, s.builder.joinsArgs = ob.joins, ob.joinsArgs
+	// copy operations
+	s.builder.brs = ob.brs
+	s.builder.filters = ob.filters
+	// copy connection/transaction
+	s.conn = conn
+	return s
+}
+
+// AsQuery return a [model.Query] for use inside a [where.In].
+func (s *StateSelect[T, R]) AsQuery() model.Query {
+	s.builder.buildSqlSelect()
+	return s.builder.query
+}
+
+// Rows return a iterator on rows.
+func (s *StateSelect[T, R]) Rows() iter.Seq2[R, error] {
+	s.builder.buildSqlSelect()
+	dc, size := s.prepare(s.table.db.driver), len(s.builder.fieldsSelect)
+	return handlerResult[R](s.ctx, s.conn, s.builder.query, size, dc)
+}
+
+func (s *StateSelect[T, R]) One() (*R, error) {
+	for row, err := range s.Take(1).Rows() {
+		return &row, err
+	}
 	return nil, ErrNotFound
 }
 
-// Select retrieves rows from tables.
-//
-// Select uses [context.Background] internally;
-// to specify the context, use [SelectContext]
-//
-// # Example
-//
-//	var result []struct {
-//		User    string
-//		Role    *string
-//		EndTime *time.Time
-//	}
-//
-//	// row is the generic struct
-//	for row, err := range goent.Select[struct {
-//			User    string     // output row
-//			Role    *string    // output row
-//			EndTime *time.Time // output row
-//		}](&db.User.Name, &db.Role.Name, &db.UserRole.EndDate).
-//		Joins(
-//			join.LeftJoin[int](&db.User.ID, &db.UserRole.UserID),
-//			join.LeftJoin[int](&db.UserRole.RoleID, &db.Role.ID),
-//		).
-//		OrderByAsc(&db.User.ID).Rows() {
-//
-//		if err != nil {
-//			//handler error
-//		}
-//		//handler rows
-//		result = append(result, row)
-//	}
-func Select[T any](args ...any) StateSelect[T] {
-	return SelectContext[T](context.Background(), args...)
-}
-
-// SelectContext retrieves rows from tables.
-//
-// See [Select] for examples
-func SelectContext[T any](ctx context.Context, args ...any) StateSelect[T] {
-	return createSelectState[T](ctx, getArgsSelect, args...)
-}
-
-// Where receives [model.Operation] as where operations from where sub package
-func (s StateSelect[T]) Where(o model.Operation) StateSelect[T] {
-	s.builder.brs = nil
-	helperWhere(&s.builder, addrMap.mapField, o)
-	return s
-}
-
-// Filter creates a where on non-zero values.
-func (s StateSelect[T]) Filter(o model.Operation) StateSelect[T] {
-	s.builder.filters = nil
-	helperFilter(&s.builder, addrMap.mapField, o)
-	return s
-}
-
-// Match creates a where on non-zero values over the model T, all strings will be a LIKE operator
-// using the ToUpper function to ensure all values is matched.
-func (s StateSelect[T]) Match(value T) StateSelect[T] {
-	args, values, skip := getNonZeroFields(getArgs{
-		addrMap:   addrMap.mapField,
-		tableArgs: s.tableArgs,
-		value:     value})
-
-	if skip {
-		return s
-	}
-
-	return s.Filter(operationsList(args, values))
-}
-
-// Take takes i elements
-func (s StateSelect[T]) Take(i int) StateSelect[T] {
-	s.builder.query.Limit = i
-	return s
-}
-
-// Skip skips i elements
-func (s StateSelect[T]) Skip(i int) StateSelect[T] {
-	s.builder.query.Offset = i
-	return s
-}
-
-// OrderByAsc makes a ordained by args ascending query
-func (s StateSelect[T]) OrderByAsc(args ...any) StateSelect[T] {
-	for _, arg := range args {
-		if a, ok := getAttribute(arg, addrMap.mapField); ok {
-			ord := model.OrderBy{Attribute: a, Desc: false}
-			s.builder.query.OrderBy = append(s.builder.query.OrderBy, ord)
+func (s *StateSelect[T, R]) All() ([]*R, error) {
+	rows := make([]*R, 0, s.builder.query.Limit)
+	for row, err := range s.Rows() {
+		if err != nil {
+			return nil, err
 		}
+		rows = append(rows, &row)
 	}
+	return rows, nil
+}
+
+func (s *StateSelect[T, R]) RollUP() *StateSelect[T, R] {
 	return s
 }
 
-// OrderByDesc makes a ordained by args descending query
-func (s StateSelect[T]) OrderByDesc(args ...any) StateSelect[T] {
+func (s *StateSelect[T, R]) OnTransaction(tx model.Transaction) *StateSelect[T, R] {
+	s.builder.query.ForUpdate = true
+	s.StateWhere.conn = tx
+	return s
+}
+
+func (s *StateSelect[T, R]) Filter(args ...model.Operation) *StateSelect[T, R] {
+	s.StateWhere = s.StateWhere.Filter(args...)
+	return s
+}
+
+func (s *StateSelect[T, R]) Match(obj T) *StateSelect[T, R] {
+	s.StateWhere = MatchWhere[T](s.StateWhere, s.table, obj)
+	return s
+}
+
+// OrderBy makes a ordained by args query
+func (s *StateSelect[T, R]) OrderBy(args ...string) *StateSelect[T, R] {
+	var desc bool
 	for _, arg := range args {
-		if a, ok := getAttribute(arg, addrMap.mapField); ok {
-			ord := model.OrderBy{Attribute: a, Desc: true}
-			s.builder.query.OrderBy = append(s.builder.query.OrderBy, ord)
+		pieces := strings.Fields(arg)
+		if len(pieces) == 2 && strings.ToLower(pieces[1]) == "desc" {
+			arg, desc = pieces[0], true
 		}
+		var table string
+		if pieces = strings.SplitN(arg, ".", 2); len(pieces) == 2 {
+			table, arg = pieces[0], pieces[1]
+		} else {
+			table = s.table.TableName
+		}
+		attr := model.Attribute{Table: table, Name: arg}
+		ord := model.OrderBy{Attribute: attr, Desc: desc}
+		s.builder.query.OrderBy = append(s.builder.query.OrderBy, ord)
 	}
 	return s
 }
-
-// StrOrderBy makes a ordained by args query
-// func (s StateSelect[T]) StrOrderBy(args ...string) StateSelect[T] {
-// 	for _, arg := range args {
-// 		if a, ok := getAttribute(arg, addrMap.mapField); ok {
-// 			ord := model.OrderBy{Attribute: a, Desc: false}
-// 			s.builder.query.OrderBy = append(s.builder.query.OrderBy, ord)
-// 		}
-// 	}
-// 	return s
-// }
 
 // GroupBy makes a group by args query
-func (s StateSelect[T]) GroupBy(args ...any) StateSelect[T] {
+func (s *StateSelect[T, R]) GroupBy(args ...any) *StateSelect[T, R] {
 	s.builder.query.GroupBy = make([]model.GroupBy, len(args))
 	for i := range args {
 		if a, ok := getAttribute(args[i], addrMap.mapField); ok {
@@ -242,59 +132,34 @@ func (s StateSelect[T]) GroupBy(args ...any) StateSelect[T] {
 	return s
 }
 
-// StrGroupBy makes a group by args query
-// func (s StateSelect[T]) StrGroupBy(args ...string) StateSelect[T] {
-// 	s.builder.query.GroupBy = make([]model.GroupBy, len(args))
-// 	for i := range args {
-// 		if a, ok := getAttribute(args[i], addrMap.mapField); ok {
-// 			s.builder.query.GroupBy[i].Attribute = a
-// 		}
-// 	}
-// 	return s
-// }
+// Take takes i elements
+func (s *StateSelect[T, R]) Take(i int) *StateSelect[T, R] {
+	s.builder.query.Limit = i
+	return s
+}
 
-func (s StateSelect[T]) Join(left, right any) StateSelect[T] {
+// Skip skips i elements
+func (s *StateSelect[T, R]) Skip(i int) *StateSelect[T, R] {
+	s.builder.query.Offset = i
+	return s
+}
+
+func (s *StateSelect[T, R]) Join(left, right any) *StateSelect[T, R] {
 	s.builder.buildSelectJoins(enum.Join, getArgsJoin(addrMap.mapField, left, right))
 	return s
 }
 
-func (s StateSelect[T]) LeftJoin(left, right any) StateSelect[T] {
+func (s *StateSelect[T, R]) LeftJoin(left, right any) *StateSelect[T, R] {
 	s.builder.buildSelectJoins(enum.LeftJoin, getArgsJoin(addrMap.mapField, left, right))
 	return s
 }
 
-func (s StateSelect[T]) RightJoin(left, right any) StateSelect[T] {
+func (s *StateSelect[T, R]) RightJoin(left, right any) *StateSelect[T, R] {
 	s.builder.buildSelectJoins(enum.RightJoin, getArgsJoin(addrMap.mapField, left, right))
 	return s
 }
 
-// AsSlice return all the rows as a slice.
-func (s StateSelect[T]) AsSlice() ([]T, error) {
-	rows := make([]T, 0, s.builder.query.Limit)
-	for row, err := range s.Rows() {
-		if err != nil {
-			return nil, err
-		}
-		rows = append(rows, row)
-	}
-	return rows, nil
-}
-
-// AsOne return the first row, if non row is found returns a [ErrNotFound].
-func (s StateSelect[T]) AsOne() (row T, err error) {
-	for row, err = range s.Rows() {
-		break
-	}
-	return
-}
-
-// AsQuery return a [model.Query] for use inside a [where.In].
-func (s StateSelect[T]) AsQuery() model.Query {
-	s.builder.buildSqlSelect()
-	return s.builder.query
-}
-
-type Pagination[T any] struct {
+type Pagination[T, R any] struct {
 	TotalValues int64 `json:"totalValues"`
 	TotalPages  int   `json:"totalPages"`
 
@@ -307,15 +172,15 @@ type Pagination[T any] struct {
 	HasNextPage     bool `json:"hasNextPage"`
 	NextPage        int  `json:"nextPage"`
 
-	StartIndex int `json:"startIndex"`
-	EndIndex   int `json:"endIndex"`
-	Values     []T `json:"values"`
+	StartIndex int  `json:"startIndex"`
+	EndIndex   int  `json:"endIndex"`
+	Values     []*R `json:"values"`
 }
 
-// AsPagination return a paginated query as [Pagination].
+// Pagination return a paginated query as [Pagination].
 //
 // Default values for page and size are 1 and 10 respectively.
-func (s StateSelect[T]) AsPagination(page, size int) (*Pagination[T], error) {
+func (s *StateSelect[T, R]) Pagination(page, size int) (*Pagination[T, R], error) {
 	if size <= 0 {
 		size = 10
 	}
@@ -323,35 +188,19 @@ func (s StateSelect[T]) AsPagination(page, size int) (*Pagination[T], error) {
 		page = 1
 	}
 
-	var err error
-	stateCount := Select[struct{ Count int64 }](aggregate.Count(s.tableArgs[0]))
-
-	// copy joins
-	stateCount.builder.joins = s.builder.joins
-	stateCount.builder.joinsArgs = s.builder.joinsArgs
-
-	// copy operations
-	stateCount.builder.brs = s.builder.brs
-	stateCount.builder.filters = s.builder.filters
-
-	// copy connection/transaction
-	stateCount.conn = s.conn
-
-	var count int64
-	for row, err := range stateCount.Rows() {
-		if err != nil {
-			return nil, err
-		}
-		count = row.Count
-		break
+	counter := NewStateSelect[T, ResultCount](s.ctx, s.table, aggregate.Count(s.table))
+	counter.CopyFrom(s.builder, s.conn)
+	count, err := FetchCountResult(counter)
+	if err != nil {
+		return nil, err
 	}
 
 	s.builder.query.Offset = size * (page - 1)
 	s.builder.query.Limit = size
 
-	p := new(Pagination[T])
+	p := new(Pagination[T, R])
 
-	p.Values, err = s.AsSlice()
+	p.Values, err = s.All()
 	if err != nil {
 		return nil, err
 	}
@@ -389,86 +238,6 @@ func (s StateSelect[T]) AsPagination(page, size int) (*Pagination[T], error) {
 	return p, nil
 }
 
-// OnTransaction sets a transaction on the query.
-//
-// # Example
-//
-//	tx, err = db.NewTransaction()
-//	if err != nil {
-//		// handler error
-//	}
-//	defer tx.Rollback()
-//
-//	var animals []Animal
-//
-//	animals, err = goent.List(db.Animal).OnTransaction(tx).AsSlice()
-//	if err != nil {
-//		// handler error
-//	}
-//
-//	err = tx.Commit()
-//	if err != nil {
-//		// handler error
-//	}
-func (s StateSelect[T]) OnTransaction(tx model.Transaction) StateSelect[T] {
-	s.builder.query.ForUpdate = true
-	s.conn = tx
-	return s
-}
-
-// Rows return a iterator on rows.
-func (s StateSelect[T]) Rows() iter.Seq2[T, error] {
-	s.builder.buildSqlSelect()
-
-	driver := s.builder.fieldsSelect[0].getDb().driver
-	if s.conn == nil {
-		s.conn = driver.NewConnection()
-	}
-
-	dc := driver.GetDatabaseConfig()
-	return handlerResult[T](s.ctx, s.conn, s.builder.query, len(s.builder.fieldsSelect), dc)
-}
-
-func createSelectState[T any](ctx context.Context, getArgs func(args ...any) argsSelect, args ...any) StateSelect[T] {
-	s := StateSelect[T]{builder: createBuilder(enum.SelectQuery), argsSelect: getArgs(args...), ctx: ctx}
-	s.builder.fieldsSelect = s.fields
-	return s
-}
-
-// List is a wrapper over [Select] for more simple queries using filters, pagination and ordering.
-//
-// List uses [context.Background] internally;
-// to specify the context, use [ListContext]
-//
-// # Example
-//
-//	// where animals.name LIKE $1 AND animal.id = $2 AND animals.habitat_id = $3
-//	goent.List(db.Animal).OrderByAsc(&db.Animal.Name).Match(Animal{Name: "Cat", Id: 3, HabitatID: &habitatId}).AsSlice()
-//
-//	// pagination list
-//	var p *goent.Pagination[Animal]
-//	p, err = goent.List(db.Animal).AsPagination(1, 10)
-func List[T any](table *T) StateSelect[T] {
-	return ListContext(context.Background(), table)
-}
-
-// ListContext is a wrapper over [Select] for more simple queries using filters, pagination and ordering.
-//
-// See [List] for examples.
-func ListContext[T any](ctx context.Context, table *T) StateSelect[T] {
-	return createSelectState[T](ctx, getArgsList, table)
-}
-
-// ListTable is a wrapper over [Select] for more simple queries using filters, pagination and ordering.
-func ListTable[T any](table *Table[T]) StateSelect[T] {
-	return ListTableContext(context.Background(), table)
-}
-
-// ListTableContext is a wrapper over [Select] for more simple queries using filters, pagination and ordering.
-func ListTableContext[T any](ctx context.Context, table *Table[T]) StateSelect[T] {
-	return createSelectState[T](ctx, getArgsList, table.Model)
-}
-
 type getArgs struct {
 	addrMap   map[uintptr]field
 	value     any
@@ -492,39 +261,35 @@ func getNonZeroFields(a getArgs) ([]any, []any, bool) {
 	return args, values, false
 }
 
-func operations(args, values []any) model.Operation {
-	if len(args) == 1 {
-		return equals(args[0], values[0])
+func andList(args, values []any, eq func(f, a any) model.Operation) model.Operation {
+	size := len(args)
+	if size == 0 {
+		return model.Operation{}
+	} else if size == 1 {
+		return eq(args[0], values[0])
 	}
 
-	if len(args) == 2 {
-		return where.And(equals(args[0], values[0]), equals(args[1], values[1]))
+	var others []model.Operation
+	left, right := eq(args[0], values[0]), eq(args[1], values[1])
+	for i := 2; i < size; i++ {
+		others = append(others, eq(args[i], values[i]))
 	}
-
-	middle := len(args) / 2
-
-	return where.And(operations(args[:middle], values[:middle]), operations(args[middle:], values[middle:]))
+	return where.And(left, right, others...)
 }
 
-func equals(f any, a any) model.Operation {
+func operations(args, values []any) model.Operation {
+	return andList(args, values, equals)
+}
+
+func equals(f, a any) model.Operation {
 	return where.Equals(&f, a)
 }
 
 func operationsList(args, values []any) model.Operation {
-	if len(args) == 1 {
-		return equalsOrLike(args[0], values[0])
-	}
-
-	if len(args) == 2 {
-		return where.And(equalsOrLike(args[0], values[0]), equalsOrLike(args[1], values[1]))
-	}
-
-	middle := len(args) / 2
-
-	return where.And(operationsList(args[:middle], values[:middle]), operationsList(args[middle:], values[middle:]))
+	return andList(args, values, equalsOrLike)
 }
 
-func equalsOrLike(f any, a any) model.Operation {
+func equalsOrLike(f, a any) model.Operation {
 	v, ok := a.(string)
 
 	if !ok {
@@ -567,6 +332,20 @@ func createAggregate(field field, a any) fieldSelect {
 	return nil
 }
 
+func createAggregateFromTable[T any](table *Table[T], col *Column, aggType enum.AggregateType) fieldSelect {
+	schemaName := table.SchemaName
+	if schemaName == "" {
+		schemaName = "public"
+	}
+	return aggregateResult{
+		tableName:     table.TableName,
+		schemaName:    &schemaName,
+		tableId:       table.TableId,
+		db:            table.db,
+		attributeName: col.ColumnName,
+		aggregateType: aggType}
+}
+
 func getArgsJoin(addrMap map[uintptr]field, args ...any) []field {
 	fields := make([]field, 2)
 	var ptr uintptr
@@ -597,9 +376,9 @@ func getArgFunction(arg any, addrMap map[uintptr]field, operation *model.Operati
 		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
 	}
 
-	if function, ok := value.Elem().Interface().(model.Attributer); ok {
-		operation.Function = function.Attribute(model.Body{}).FunctionType
-		return getArg(function.GetField(), addrMap, nil)
+	if fun, ok := value.Elem().Interface().(model.Attributer); ok {
+		operation.Function = fun.Attribute(model.Body{}).FunctionType
+		return getArg(fun.GetField(), addrMap, nil)
 	}
 	return getArg(arg, addrMap, nil)
 }
@@ -618,7 +397,7 @@ func getArg(arg any, addrMap map[uintptr]field, operation *model.Operation) fiel
 	if addrMap[addr] != nil {
 		return addrMap[addr]
 	}
-	// any as pointer, used on StateSave, StateFind, StateRemove and list
+	// any as pointer, used on StateSave2, StateFind, StateRemove and list
 	return getAnyArg(v, addrMap)
 }
 
@@ -668,6 +447,9 @@ func helperWhere(builder *builder, addrMap map[uintptr]field, br model.Operation
 	switch br.Type {
 	case enum.OperationWhere, enum.OperationInWhere:
 		a := getArg(br.Arg, addrMap, &br)
+		if a == nil {
+			return
+		}
 		br.Table = model.Table{Schema: a.schema(), Name: a.table()}
 		br.TableId = a.getTableId()
 		br.Attribute = a.getAttributeName()
@@ -675,6 +457,9 @@ func helperWhere(builder *builder, addrMap map[uintptr]field, br model.Operation
 		builder.brs = append(builder.brs, br)
 	case enum.OperationAttributeWhere:
 		a, b := getArg(br.Arg, addrMap, nil), getArg(br.Value.GetValue(), addrMap, nil)
+		if a == nil || b == nil {
+			return
+		}
 		br.Table = model.Table{Schema: a.schema(), Name: a.table()}
 		br.TableId = a.getTableId()
 		br.Attribute = a.getAttributeName()
@@ -685,15 +470,21 @@ func helperWhere(builder *builder, addrMap map[uintptr]field, br model.Operation
 		builder.brs = append(builder.brs, br)
 	case enum.OperationIsWhere:
 		a := getArg(br.Arg, addrMap, nil)
+		if a == nil {
+			return
+		}
 		br.Table = model.Table{Schema: a.schema(), Name: a.table()}
 		br.TableId = a.getTableId()
 		br.Attribute = a.getAttributeName()
 
 		builder.brs = append(builder.brs, br)
 	case enum.LogicalWhere:
-		helperWhere(builder, addrMap, *br.FirstOperation)
-		builder.brs = append(builder.brs, br)
-		helperWhere(builder, addrMap, *br.SecondOperation)
+		for i, op := range br.Branches {
+			if i > 0 {
+				builder.brs = append(builder.brs, br)
+			}
+			helperWhere(builder, addrMap, op)
+		}
 	}
 }
 
@@ -721,12 +512,13 @@ func helperFilter(builder *builder, addrMap map[uintptr]field, br model.Operatio
 		builder.filters = append(builder.filters, br)
 		return true
 	case enum.LogicalWhere:
-		firstFlag := helperFilter(builder, addrMap, *br.FirstOperation)
-		builder.filters = append(builder.filters, br)
-		idx := len(builder.filters) - 1
-		secondFlag := helperFilter(builder, addrMap, *br.SecondOperation)
-		if !firstFlag || !secondFlag {
-			builder.filters = slices.Delete(builder.filters, idx, idx+1)
+		var currFlag, lastFlag bool
+		for i, op := range br.Branches {
+			currFlag = helperFilter(builder, addrMap, op)
+			if i > 0 && currFlag && lastFlag {
+				builder.filters = append(builder.filters, br)
+			}
+			lastFlag = currFlag
 		}
 		return true
 	}
@@ -738,20 +530,34 @@ func getArgsSelect(args ...any) argsSelect {
 	fields := make([]fieldSelect, 0, len(args))
 
 	for _, arg := range args {
-		fieldOf := reflect.ValueOf(arg)
-		f := addrMap[uintptr(fieldOf.UnsafePointer())]
-		if f != nil {
+		if f, ok := arg.(field); ok {
 			fields = append(fields, f)
 			continue
 		}
-		if a, ok := fieldOf.Interface().(model.Attributer); ok {
-			f = addrMap[uintptr(reflect.ValueOf(a.GetField()).UnsafePointer())]
+		if a, ok := arg.(model.Aggregate); ok {
+			if f, ok := a.(interface{ GetField() any }).GetField().(field); ok {
+				fields = append(fields, createAggregate(f, a))
+				continue
+			}
+		}
+		if a, ok := arg.(model.FunctionType); ok {
+			if f, ok := a.(interface{ GetField() any }).GetField().(field); ok {
+				fields = append(fields, createFunction(f, a))
+				continue
+			}
+		}
+		if a, ok := arg.(model.Attributer); ok {
+			if f, ok := a.GetField().(field); ok {
+				fields = append(fields, f)
+				continue
+			}
+		}
+		fieldOf := reflect.ValueOf(arg)
+		if fieldOf.Kind() == reflect.Ptr && !fieldOf.IsNil() {
+			f := addrMap[uintptr(fieldOf.UnsafePointer())]
 			if f != nil {
-				if a.Attribute(model.Body{}).AggregateType != 0 {
-					fields = append(fields, createAggregate(f, fieldOf.Elem().Interface()))
-					continue
-				}
-				fields = append(fields, createFunction(f, fieldOf.Elem().Interface()))
+				fields = append(fields, f)
+				continue
 			}
 		}
 	}

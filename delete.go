@@ -4,205 +4,92 @@ import (
 	"context"
 	"reflect"
 
-	"github.com/azhai/goent/enum"
 	"github.com/azhai/goent/model"
+	"github.com/azhai/goent/query/where"
 )
 
-type StateDelete struct {
-	conn    model.Connection
+type StateWhere struct {
 	builder builder
+	conn    model.Connection
 	ctx     context.Context
 }
 
-type StateRemove[T any] struct {
-	table  *T
-	delete StateDelete
+func NewStateWhere(ctx context.Context) *StateWhere {
+	return &StateWhere{ctx: ctx, builder: createBuilder(0)}
 }
 
-// Remove is a wrapper over [Delete] for more simple deletes,
-// uses the value for create a where matching the primary keys.
-//
-// Remove uses [context.Background] internally;
-// to specify the context, use [RemoveContext].
-//
-// # Examples
-//
-//	// StateRemove animal of id 2
-//	err = goent.Remove(db.Animal).ByValue(Animal{Id: 2})
-func Remove[T any](table *T) StateRemove[T] {
-	return RemoveContext(context.Background(), table)
-}
-
-// RemoveContext is a wrapper over [Delete] for more simple deletes,
-// uses the value for create a where matching the primary keys.
-//
-// See [Remove] for examples
-func RemoveContext[T any](ctx context.Context, table *T) StateRemove[T] {
-	return StateRemove[T]{table: table, delete: DeleteContext(ctx, table)}
-}
-
-// RemoveTable is a wrapper over [Delete] for more simple deletes
-func RemoveTable[T any](table *Table[T]) StateRemove[T] {
-	return RemoveTableContext(context.Background(), table)
-}
-
-// RemoveTableContext is a wrapper over [Delete] for more simple deletes
-func RemoveTableContext[T any](ctx context.Context, table *Table[T]) StateRemove[T] {
-	return StateRemove[T]{table: table.Model, delete: DeleteContext(ctx, table)}
-}
-
-// OnTransaction sets a transaction on the query.
-//
-// # Example
-//
-//	tx, err = db.NewTransaction()
-//	if err != nil {
-//		// handler error
-//	}
-//	defer tx.Rollback()
-//
-//	err = err = goent.Remove(db.Animal).OnTransaction(tx).ByValue(Animal{ID: 2})
-//	if err != nil {
-//		// handler error
-//	}
-//
-//	err = tx.Commit()
-//	if err != nil {
-//		// handler error
-//	}
-func (r StateRemove[T]) OnTransaction(tx model.Transaction) StateRemove[T] {
-	r.delete.conn = tx
-	return r
-}
-
-// ByValue removes the record by non-zero values
-func (r StateRemove[T]) ByValue(value T) error {
-	args, valuesArgs, skip := getNonZeroFields(getArgs{
-		addrMap:   addrMap.mapField,
-		tableArgs: getRemoveTableArgs(r.table),
-		value:     value})
-
-	if skip {
-		return nil
+func MatchWhere[T any](s *StateWhere, table *Table[T], obj T) *StateWhere {
+	if et, ok := any(obj).(Entity); ok {
+		pkey, id := table.PrimaryKeys[0], et.GetID()
+		return s.Filter(where.EqualsTable(table, pkey.ColumnName, id))
 	}
-
-	return r.delete.Where(operations(args, valuesArgs))
+	data, valueOf := make(dict), reflect.ValueOf(obj)
+	for _, key := range table.PrimaryKeys {
+		data[key.ColumnName] = valueOf.FieldByName(key.FieldName).Interface()
+	}
+	return s.Filter(where.EqualsMap(table, data))
 }
 
-// Delete StateRemove records in the given table
-//
-// Delete uses [context.Background] internally;
-// to specify the context, use [DeleteContext].
-//
-// # Examples
-//
-//	// delete all records
-//	err = goent.Delete(db.UserRole).All()
-//	// delete one record
-//	err = goent.Delete(db.Animal).Where(where.Equals(&db.Animal.ID, 2))
-func Delete[T any](table *T) StateDelete {
-	return DeleteContext(context.Background(), table)
+func (s *StateWhere) Filter(args ...model.Operation) *StateWhere {
+	for _, arg := range args {
+		helperWhere(&s.builder, addrMap.mapField, arg)
+	}
+	return s
 }
 
-// DeleteContext StateRemove records in the given table
-//
-// See [Delete] for examples
-func DeleteContext[T any](ctx context.Context, table *T) StateDelete {
-	var state = createDeleteState(ctx)
-	state.builder.fields = append(state.builder.fields, getArgDelete(table, addrMap.mapField))
-	return state
-}
-
-// DeleteTable StateRemove records in the given table
-func DeleteTable[T any](table *Table[T]) StateDelete {
-	return DeleteTableContext(context.Background(), table)
-}
-
-// DeleteTableContext StateRemove records in the given table
-func DeleteTableContext[T any](ctx context.Context, table *Table[T]) StateDelete {
-	var state = createDeleteState(ctx)
-	state.builder.fields = append(state.builder.fields, getArgDelete(table.Model, addrMap.mapField))
-	return state
-}
-
-// OnTransaction sets a transaction on the query.
-//
-// # Example
-//
-//	tx, err = db.NewTransaction()
-//	if err != nil {
-//		// handler error
-//	}
-//	defer tx.Rollback()
-//
-//	err = goent.Delete(db.Animal).OnTransaction(tx).All()
-//	if err != nil {
-//		// handler error
-//	}
-//
-//	err = tx.Commit()
-//	if err != nil {
-//		// handler error
-//	}
-func (s StateDelete) OnTransaction(tx model.Transaction) StateDelete {
+func (s *StateWhere) OnTransaction(tx model.Transaction) *StateWhere {
 	s.conn = tx
 	return s
 }
 
-// All delete all records
-func (s StateDelete) All() error {
-	return s.Where(model.Operation{})
+func (s *StateWhere) prepare(drv model.Driver) *model.DatabaseConfig {
+	if s.conn == nil {
+		s.conn = drv.NewConnection()
+	}
+	return drv.GetDatabaseConfig()
 }
 
-// Where receives [model.Operation] as where operations from where sub package
-func (s StateDelete) Where(o model.Operation) error {
-	helperWhere(&s.builder, addrMap.mapField, o)
-
-	s.builder.buildSqlDelete()
-
-	driver := s.builder.fields[0].getDb().driver
-	if s.conn == nil {
-		s.conn = driver.NewConnection()
-	}
-
-	dc := driver.GetDatabaseConfig()
+func (s *StateWhere) exec(drv model.Driver) error {
+	// TODO: add table to builder
+	dc := s.prepare(drv)
 	return handlerValues(s.ctx, s.conn, s.builder.query, dc)
 }
 
-func createDeleteState(ctx context.Context) StateDelete {
-	return StateDelete{builder: createBuilder(enum.DeleteQuery), ctx: ctx}
+type StateDelete[T any] struct {
+	table *Table[T]
+	*StateWhere
 }
 
-func getArgDelete(arg any, addrMap map[uintptr]field) field {
-	v := reflect.ValueOf(arg)
-	if v.Kind() != reflect.Pointer {
-		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
-	}
-
-	addr := uintptr(v.UnsafePointer())
-	if addrMap[addr] != nil {
-		return addrMap[addr]
-	}
-
-	return nil
+func (s *StateDelete[T]) Exec() error {
+	// TODO: add table to builder
+	return s.exec(s.table.db.driver)
 }
 
-func getRemoveTableArgs(table any) []any {
-	valueOf := reflect.ValueOf(table).Elem()
+// OnTransaction sets a transaction on the query.
+//
+// # Example
+//
+//	tx, err = db.NewTransaction()
+//	if err != nil {
+//		// handler error
+//	}
+//	defer tx.Rollback()
+//
+//	err = db.Animal.Delete().OnTransaction(tx).All()
+//	if err != nil {
+//		// handler error
+//	}
+//
+//	err = tx.Commit()
+//	if err != nil {
+//		// handler error
+//	}
+func (s *StateDelete[T]) OnTransaction(tx model.Transaction) *StateDelete[T] {
+	s.StateWhere.conn = tx
+	return s
+}
 
-	if valueOf.Kind() != reflect.Struct {
-		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
-	}
-	args := make([]any, 0, valueOf.NumField())
-	var fieldOf reflect.Value
-	for i := 0; i < valueOf.NumField(); i++ {
-		fieldOf = valueOf.Field(i)
-		if fieldOf.Kind() == reflect.Slice && fieldOf.Type().Elem().Kind() == reflect.Struct {
-			continue
-		}
-
-		args = append(args, fieldOf.Addr().Interface())
-	}
-
-	return args
+func (s *StateDelete[T]) Filter(args ...model.Operation) *StateDelete[T] {
+	s.StateWhere = s.StateWhere.Filter(args...)
+	return s
 }

@@ -4,122 +4,119 @@ import (
 	"context"
 	"testing"
 
-	"github.com/azhai/goent"
 	"github.com/azhai/goent/query/where"
 	"github.com/google/uuid"
 )
 
-var animals []Animal
+var animals []*Animal
 var size int = 100
 
 func BenchmarkSelect(b *testing.B) {
 	db, _ := Setup()
 
-	goent.Delete(db.AnimalFood).All()
-	goent.Delete(db.Animal).All()
+	db.AnimalFood.Delete().Exec()
+	db.Animal.Delete().Exec()
 
-	animals = make([]Animal, size)
-	goent.Insert(db.Animal).All(animals)
+	animals = make([]*Animal, size)
+	for i := 0; i < size; i++ {
+		animals[i] = &Animal{Name: uuid.New().String()}
+	}
+	db.Animal.Insert().All(animals)
 
 	for b.Loop() {
-		animals = make([]Animal, 0)
-		for row := range goent.List(db.Animal).Rows() {
-			animals = append(animals, row)
-		}
+		result, _ := db.Animal.Select().All()
+		_ = result
 	}
 }
 
 func BenchmarkSelectRaw(b *testing.B) {
 	db, _ := Setup()
 
-	goent.Delete(db.AnimalFood).All()
-	goent.Delete(db.Animal).All()
+	db.Animal.Delete().Exec()
 
-	animals = make([]Animal, size)
-	goent.Insert(db.Animal).All(animals)
+	animals = make([]*Animal, size)
+	for i := 0; i < size; i++ {
+		animals[i] = &Animal{Name: uuid.New().String()}
+	}
+	db.Animal.Insert().All(animals)
 
 	for b.Loop() {
 		rows, _ := db.DB.RawQueryContext(context.Background(), "select a.id, a.name, a.info_id, a.habitat_id from animals a;")
 		defer rows.Close()
 
 		var a Animal
-		animals = make([]Animal, 0)
 		for rows.Next() {
 			rows.Scan(&a.Id, &a.Name, &a.InfoId, &a.HabitatId)
-			animals = append(animals, a)
+			_ = a
 		}
 	}
 }
 
-var foods []Food
+var foods []*Food
 
 func BenchmarkJoin(b *testing.B) {
 	db, _ := Setup()
 
-	goent.Delete(db.Weather)
-	goent.Delete(db.Habitat)
-	goent.Delete(db.AnimalFood).All()
-	goent.Delete(db.Animal).All()
-	goent.Delete(db.Food).All()
+	db.Weather.Delete().Exec()
+	db.Habitat.Delete().Exec()
+	db.AnimalFood.Delete().Exec()
+	db.Animal.Delete().Exec()
+	db.Food.Delete().Exec()
 
 	w := Weather{Name: "Weather"}
-	goent.Insert(db.Weather).One(&w)
+	db.Weather.Insert().One(&w)
 
 	h := Habitat{Id: uuid.New(), Name: "Habitat", WeatherId: w.Id}
-	goent.Insert(db.Habitat).One(&h)
+	db.Habitat.Insert().One(&h)
 
 	a := Animal{Name: "Animal", HabitatId: &h.Id}
-	goent.Insert(db.Animal).One(&a)
+	db.Animal.Insert().One(&a)
 
 	f := Food{Id: uuid.New(), Name: "Food"}
-	goent.Insert(db.Food).One(&f)
+	db.Food.Insert().One(&f)
 
 	af := AnimalFood{AnimalId: a.Id, FoodId: f.Id}
-	goent.Insert(db.AnimalFood).One(&af)
+	db.AnimalFood.Insert().One(&af)
 
 	for b.Loop() {
-		foods = make([]Food, 0)
-
-		for row := range goent.List(db.Food).
-			Join(&db.Food.Id, &db.AnimalFood.FoodId).
-			Join(&db.AnimalFood.AnimalId, &db.Animal.Id).
-			Join(&db.Animal.HabitatId, &db.Habitat.Id).
-			Join(&db.Habitat.WeatherId, &db.Weather.Id).
-			Where(
-				where.And(where.Equals(&db.Food.Id, f.Id), where.Equals(&db.Food.Name, f.Name)),
-			).
-			Rows() {
-			foods = append(foods, row)
-		}
+		result, _ := db.Food.Select().
+			Join(&db.Food.Model.Id, &db.AnimalFood.Model.FoodId).
+			Join(&db.AnimalFood.Model.AnimalId, &db.Animal.Model.Id).
+			Join(&db.Animal.Model.HabitatId, &db.Habitat.Model.Id).
+			Join(&db.Habitat.Model.WeatherId, &db.Weather.Model.Id).
+			Filter(where.And(
+				where.Equals(&db.Food.Model.Id, f.Id),
+				where.Equals(&db.Food.Model.Name, f.Name),
+			)).All()
+		foods = result
 	}
 }
 
 func BenchmarkJoinSql(b *testing.B) {
 	db, _ := Setup()
 
-	goent.Delete(db.Weather)
-	goent.Delete(db.Habitat)
-	goent.Delete(db.AnimalFood).All()
-	goent.Delete(db.Animal).All()
-	goent.Delete(db.Food).All()
+	db.Weather.Delete().Exec()
+	db.Habitat.Delete().Exec()
+	db.AnimalFood.Delete().Exec()
+	db.Animal.Delete().Exec()
+	db.Food.Delete().Exec()
 
 	w := Weather{Name: "Weather"}
-	goent.Insert(db.Weather).One(&w)
+	db.Weather.Insert().One(&w)
 
 	h := Habitat{Id: uuid.New(), Name: "Habitat", WeatherId: w.Id}
-	goent.Insert(db.Habitat).One(&h)
+	db.Habitat.Insert().One(&h)
 
 	a := Animal{Name: "Animal", HabitatId: &h.Id}
-	goent.Insert(db.Animal).One(&a)
+	db.Animal.Insert().One(&a)
 
 	f := Food{Id: uuid.New(), Name: "Food"}
-	goent.Insert(db.Food).One(&f)
+	db.Food.Insert().One(&f)
 
 	af := AnimalFood{AnimalId: a.Id, FoodId: f.Id}
-	goent.Insert(db.AnimalFood).One(&af)
+	db.AnimalFood.Insert().One(&af)
 
 	for b.Loop() {
-
 		rows, _ := db.DB.RawQueryContext(context.Background(), `select f.id, f.name from foods f
 						join animal_foods af on f.id = af.food_id
 						join animals a on af.animal_id = a.id
@@ -128,11 +125,11 @@ func BenchmarkJoinSql(b *testing.B) {
 						where f.id = $1 and f.name = $2;`, f.Id, f.Name)
 		defer rows.Close()
 
-		foods = make([]Food, 0)
+		foods = make([]*Food, 0)
 		var food Food
 		for rows.Next() {
 			rows.Scan(&food.Id, &food.Name)
-			foods = append(foods, food)
+			foods = append(foods, &food)
 		}
 	}
 }
