@@ -2,345 +2,327 @@ package goent
 
 import (
 	"reflect"
-	"time"
+	"strconv"
+	"strings"
+	"sync"
 
 	"github.com/azhai/goent/enum"
 	"github.com/azhai/goent/model"
 )
 
-type builder struct {
-	query        model.Query
-	modelStart   time.Time
-	pkFieldId    int // insert
-	table        *TableInfo
-	fields       []field
-	fieldsSelect []fieldSelect
-	fieldIds     []int           // insert and update
-	joins        []enum.JoinType // select
-	joinsArgs    []field         // select
-	brs          []model.Operation
-	filters      []model.Operation
-	sets         []set
-}
-
-type set struct {
-	attribute field
-	value     any
-}
-
-func createBuilder(typeQuery enum.QueryType) builder {
-	return builder{
-		query:      model.Query{Type: typeQuery},
-		modelStart: time.Now(),
-	}
-}
-
-func (b *builder) buildSelect() {
-	if len(b.fieldsSelect) == 0 && b.table != nil {
-		columns := make([]*Column, 0, len(b.table.Columns))
-		for _, col := range b.table.Columns {
-			columns = append(columns, col)
+var builderPool = sync.Pool{
+	New: func() any {
+		return &Builder{
+			Changes: map[*Field]any{},
 		}
-		for i := 0; i < len(columns)-1; i++ {
-			for j := i + 1; j < len(columns); j++ {
-				if columns[i].FieldId > columns[j].FieldId {
-					columns[i], columns[j] = columns[j], columns[i]
+	},
+}
+
+type JoinTable struct {
+	JoinType enum.JoinType
+	Table    *model.Table
+	On       Condition
+}
+
+type Order struct {
+	Desc bool
+	*Field
+}
+
+type Group struct {
+	Having Condition
+	*Field
+}
+
+type Builder struct {
+	Type      enum.QueryType
+	Table     *model.Table
+	Joins     []*JoinTable
+	Selects   []*Field
+	Changes   map[*Field]any
+	Where     Condition
+	Orders    []*Order
+	Groups    []*Group
+	Limit     int
+	Offset    int
+	Returning string
+	RollUp    string
+	ForUpdate bool
+	// Clause    *Builder
+	strings.Builder
+}
+
+func GetBuilder() *Builder {
+	return builderPool.Get().(*Builder)
+}
+
+func PutBuilder(b *Builder) {
+	b.Reset()
+	builderPool.Put(b)
+}
+
+func (b *Builder) Reset() {
+	b.Builder.Reset()
+	b.Type = 0
+	b.Table = nil
+	b.Joins = nil
+	b.Selects = nil
+	b.Changes = map[*Field]any{}
+	b.Where = Condition{}
+	b.Orders = nil
+	b.Groups = nil
+	b.Limit = 0
+	b.Offset = 0
+	b.Returning = ""
+	b.RollUp = ""
+}
+
+func (b *Builder) BuildHead() []any {
+	var args []any
+
+	switch b.Type {
+	case enum.SelectQuery:
+		b.WriteString("SELECT ")
+		if len(b.Selects) == 0 {
+			b.WriteString("*")
+		} else {
+			b.WriteString(b.Selects[0].String())
+			for _, f := range b.Selects[1:] {
+				b.WriteByte(',')
+				b.WriteString(f.String())
+			}
+		}
+		b.WriteString(" FROM ")
+		if b.Table != nil {
+			b.WriteString(b.Table.String())
+		}
+	case enum.InsertQuery:
+		b.WriteString("INSERT INTO ")
+		if b.Table != nil {
+			b.WriteString(b.Table.String())
+		}
+		b.WriteByte('(')
+		i := 0
+		for f := range b.Changes {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			b.WriteString(f.String())
+			i++
+		}
+		b.WriteString(") VALUES (")
+		i = 1
+		for range b.Changes {
+			if i > 1 {
+				b.WriteString(",$" + strconv.Itoa(i))
+			} else {
+				b.WriteString("$" + strconv.Itoa(i))
+			}
+			i++
+		}
+		b.WriteByte(')')
+		for _, v := range b.Changes {
+			args = append(args, v)
+		}
+	case enum.UpdateQuery:
+		b.WriteString("UPDATE ")
+		if b.Table != nil {
+			b.WriteString(b.Table.String())
+		}
+		b.WriteString(" SET ")
+		i := 1
+		for f, v := range b.Changes {
+			if i > 1 {
+				b.WriteByte(',')
+			}
+			b.WriteString(f.String() + "=$" + strconv.Itoa(i))
+			args = append(args, v)
+			i++
+		}
+	case enum.DeleteQuery:
+		b.WriteString("DELETE FROM ")
+		if b.Table != nil {
+			b.WriteString(b.Table.String())
+		}
+	}
+
+	return args
+}
+
+func (b *Builder) BuildTail() []any {
+	var args []any
+
+	if b.Type == enum.SelectQuery {
+		if len(b.Groups) != 0 {
+			b.WriteByte('\n')
+			gp := b.Groups[0]
+			b.WriteString("GROUP BY " + gp.String())
+			for _, gp = range b.Groups[1:] {
+				b.WriteString("," + gp.String())
+			}
+		}
+
+		if len(b.Orders) != 0 {
+			b.WriteByte('\n')
+			ob := b.Orders[0]
+			if ob.Desc {
+				b.WriteString("ORDER BY " + ob.String() + " DESC")
+			} else {
+				b.WriteString("ORDER BY " + ob.String() + " ASC")
+			}
+			for _, ob = range b.Orders[1:] {
+				if ob.Desc {
+					b.WriteString("," + ob.String() + " DESC")
+				} else {
+					b.WriteString("," + ob.String() + " ASC")
 				}
 			}
 		}
-		for _, col := range columns {
-			b.fieldsSelect = append(b.fieldsSelect, col)
+
+		if b.Limit != 0 {
+			b.WriteByte('\n')
+			b.WriteString("LIMIT " + strconv.Itoa(b.Limit))
+		}
+		if b.Offset != 0 {
+			b.WriteByte('\n')
+			b.WriteString("OFFSET " + strconv.Itoa(b.Offset))
 		}
 	}
-	b.query.Attributes = make([]model.Attribute, len(b.fieldsSelect))
-	for i := range b.fieldsSelect {
-		b.fieldsSelect[i].buildAttributeSelect(b.query.Attributes, i)
-	}
-}
 
-func (b *builder) buildSelectJoins(join enum.JoinType, fields []field) {
-	j := len(b.joinsArgs)
-	b.joinsArgs = append(b.joinsArgs, make([]field, 2)...)
-	b.joins = append(b.joins, join)
-	b.joinsArgs[j] = fields[0]
-	b.joinsArgs[j+1] = fields[1]
-}
-
-func (b *builder) buildSqlSelect() {
-	b.buildSelect()
-	b.buildTables()
-	b.buildWhere()
-	b.query.Header.ModelBuild = time.Since(b.modelStart)
-}
-
-func (b *builder) buildSqlInsert(v reflect.Value) (pkFieldId int) {
-	b.buildInsert()
-	pkFieldId = b.buildValues(v)
-	b.query.Header.ModelBuild = time.Since(b.modelStart)
-	return pkFieldId
-}
-
-func (b *builder) buildSqlInsertBatch(v reflect.Value) (pkFieldId int) {
-	b.buildInsert()
-	pkFieldId = b.buildBatchValues(v)
-	b.query.Header.ModelBuild = time.Since(b.modelStart)
-	return pkFieldId
-}
-
-func (b *builder) buildSqlDelete() {
-	b.query.Tables = make([]model.Table, 1)
-	b.query.Tables[0] = model.Table{Schema: b.fields[0].schema(), Name: b.fields[0].table()}
-	b.buildWhere()
-	b.query.Header.ModelBuild = time.Since(b.modelStart)
-}
-
-func (b *builder) buildWhere() {
-	if len(b.filters) != 0 && len(b.brs) != 0 {
-		b.brs = append(b.brs, model.Operation{
-			Operator: enum.And,
-			Type:     enum.LogicalWhere})
-		b.brs = append(b.brs, b.filters...)
-	} else if len(b.filters) != 0 {
-		b.brs = append(b.brs, b.filters...)
+	if b.Returning != "" && b.Type == enum.InsertQuery {
+		b.WriteString(" RETURNING ")
+		b.WriteString(b.Returning)
 	}
 
-	if len(b.brs) == 0 {
-		return
+	return args
+}
+
+func (b *Builder) BuildWhere() []any {
+	var args []any
+
+	if b.Where.Template == "" {
+		return nil
 	}
-	b.query.WhereOperations = make([]model.Where, len(b.brs))
 
-	b.query.WhereIndex = len(b.query.Arguments) + 1
-	for i, v := range b.brs {
-		switch v.Type {
-		case enum.OperationWhere:
-			b.query.Arguments = append(b.query.Arguments, v.Value.GetValue())
+	b.WriteString("WHERE ")
 
-			b.query.WhereOperations[i] = model.Where{
-				Attribute: model.Attribute{
-					Name:         v.Attribute,
-					Table:        v.Table.Name,
-					FunctionType: v.Function,
-				},
-				Operator: v.Operator,
-				Type:     v.Type,
-			}
-		case enum.OperationAttributeWhere:
-			b.query.WhereOperations[i] = model.Where{
-				Attribute: model.Attribute{
-					Name:  v.Attribute,
-					Table: v.Table.Name,
-				},
-				Operator:       v.Operator,
-				AttributeValue: model.Attribute{Name: v.AttributeValue, Table: v.AttributeValueTable.Name},
-				Type:           v.Type,
-			}
-		case enum.OperationIsWhere:
-			b.query.WhereOperations[i] = model.Where{
-				Attribute: model.Attribute{
-					Name:  v.Attribute,
-					Table: v.Table.Name,
-				},
-				Operator: v.Operator,
-				Type:     v.Type,
-			}
-		case enum.OperationInWhere:
-			where := model.Where{
-				Attribute: model.Attribute{
-					Name:         v.Attribute,
-					Table:        v.Table.Name,
-					FunctionType: v.Function,
-				},
-				Operator: v.Operator,
-				Type:     v.Type,
-			}
+	template := b.Where.Template
+	fieldIndex := 0
+	valueIndex := 0
+	paramIndex := 1
 
-			valueOf := reflect.ValueOf(v.Value.GetValue())
-			switch valueOf.Kind() {
-			case reflect.Slice:
-				for i := range valueOf.Len() {
-					b.query.Arguments = append(b.query.Arguments, valueOf.Index(i).Interface())
-					where.SizeIn++
+	for i := 0; i < len(template); i++ {
+		if i+1 < len(template) && template[i:i+2] == "%s" {
+			if fieldIndex < len(b.Where.Fields) {
+				b.WriteString(b.Where.Fields[fieldIndex].String())
+				fieldIndex++
+			}
+			i++
+		} else if template[i] == '?' {
+			if valueIndex < len(b.Where.Values) {
+				val := b.Where.Values[valueIndex]
+				if val.Type == reflect.Slice && len(val.Args) > 0 {
+					b.WriteString("(")
+					for j, arg := range val.Args {
+						if j > 0 {
+							b.WriteString(",$" + strconv.Itoa(paramIndex))
+						} else {
+							b.WriteString("$" + strconv.Itoa(paramIndex))
+						}
+						args = append(args, arg)
+						paramIndex++
+					}
+					b.WriteByte(')')
+				} else if len(val.Args) > 0 {
+					b.WriteString("$" + strconv.Itoa(paramIndex))
+					args = append(args, val.Args[0])
+					paramIndex++
 				}
-			case reflect.Array:
-				for i := range valueOf.Len() {
-					b.query.Arguments = append(b.query.Arguments, valueOf.Index(i).Interface())
-					where.SizeIn++
-				}
-			default:
-				if modelQuery, ok := valueOf.Interface().(model.Query); ok {
-					where.QueryIn = &modelQuery
-				}
+				valueIndex++
 			}
-
-			b.query.WhereOperations[i] = where
-		case enum.LogicalWhere:
-			b.query.WhereOperations[i] = model.Where{
-				Operator: v.Operator,
-				Type:     v.Type,
-			}
-
+		} else {
+			b.WriteByte(template[i])
 		}
 	}
+
+	return args
 }
 
-func (b *builder) buildTables() {
-	if len(b.joins) != 0 {
-		tables := make(map[int]int)
-		tables[b.joinsArgs[0].getTableId()] = 1
-		b.query.Tables = append(b.query.Tables, model.Table{Schema: b.joinsArgs[0].schema(), Name: b.joinsArgs[0].table()})
+func (b *Builder) BuildJoins() []any {
+	var args []any
 
-		b.query.Joins = make([]model.Join, len(b.joins))
-		c := 1
-		for i := range b.joins {
-			buildJoins(i, b.query.Joins, b.joins[i], b.joinsArgs[i+c-1], b.joinsArgs[i+c-1+1], tables)
-			c++
-		}
-		return
+	if len(b.Joins) == 0 {
+		return nil
 	}
 
-	tables := make(map[int]int)
+	joinTypes := map[enum.JoinType]string{
+		enum.Join:      "JOIN",
+		enum.LeftJoin:  "LEFT JOIN",
+		enum.RightJoin: "RIGHT JOIN",
+	}
 
-	// 当fieldsSelect为空时，从table中获取表信息
-	if len(b.fieldsSelect) == 0 {
-		if b.table != nil {
-			tableId := b.table.TableId
-			if tableId == 0 {
-				tableId = b.table.SchemaId<<16 | b.table.TableId
-			}
-			tables[tableId] = 1
-			schema := b.table.SchemaName
-			b.query.Tables = append(b.query.Tables, model.Table{Schema: &schema, Name: b.table.TableName})
+	for _, j := range b.Joins {
+		b.WriteByte('\n')
+		joinType := joinTypes[j.JoinType]
+		if joinType == "" {
+			joinType = "JOIN"
 		}
-		for i := range b.brs {
-			if b.brs[i].TableId != 0 && tables[b.brs[i].TableId] == 0 {
-				// 跳过与主表相同的表（通过名称判断）
-				isSameTable := b.table != nil && b.brs[i].Table.Name == b.table.TableName
-				if !isSameTable {
-					tables[b.brs[i].TableId] = 1
-					b.query.Tables = append(b.query.Tables, b.brs[i].Table)
-				}
-			}
-			if b.brs[i].AttributeTableId != 0 && tables[b.brs[i].AttributeTableId] == 0 {
-				// 跳过与主表相同的表（通过名称判断）
-				isSameTable := b.table != nil && b.brs[i].AttributeValueTable.Name == b.table.TableName
-				if !isSameTable {
-					tables[b.brs[i].AttributeTableId] = 1
-					b.query.Tables = append(b.query.Tables, b.brs[i].AttributeValueTable)
+		b.WriteString(joinType + " ")
+		if j.Table != nil {
+			b.WriteString(j.Table.String())
+		}
+		b.WriteString(" ON ")
+		if j.On.Template != "" {
+			template := j.On.Template
+			fieldIndex := 0
+			valueIndex := 0
+			paramIndex := 1
+
+			for i := 0; i < len(template); i++ {
+				if i+1 < len(template) && template[i:i+2] == "%s" {
+					if fieldIndex < len(j.On.Fields) {
+						b.WriteString(j.On.Fields[fieldIndex].String())
+						fieldIndex++
+					}
+					i++
+				} else if template[i] == '?' {
+					if valueIndex < len(j.On.Values) {
+						val := j.On.Values[valueIndex]
+						if val.Type == reflect.Slice && len(val.Args) > 0 {
+							b.WriteString("(")
+							for j, arg := range val.Args {
+								if j > 0 {
+									b.WriteString(",$" + strconv.Itoa(paramIndex))
+								} else {
+									b.WriteString("$" + strconv.Itoa(paramIndex))
+								}
+								args = append(args, arg)
+								paramIndex++
+							}
+							b.WriteByte(')')
+						} else if len(val.Args) > 0 {
+							b.WriteString("$" + strconv.Itoa(paramIndex))
+							args = append(args, val.Args[0])
+							paramIndex++
+						}
+						valueIndex++
+					}
+				} else {
+					b.WriteByte(template[i])
 				}
 			}
 		}
-		return
 	}
 
-	tables[b.fieldsSelect[0].getTableId()] = 1
-	b.query.Tables = append(b.query.Tables, model.Table{Schema: b.fieldsSelect[0].schema(), Name: b.fieldsSelect[0].table()})
-
-	for i := range b.brs {
-		if b.brs[i].TableId != 0 && tables[b.brs[i].TableId] == 0 {
-			// 跳过与第一个字段相同的表（通过名称判断）
-			isSameTable := b.brs[i].Table.Name == b.fieldsSelect[0].table()
-			if !isSameTable {
-				tables[b.brs[i].TableId] = 1
-				b.query.Tables = append(b.query.Tables, b.brs[i].Table)
-			}
-		}
-		if b.brs[i].AttributeTableId != 0 && tables[b.brs[i].AttributeTableId] == 0 {
-			// 跳过与第一个字段相同的表（通过名称判断）
-			isSameTable := b.brs[i].AttributeValueTable.Name == b.fieldsSelect[0].table()
-			if !isSameTable {
-				tables[b.brs[i].AttributeTableId] = 1
-				b.query.Tables = append(b.query.Tables, b.brs[i].AttributeValueTable)
-			}
-		}
-	}
+	return args
 }
 
-func buildJoins(i int, joins []model.Join, join enum.JoinType, f1, f2 field, tables map[int]int) {
-	if tables[f1.getTableId()] == 1 {
-		joins[i] = model.Join{
-			Table:          model.Table{Schema: f2.schema(), Name: f2.table()},
-			FirstArgument:  model.JoinArgument{Table: f1.table(), Name: f1.getAttributeName()},
-			JoinOperation:  join,
-			SecondArgument: model.JoinArgument{Table: f2.table(), Name: f2.getAttributeName()}}
-
-		tables[f2.getTableId()] = 1
-		return
-	}
-	joins[i] = model.Join{
-		Table:          model.Table{Schema: f1.schema(), Name: f1.table()},
-		FirstArgument:  model.JoinArgument{Table: f1.table(), Name: f1.getAttributeName()},
-		JoinOperation:  join,
-		SecondArgument: model.JoinArgument{Table: f2.table(), Name: f2.getAttributeName()}}
-
-	tables[f1.getTableId()] = 1
-}
-
-func (b *builder) buildInsert() {
-	b.fieldIds = make([]int, 0, len(b.fields))
-	b.query.Attributes = make([]model.Attribute, 0, len(b.fields))
-
-	if len(b.fields) > 0 {
-		b.query.Tables = make([]model.Table, 1)
-		b.query.Tables[0] = model.Table{Schema: b.fields[0].schema(), Name: b.fields[0].table()}
-		for i := range b.fields {
-			b.fields[i].buildAttributeInsert(b)
-		}
-	}
-}
-
-func (b *builder) buildValues(value reflect.Value) int {
-	b.query.Arguments = make([]any, len(b.fieldIds))
-
-	if value.Kind() == reflect.Ptr {
-		value = value.Elem()
-	}
-
-	for c, i := range b.fieldIds {
-		b.query.Arguments[c] = value.Field(i).Interface()
-	}
-	b.query.SizeArguments = len(b.fieldIds)
-	return b.pkFieldId
-
-}
-
-func (b *builder) buildBatchValues(value reflect.Value) int {
-	b.query.Arguments = make([]any, len(b.fieldIds)*value.Len())
-
-	c := 0
-	for j := 0; j < value.Len(); j++ {
-		c = buildBatchValues(value.Index(j), b, c)
-	}
-	b.query.BatchSizeQuery = value.Len()
-	b.query.SizeArguments = len(b.fieldIds)
-	return b.pkFieldId
-
-}
-
-func buildBatchValues(value reflect.Value, b *builder, c int) int {
-	if value.Kind() == reflect.Ptr {
-		value = value.Elem()
-	}
-	for _, i := range b.fieldIds {
-		b.query.Arguments[c] = value.Field(i).Interface()
-		c++
-	}
-	return c
-}
-
-func (b *builder) buildUpdate() {
-	b.buildSets()
-	b.buildWhere()
-	b.query.Header.ModelBuild = time.Since(b.modelStart)
-}
-
-func (b *builder) buildSets() {
-	b.query.Attributes = make([]model.Attribute, len(b.sets))
-	b.query.Tables = make([]model.Table, 1)
-	b.query.Tables[0] = model.Table{Schema: b.sets[0].attribute.schema(), Name: b.sets[0].attribute.table()}
-	b.query.Arguments = make([]any, len(b.sets))
-
-	for i := range b.sets {
-		b.query.Attributes[i] = model.Attribute{Name: b.sets[i].attribute.getAttributeName()}
-		b.query.Arguments[i] = b.sets[i].value
-	}
+func (b *Builder) Build() (sql string, args []any) {
+	args = append(args, b.BuildHead()...)
+	args = append(args, b.BuildJoins()...)
+	args = append(args, b.BuildWhere()...)
+	args = append(args, b.BuildTail()...)
+	sql = b.String()
+	PutBuilder(b)
+	return
 }

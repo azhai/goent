@@ -9,7 +9,6 @@ import (
 	"github.com/azhai/goent/drivers/pgsql"
 	"github.com/azhai/goent/drivers/sqlite"
 	"github.com/azhai/goent/model"
-	"github.com/azhai/goent/query/where"
 	"github.com/azhai/goent/utils"
 )
 
@@ -248,14 +247,14 @@ func CalcTotalPrice(db *Database, orderID int) (float64, error) {
 	}
 	// fmt.Printf("Output:\n%+v\n%+v\n%+v\n", order, order.Details, order.Products)
 
-	filter := where.EqualsTable(db.OrderDetail, "order_id", orderID)
+	filter := goent.Equals(db.OrderDetail.Field("order_id"), orderID)
 	query := db.OrderDetail.Select().OrderBy("product_id")
 	order.Details, err = query.Filter(filter).All()
 	if err != nil {
 		return 0.0, err
 	}
 
-	filter = where.InTable(db.Product, "id", order.GetProductIds())
+	filter = goent.In(db.Product.Field("id"), order.GetProductIds())
 	order.Products, err = db.Product.Select().OrderBy("id").Filter(filter).All()
 	if err != nil {
 		return 0.0, err

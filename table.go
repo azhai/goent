@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	"github.com/azhai/goent/enum"
-	"github.com/azhai/goent/model"
 	"github.com/azhai/goent/query/aggregate"
 	"github.com/azhai/goent/query/function"
 	"github.com/azhai/goent/utils"
@@ -20,7 +19,7 @@ type Entity interface {
 }
 
 type TableInfo struct {
-	FieldAddr   uintptr
+	TableAddr   uintptr
 	FieldName   string
 	TableId     int
 	TableName   string
@@ -30,6 +29,15 @@ type TableInfo struct {
 	Indexes     []*Index
 	Columns     map[string]*Column
 	Ignores     []string
+}
+
+func (t TableInfo) String() string {
+	return t.TableName
+	// return fmt.Sprintf("%s.%s", t.SchemaName, t.TableName)
+}
+
+func (t TableInfo) Field(col string) *Field {
+	return &Field{Table: t.TableAddr, Column: col}
 }
 
 type Table[T any] struct {
@@ -143,19 +151,29 @@ func (t *Table[T]) FieldInfo(name string) *Column {
 	return nil
 }
 
-func (t *Table[T]) Field(name string) field {
-	return t.FieldInfo(name)
+// func (t *Table[T]) Field(name string) field {
+// 	return t.FieldInfo(name)
+// }
+
+func (t *Table[T]) Dest() (*T, []any) {
+	obj, size := new(T), len(t.Columns)
+	dest := make([]any, size)
+	value := reflect.ValueOf(obj).Elem()
+	for i := range size {
+		dest[i] = value.Field(i).Addr().Interface()
+	}
+	return obj, dest
 }
 
 // ------------------------------
 // Filter ...
 // ------------------------------
 
-func (t *Table[T]) Filter(args ...model.Operation) *Table[T] {
+func (t *Table[T]) Filter(args ...Condition) *Table[T] {
 	return t.FilterContext(context.Background(), args...)
 }
 
-func (t *Table[T]) FilterContext(ctx context.Context, args ...model.Operation) *Table[T] {
+func (t *Table[T]) FilterContext(ctx context.Context, args ...Condition) *Table[T] {
 	if t.state == nil {
 		t.state = NewStateWhere(ctx)
 	}
@@ -184,7 +202,7 @@ func (t *Table[T]) DeleteContext(ctx context.Context) *StateDelete[T] {
 	var s *StateWhere
 	if s = t.state; s == nil {
 		s = NewStateWhere(ctx)
-		s.builder.query.Type = enum.DeleteQuery
+		s.builder.Type = enum.DeleteQuery
 	}
 	return &StateDelete[T]{table: t, StateWhere: s}
 }
@@ -199,7 +217,7 @@ func (t *Table[T]) Insert() *StateInsert[T] {
 
 func (t *Table[T]) InsertContext(ctx context.Context) *StateInsert[T] {
 	s := NewStateWhere(ctx)
-	s.builder.query.Type = enum.InsertQuery
+	s.builder.Type = enum.InsertQuery
 	return &StateInsert[T]{table: t, StateWhere: s}
 }
 
@@ -224,7 +242,7 @@ func (t *Table[T]) UpdateContext(ctx context.Context) *StateUpdate[T] {
 	var s *StateWhere
 	if s = t.state; s == nil {
 		s = NewStateWhere(ctx)
-		s.builder.query.Type = enum.UpdateQuery
+		s.builder.Type = enum.UpdateQuery
 	}
 	return &StateUpdate[T]{table: t, StateWhere: s}
 }

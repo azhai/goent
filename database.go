@@ -3,6 +3,7 @@ package goent
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"reflect"
 	"sync"
 
@@ -16,9 +17,17 @@ var (
 	tableRegistry = make(map[uintptr]*TableInfo)
 )
 
-// func init() {
-// 	addrMap = &goeMap{mapField: make(map[uintptr]field)}
-// }
+func GetFieldName(addr uintptr, name string) (string, error) {
+	if addr == 0 {
+		return name, nil
+	}
+	if info := tableRegistry[addr]; info != nil {
+		if _, ok := info.Columns[name]; ok {
+			return fmt.Sprintf("%s.%s", info.String(), name), nil
+		}
+	}
+	return "", fmt.Errorf("field %s or table not found", name)
+}
 
 type goeMap struct {
 	mu       sync.Mutex

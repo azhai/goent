@@ -10,8 +10,6 @@ import (
 	"github.com/azhai/goent/enum"
 	"github.com/azhai/goent/model"
 	"github.com/azhai/goent/query/aggregate"
-	"github.com/azhai/goent/query/function"
-	"github.com/azhai/goent/query/where"
 )
 
 type StateSelect[T, R any] struct {
@@ -23,27 +21,34 @@ type StateSelect[T, R any] struct {
 
 func NewStateSelect[T, R any](ctx context.Context, table *Table[T], col any) *StateSelect[T, R] {
 	s := NewStateWhere(ctx)
-	s.builder.query.Type = enum.SelectQuery
-	s.builder.table = &table.TableInfo
+	s.builder.Type = enum.SelectQuery
+	s.builder.Table = model.Table{
+		Schema: table.Schema,
+		Name:   table.TableName,
+	}
 	sel := &StateSelect[T, R]{table: table, StateWhere: s}
 	if col != nil {
 		if a, ok := col.(model.Aggregate); ok {
 			if f, ok := a.(interface{ GetField() any }).GetField().(*Column); ok {
 				agg := createAggregateFromTable(table, f, a.Aggregate())
 				sel.fields = append(sel.fields, agg)
-				s.builder.fieldsSelect = append(s.builder.fieldsSelect, agg)
+				s.builder.Selects = append(s.builder.Selects, agg)
 			}
 		}
 	}
 	return sel
 }
 
-func (s *StateSelect[T, R]) CopyFrom(ob builder, conn model.Connection) *StateSelect[T, R] {
+func (s *StateSelect[T, R]) CopyFrom(ob *Builder, conn model.Connection) *StateSelect[T, R] {
 	// copy joins
-	s.builder.joins, s.builder.joinsArgs = ob.joins, ob.joinsArgs
+	s.builder.Joins = ob.Joins
 	// copy operations
-	s.builder.brs = ob.brs
-	s.builder.filters = ob.filters
+	s.builder.Where = ob.Where
+	s.builder.Orders = ob.Orders
+	s.builder.Groups = ob.Groups
+	s.builder.Limit = ob.Limit
+	s.builder.Offset = ob.Offset
+	s.builder.RollUp = ob.RollUp
 	// copy connection/transaction
 	s.conn = conn
 	return s
@@ -58,8 +63,8 @@ func (s *StateSelect[T, R]) AsQuery() model.Query {
 // Rows return a iterator on rows.
 func (s *StateSelect[T, R]) Rows() iter.Seq2[R, error] {
 	s.builder.buildSqlSelect()
-	dc, size := s.prepare(s.table.db.driver), len(s.builder.fieldsSelect)
-	return handlerResult[R](s.ctx, s.conn, s.builder.query, size, dc)
+	dc, size := s.prepare(s.table.db.driver), len(s.builder.Selects)
+	return handlerResult[R](s.ctx, s.conn, s.builder, size, dc)
 }
 
 func (s *StateSelect[T, R]) One() (*R, error) {
@@ -70,7 +75,7 @@ func (s *StateSelect[T, R]) One() (*R, error) {
 }
 
 func (s *StateSelect[T, R]) All() ([]*R, error) {
-	rows := make([]*R, 0, s.builder.query.Limit)
+	rows := make([]*R, 0, s.builder.Limit)
 	for row, err := range s.Rows() {
 		if err != nil {
 			return nil, err
@@ -85,12 +90,12 @@ func (s *StateSelect[T, R]) RollUP() *StateSelect[T, R] {
 }
 
 func (s *StateSelect[T, R]) OnTransaction(tx model.Transaction) *StateSelect[T, R] {
-	s.builder.query.ForUpdate = true
+	s.builder.ForUpdate = true
 	s.StateWhere.conn = tx
 	return s
 }
 
-func (s *StateSelect[T, R]) Filter(args ...model.Operation) *StateSelect[T, R] {
+func (s *StateSelect[T, R]) Filter(args ...Condition) *StateSelect[T, R] {
 	s.StateWhere = s.StateWhere.Filter(args...)
 	return s
 }
@@ -108,39 +113,30 @@ func (s *StateSelect[T, R]) OrderBy(args ...string) *StateSelect[T, R] {
 		if len(pieces) == 2 && strings.ToLower(pieces[1]) == "desc" {
 			arg, desc = pieces[0], true
 		}
-		var table string
-		if pieces = strings.SplitN(arg, ".", 2); len(pieces) == 2 {
-			table, arg = pieces[0], pieces[1]
-		} else {
-			table = s.table.TableName
-		}
-		attr := model.Attribute{Table: table, Name: arg}
-		ord := model.OrderBy{Attribute: attr, Desc: desc}
-		s.builder.query.OrderBy = append(s.builder.query.OrderBy, ord)
+		ord := &Order{Field: s.table.Field(arg), Desc: desc}
+		s.builder.Orders = append(s.builder.Orders, ord)
 	}
 	return s
 }
 
 // GroupBy makes a group by args query
-func (s *StateSelect[T, R]) GroupBy(args ...any) *StateSelect[T, R] {
-	s.builder.query.GroupBy = make([]model.GroupBy, len(args))
-	for i := range args {
-		if a, ok := getAttribute(args[i], addrMap.mapField); ok {
-			s.builder.query.GroupBy[i].Attribute = a
-		}
+func (s *StateSelect[T, R]) GroupBy(args ...string) *StateSelect[T, R] {
+	for _, arg := range args {
+		grp := &Group{Field: s.table.Field(arg), Having: Condition{}}
+		s.builder.Groups = append(s.builder.Groups, grp)
 	}
 	return s
 }
 
 // Take takes i elements
 func (s *StateSelect[T, R]) Take(i int) *StateSelect[T, R] {
-	s.builder.query.Limit = i
+	s.builder.Limit = i
 	return s
 }
 
 // Skip skips i elements
 func (s *StateSelect[T, R]) Skip(i int) *StateSelect[T, R] {
-	s.builder.query.Offset = i
+	s.builder.Offset = i
 	return s
 }
 
@@ -261,44 +257,6 @@ func getNonZeroFields(a getArgs) ([]any, []any, bool) {
 	return args, values, false
 }
 
-func andList(args, values []any, eq func(f, a any) model.Operation) model.Operation {
-	size := len(args)
-	if size == 0 {
-		return model.Operation{}
-	} else if size == 1 {
-		return eq(args[0], values[0])
-	}
-
-	var others []model.Operation
-	left, right := eq(args[0], values[0]), eq(args[1], values[1])
-	for i := 2; i < size; i++ {
-		others = append(others, eq(args[i], values[i]))
-	}
-	return where.And(left, right, others...)
-}
-
-func operations(args, values []any) model.Operation {
-	return andList(args, values, equals)
-}
-
-func equals(f, a any) model.Operation {
-	return where.Equals(&f, a)
-}
-
-func operationsList(args, values []any) model.Operation {
-	return andList(args, values, equalsOrLike)
-}
-
-func equalsOrLike(f, a any) model.Operation {
-	v, ok := a.(string)
-
-	if !ok {
-		return where.Equals(&f, a)
-	}
-
-	return where.Like(function.ToUpper(f.(*string)), strings.ToUpper("%"+v+"%"))
-}
-
 type argsSelect struct {
 	fields    []fieldSelect
 	tableArgs []any
@@ -370,7 +328,7 @@ func getArgsJoin(addrMap map[uintptr]field, args ...any) []field {
 	return fields
 }
 
-func getArgFunction(arg any, addrMap map[uintptr]field, operation *model.Operation) field {
+func getArgFunction(arg any, addrMap map[uintptr]field, operation *Condition) field {
 	value := reflect.ValueOf(arg)
 	if value.IsNil() {
 		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
@@ -383,7 +341,7 @@ func getArgFunction(arg any, addrMap map[uintptr]field, operation *model.Operati
 	return getArg(arg, addrMap, nil)
 }
 
-func getArg(arg any, addrMap map[uintptr]field, operation *model.Operation) field {
+func getArg(arg any, addrMap map[uintptr]field, operation *Condition) field {
 	v := reflect.ValueOf(arg)
 	if v.Kind() != reflect.Pointer {
 		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
@@ -443,7 +401,7 @@ func getAttribute(arg any, addrMap map[uintptr]field) (model.Attribute, bool) {
 	return model.Attribute{}, false
 }
 
-func helperWhere(builder *builder, addrMap map[uintptr]field, br model.Operation) {
+func helperWhere(builder *builder, addrMap map[uintptr]field, br Condition) {
 	switch br.Type {
 	case enum.OperationWhere, enum.OperationInWhere:
 		a := getArg(br.Arg, addrMap, &br)
@@ -488,7 +446,7 @@ func helperWhere(builder *builder, addrMap map[uintptr]field, br model.Operation
 	}
 }
 
-func helperFilter(builder *builder, addrMap map[uintptr]field, br model.Operation) bool {
+func helperFilter(builder *builder, addrMap map[uintptr]field, br Condition) bool {
 	switch br.Type {
 	case enum.OperationWhere, enum.OperationInWhere:
 		if !reflect.ValueOf(br.Value.GetValue()).IsZero() {

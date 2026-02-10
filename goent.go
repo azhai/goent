@@ -81,13 +81,13 @@ func travelSchemas(db *DB, dbId int, valueOf reflect.Value) ([]string, error) {
 			tableType := utils.GetElemType(tableField)
 			fieldName := schemaOf.Type().Field(j).Name
 			tableOf, info := NewTableReflect(db, tableType, fieldName, schema, i, j)
-			info.FieldAddr = uintptr(tableField.Addr().UnsafePointer())
-			tableRegistry[info.FieldAddr] = &info
+			info.TableAddr = uintptr(tableField.Addr().UnsafePointer())
 			setDBMethod := tableOf.MethodByName("SetDB")
 			if setDBMethod.IsValid() {
 				setDBMethod.Call([]reflect.Value{reflect.ValueOf(db)})
 			}
-			schemaOf.Field(j).Set(tableOf)
+			tableField.Set(tableOf)
+			tableRegistry[info.TableAddr] = &info
 		}
 	}
 

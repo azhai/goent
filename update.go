@@ -35,7 +35,7 @@ func (s *StateUpdate[T]) Set(sets ...model.Set) *StateUpdate[T] {
 	return s
 }
 
-func (s *StateUpdate[T]) Filter(args ...model.Operation) *StateUpdate[T] {
+func (s *StateUpdate[T]) Filter(args ...Condition) *StateUpdate[T] {
 	s.StateWhere = s.StateWhere.Filter(args...)
 	return s
 }

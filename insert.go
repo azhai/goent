@@ -172,7 +172,7 @@ func (s *StateSave[T]) One(obj *T) error {
 		for i, pkValue := range argSave.valuesWhere {
 			fld := addrMap.mapField[uintptr(tableOf.Field(i).Addr().UnsafePointer())]
 			if fld != nil {
-				filter := model.Operation{
+				filter := Condition{
 					Type:      enum.OperationWhere,
 					Operator:  enum.Equals,
 					Attribute: fld.getAttributeName(),
@@ -185,11 +185,11 @@ func (s *StateSave[T]) One(obj *T) error {
 		// Add AND connector
 		if len(s.builder.filters) > 1 {
 			for i := len(s.builder.filters) - 1; i > 0; i-- {
-				andOp := model.Operation{
+				andOp := Condition{
 					Operator: enum.And,
 					Type:     enum.LogicalWhere,
 				}
-				s.builder.filters = append(s.builder.filters[:i], append([]model.Operation{andOp}, s.builder.filters[i:]...)...)
+				s.builder.filters = append(s.builder.filters[:i], append([]Condition{andOp}, s.builder.filters[i:]...)...)
 			}
 		}
 	}
@@ -231,7 +231,7 @@ func (s *StateSave[T]) OneMap(val dict) error {
 	// 构建 WHERE 条件（使用 id 字段）
 	if pkValue != nil && len(s.table.PrimaryKeys) > 0 {
 		for _, pk := range s.table.PrimaryKeys {
-			filter := model.Operation{
+			filter := Condition{
 				Type:      enum.OperationWhere,
 				Operator:  enum.Equals,
 				Attribute: pk.Column.getAttributeName(),
