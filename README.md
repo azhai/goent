@@ -183,7 +183,7 @@ func main() {
 		{Name: "Bird", Emoji: "🐦"},
 	}
 
-	err = db.Animal.Insert().All(animals)
+	err = db.Animal.Insert().All(true, animals)
 	if err != nil {
 		panic(err)
 	}
@@ -1084,7 +1084,7 @@ foods := []Food{
 		{Name: "Hotdog", Emoji: "🌭"},
 		{Name: "Cookie", Emoji: "🍪"},
 	}
-err = db.Food.Insert().All(foods)
+err = db.Food.Insert().All(true, foods)
 
 if err != nil {
 	//handler error

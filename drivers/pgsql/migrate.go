@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/azhai/goent/enum"
 	"github.com/azhai/goent/model"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -97,9 +96,9 @@ func getSchemas(conn *pgxpool.Pool) ([]string, error) {
 
 func (dr *Driver) rawExecContext(ctx context.Context, rawSql string, args ...any) error {
 	if dr.config.MigratePath == "" {
-		query := model.Query{Type: enum.RawQuery, RawSql: rawSql, Arguments: args}
-		query.Header.Err = wrapperExec(ctx, dr.NewConnection(), &query)
-		if query.Header.Err != nil {
+		query := model.CreateQuery(rawSql, args)
+		query.Err = wrapperExec(ctx, dr.NewConnection(), &query)
+		if query.Err != nil {
 			return dr.GetDatabaseConfig().ErrorQueryHandler(ctx, query)
 		}
 		dr.GetDatabaseConfig().InfoHandler(ctx, query)
@@ -123,7 +122,7 @@ func (dr *Driver) rawExecContext(ctx context.Context, rawSql string, args ...any
 
 func wrapperExec(ctx context.Context, conn model.Connection, query *model.Query) error {
 	queryStart := time.Now()
-	defer func() { query.Header.QueryDuration = time.Since(queryStart) }()
+	defer func() { query.QueryDuration = time.Since(queryStart) }()
 	return conn.ExecContext(ctx, query)
 }
 

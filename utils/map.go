@@ -5,6 +5,7 @@ import (
 	"sync"
 )
 
+// CoMap is a thread-safe concurrent map with read-write locking.
 type CoMap struct {
 	mu   sync.RWMutex
 	data map[string]any

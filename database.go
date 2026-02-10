@@ -7,16 +7,30 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/azhai/goent/enum"
 	"github.com/azhai/goent/model"
 )
 
 var (
-	addrMap       = &goeMap{mapField: make(map[uintptr]field)}
-	schemasMap    = make(map[string]*string)
-	tableRegistry = make(map[uintptr]*TableInfo)
+	// addrMap       = &goeMap{mapField: make(map[uintptr]field)}
+	schemaRegistry = make(map[string]*string)
+	tableRegistry  = make(map[uintptr]*TableInfo)
 )
 
+// GetTableColumn returns the column info for a given table address and column name.
+func GetTableColumn(addr uintptr, name string) *Column {
+	if addr == 0 {
+		return nil
+	}
+	if info := tableRegistry[addr]; info != nil {
+		if col, ok := info.Columns[name]; ok {
+			return col
+		}
+	}
+	return nil
+}
+
+// GetFieldName returns the qualified field name (table.column) for a given table address and column name.
+// If the address is 0, it returns just the column name.
 func GetFieldName(addr uintptr, name string) (string, error) {
 	if addr == 0 {
 		return name, nil
@@ -52,6 +66,7 @@ func (am *goeMap) delete(key uintptr) {
 	delete(am.mapField, key)
 }
 
+// DB represents a database connection with its driver.
 type DB struct {
 	driver model.Driver
 }
@@ -72,11 +87,11 @@ func (db *DB) Stats() sql.DBStats {
 }
 
 func (db *DB) RawQueryContext(ctx context.Context, rawSql string, args ...any) (model.Rows, error) {
-	query := model.Query{Type: enum.RawQuery, RawSql: rawSql, Arguments: args}
 	var rows model.Rows
-	rows, query.Header.Err = wrapperQuery(ctx, db.driver.NewConnection(), &query)
+	query := model.CreateQuery(rawSql, args)
+	rows, query.Err = wrapperQuery(ctx, db.driver.NewConnection(), &query)
 	dc := db.driver.GetDatabaseConfig()
-	if query.Header.Err != nil {
+	if query.Err != nil {
 		return nil, dc.ErrorQueryHandler(ctx, query)
 	}
 	dc.InfoHandler(ctx, query)
@@ -84,10 +99,10 @@ func (db *DB) RawQueryContext(ctx context.Context, rawSql string, args ...any) (
 }
 
 func (db *DB) RawExecContext(ctx context.Context, rawSql string, args ...any) error {
-	query := model.Query{Type: enum.RawQuery, RawSql: rawSql, Arguments: args}
-	query.Header.Err = wrapperExec(ctx, db.driver.NewConnection(), &query)
+	query := model.CreateQuery(rawSql, args)
+	query.Err = wrapperExec(ctx, db.driver.NewConnection(), &query)
 	dc := db.driver.GetDatabaseConfig()
-	if query.Header.Err != nil {
+	if query.Err != nil {
 		return dc.ErrorQueryHandler(ctx, query)
 	}
 	dc.InfoHandler(ctx, query)
@@ -183,7 +198,7 @@ func (db *DB) BeginTransactionContext(ctx context.Context, isolation sql.Isolati
 	return t.Commit()
 }
 
-// Close Closes the database connection.
+// Close closes the database connection and cleans up the table registry.
 func Close(ent any) error {
 	goeDb := getDatabase(ent)
 	err := goeDb.driver.Close()
@@ -192,20 +207,24 @@ func Close(ent any) error {
 		return dc.ErrorHandler(context.TODO(), err)
 	}
 
-	valueOf := reflect.ValueOf(ent).Elem()
-
-	for i := range valueOf.NumField() - 1 {
-		fieldOf := valueOf.Field(i)
-		if fieldOf.Kind() == reflect.Ptr {
-			if fieldOf.IsNil() {
-				continue
-			}
-			fieldOf = fieldOf.Elem()
-		}
-		for fieldId := range fieldOf.NumField() {
-			addrMap.delete(uintptr(fieldOf.Field(fieldId).Addr().UnsafePointer()))
-		}
+	for _, table := range tableRegistry {
+		delete(tableRegistry, table.TableAddr)
 	}
+
+	// valueOf := reflect.ValueOf(ent).Elem()
+
+	// for i := range valueOf.NumField() - 1 {
+	// 	fieldOf := valueOf.Field(i)
+	// 	if fieldOf.Kind() == reflect.Ptr {
+	// 		if fieldOf.IsNil() {
+	// 			continue
+	// 		}
+	// 		fieldOf = fieldOf.Elem()
+	// 	}
+	// 	for fieldId := range fieldOf.NumField() {
+	// 		addrMap.delete(uintptr(fieldOf.Field(fieldId).Addr().UnsafePointer()))
+	// 	}
+	// }
 
 	return nil
 }

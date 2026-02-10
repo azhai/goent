@@ -14,6 +14,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+type Rows struct {
+	pgx.Rows
+}
+
+func (rs *Rows) Close() error {
+	rs.Rows.Close()
+	return rs.Err()
+}
+
+// Driver implements the PostgreSQL database driver using pgx.
 type Driver struct {
 	dsn string
 	sql *pgxpool.Pool
@@ -29,6 +39,7 @@ type config struct {
 	MigratePath string
 }
 
+// Config contains PostgreSQL driver configuration options.
 type Config struct {
 	Logger           model.Logger
 	IncludeArguments bool          // include all arguments used on query
@@ -151,22 +162,16 @@ type Connection struct {
 }
 
 func (c Connection) QueryContext(ctx context.Context, query *model.Query) (model.Rows, error) {
-	buildSql(query)
 	rows, err := c.sql.Query(ctx, query.RawSql, query.Arguments...)
-	return Rows{rows: rows}, err
+	return &Rows{rows}, err
 }
 
 func (c Connection) QueryRowContext(ctx context.Context, query *model.Query) model.Row {
-	buildSql(query)
-	row := c.sql.QueryRow(ctx, query.RawSql, query.Arguments...)
-
-	return Row{row: row}
+	return c.sql.QueryRow(ctx, query.RawSql, query.Arguments...)
 }
 
 func (c Connection) ExecContext(ctx context.Context, query *model.Query) error {
-	buildSql(query)
 	_, err := c.sql.Exec(ctx, query.RawSql, query.Arguments...)
-
 	return err
 }
 
@@ -182,22 +187,16 @@ type Transaction struct {
 }
 
 func (t Transaction) QueryContext(ctx context.Context, query *model.Query) (model.Rows, error) {
-	buildSql(query)
 	rows, err := t.tx.Query(ctx, query.RawSql, query.Arguments...)
-	return Rows{rows: rows}, err
+	return &Rows{rows}, err
 }
 
 func (t Transaction) QueryRowContext(ctx context.Context, query *model.Query) model.Row {
-	buildSql(query)
-	row := t.tx.QueryRow(ctx, query.RawSql, query.Arguments...)
-
-	return Row{row: row}
+	return t.tx.QueryRow(ctx, query.RawSql, query.Arguments...)
 }
 
 func (t Transaction) ExecContext(ctx context.Context, query *model.Query) error {
-	buildSql(query)
 	_, err := t.tx.Exec(ctx, query.RawSql, query.Arguments...)
-
 	return err
 }
 
@@ -251,31 +250,6 @@ func (s SavePoint) Commit() error {
 		return s.tx.config.ErrorHandler(context.TODO(), err)
 	}
 	return nil
-}
-
-type Rows struct {
-	rows pgx.Rows
-}
-
-func (rs Rows) Close() error {
-	rs.rows.Close()
-	return nil
-}
-
-func (rs Rows) Next() bool {
-	return rs.rows.Next()
-}
-
-func (rs Rows) Scan(dest ...any) error {
-	return rs.rows.Scan(dest...)
-}
-
-type Row struct {
-	row pgx.Row
-}
-
-func (r Row) Scan(dest ...any) error {
-	return r.row.Scan(dest...)
 }
 
 func convertTxOptions(sqlOpts *sql.TxOptions) pgx.TxOptions {

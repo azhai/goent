@@ -272,7 +272,7 @@ func TestInsert(t *testing.T) {
 					{Name: "Snake"},
 					{Name: "Whale"},
 				}
-				err = db.Animal.Insert().All(animals)
+				err = db.Animal.Insert().All(true, animals)
 				if err != nil {
 					t.Fatalf("Expected insert animals, got error: %v", err)
 				}

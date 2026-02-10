@@ -7,6 +7,7 @@ import (
 	"github.com/azhai/goent/enum"
 )
 
+// Attribute represents a database column or expression with optional aggregate or function.
 type Attribute struct {
 	Table         string
 	Name          string
@@ -14,11 +15,13 @@ type Attribute struct {
 	FunctionType  enum.FunctionType
 }
 
+// JoinArgument represents a table and column reference used in JOIN conditions.
 type JoinArgument struct {
 	Table string
 	Name  string
 }
 
+// Join represents a JOIN clause with the join type and condition arguments.
 type Join struct {
 	Table          Table
 	FirstArgument  JoinArgument
@@ -26,6 +29,7 @@ type Join struct {
 	SecondArgument JoinArgument
 }
 
+// Where represents a WHERE clause condition with operator and optional subquery.
 type Where struct {
 	Type           enum.WhereType
 	Attribute      Attribute
@@ -35,15 +39,18 @@ type Where struct {
 	QueryIn        *Query
 }
 
+// OrderBy represents an ORDER BY clause with attribute and direction.
 type OrderBy struct {
 	Desc      bool
 	Attribute Attribute
 }
 
+// GroupBy represents a GROUP BY clause with an attribute.
 type GroupBy struct {
 	Attribute Attribute
 }
 
+// Table represents a database table with optional schema name.
 type Table struct {
 	Schema *string
 	Name   string
@@ -57,35 +64,51 @@ func (t Table) String() string {
 }
 
 type Query struct {
-	Type       enum.QueryType
-	Attributes []Attribute
-	Tables     []Table
-
-	Joins     []Join    // Select
-	Limit     int       // Select
-	Offset    int       // Select
-	OrderBy   []OrderBy // Select
-	GroupBy   []GroupBy // Select
-	ForUpdate bool      // Select
-
-	WhereOperations []Where // Select, Update and Delete
-	WhereIndex      int     // Start of where position arguments $1, $2...
-	Arguments       []any
-
-	ReturningID    *Attribute // Insert
-	BatchSizeQuery int        // Insert
-	SizeArguments  int        // Insert
-
-	RawSql string
-	Header QueryHeader
-}
-
-type QueryHeader struct {
-	Err           error
-	ModelBuild    time.Duration
+	RawSql        string
+	Arguments     []any
 	QueryDuration time.Duration
+	Err           error
 }
 
+func CreateQuery(rawSql string, args []any) Query {
+	return Query{RawSql: rawSql, Arguments: args}
+}
+
+// // Query represents a complete SQL query with all its components.
+// type Query struct {
+// 	Type       enum.QueryType
+// 	Attributes []Attribute
+// 	Tables     []Table
+
+// 	Joins     []Join    // Select
+// 	Limit     int       // Select
+// 	Offset    int       // Select
+// 	OrderBy   []OrderBy // Select
+// 	GroupBy   []GroupBy // Select
+// 	ForUpdate bool      // Select
+
+// 	WhereOperations []Where // Select, Update and Delete
+// 	WhereIndex      int     // Start of where position arguments $1, $2...
+// 	Arguments       []any
+
+// 	ReturningID    *Attribute // Insert
+// 	BatchSizeQuery int        // Insert
+// 	SizeArguments  int        // Insert
+
+// 	Builder any // New Builder interface
+
+// 	RawSql string
+// 	Header QueryHeader
+// }
+
+// // QueryHeader contains metadata about query execution including errors and timing.
+// type QueryHeader struct {
+// 	Err           error
+// 	ModelBuild    time.Duration
+// 	QueryDuration time.Duration
+// }
+
+// Operation represents a single operation in a WHERE clause with value and operator.
 type Operation struct {
 	Type                enum.WhereType
 	Arg                 any
@@ -101,22 +124,26 @@ type Operation struct {
 	Branches            []Operation
 }
 
+// Set represents a SET clause for UPDATE queries with attribute and value.
 type Set struct {
 	Attribute any
 	Value     any
 }
 
+// Body represents a table and column reference for internal use.
 type Body struct {
 	Table string
 	Name  string
 }
 
+// Migrator contains all tables and schemas to be migrated.
 type Migrator struct {
 	Tables  map[string]*TableMigrate
 	Schemas []string
 	Error   error
 }
 
+// TableMigrate represents a table to be migrated with its columns, indexes, and relationships.
 type TableMigrate struct {
 	Name         string
 	EscapingName string
@@ -137,6 +164,7 @@ func (t TableMigrate) EscapingTableName() string {
 	return t.EscapingName
 }
 
+// IndexMigrate represents an index to be created during migration.
 type IndexMigrate struct {
 	Name         string
 	EscapingName string
@@ -145,11 +173,13 @@ type IndexMigrate struct {
 	Attributes   []AttributeMigrate
 }
 
+// PrimaryKeyMigrate represents a primary key column with auto-increment flag.
 type PrimaryKeyMigrate struct {
 	AutoIncrement bool
 	AttributeMigrate
 }
 
+// AttributeMigrate represents a column to be created during migration.
 type AttributeMigrate struct {
 	Nullable     bool
 	FieldName    string
@@ -159,7 +189,7 @@ type AttributeMigrate struct {
 	Default      string
 }
 
-// OneToSomeMigrate O2M/O2O relationship
+// OneToSomeMigrate represents a one-to-one or one-to-many relationship for migration.
 type OneToSomeMigrate struct {
 	IsOneToMany          bool
 	TargetTable          string
@@ -178,7 +208,7 @@ func (o OneToSomeMigrate) EscapingTargetTableName() string {
 	return o.EscapingTargetTable
 }
 
-// ManyToSomeMigrate M2O/M2M relationship
+// ManyToSomeMigrate represents a many-to-one or many-to-many relationship for migration.
 type ManyToSomeMigrate struct {
 	TargetTable          string
 	TargetColumn         string
@@ -196,7 +226,7 @@ func (m ManyToSomeMigrate) EscapingTargetTableName() string {
 	return m.EscapingTargetTable
 }
 
-// DatabaseConfig Database config used by all GOE drivers
+// DatabaseConfig contains database configuration including logging and error handling settings.
 type DatabaseConfig struct {
 	Logger           Logger
 	IncludeArguments bool          // include all arguments used on query
@@ -207,17 +237,17 @@ type DatabaseConfig struct {
 	initCallback     func() error
 }
 
-func (c DatabaseConfig) ErrorHandler(ctx context.Context, err error) error {
+func (c *DatabaseConfig) ErrorHandler(ctx context.Context, err error) error {
 	if c.Logger != nil {
 		c.Logger.ErrorContext(ctx, "error", "database", c.databaseName, "err", err)
 	}
 	return err
 }
 
-func (c DatabaseConfig) ErrorQueryHandler(ctx context.Context, query Query) error {
-	query.Header.Err = c.errorTranslator(query.Header.Err)
+func (c *DatabaseConfig) ErrorQueryHandler(ctx context.Context, query Query) error {
+	query.Err = c.errorTranslator(query.Err)
 	if c.Logger == nil {
-		return query.Header.Err
+		return query.Err
 	}
 	logs := make([]any, 0)
 	logs = append(logs, "database", c.databaseName)
@@ -225,17 +255,17 @@ func (c DatabaseConfig) ErrorQueryHandler(ctx context.Context, query Query) erro
 	if c.IncludeArguments {
 		logs = append(logs, "arguments", query.Arguments)
 	}
-	logs = append(logs, "err", query.Header.Err)
+	logs = append(logs, "err", query.Err)
 
 	c.Logger.ErrorContext(ctx, "error", logs...)
-	return query.Header.Err
+	return query.Err
 }
 
-func (c DatabaseConfig) InfoHandler(ctx context.Context, query Query) {
+func (c *DatabaseConfig) InfoHandler(ctx context.Context, query Query) {
 	if c.Logger == nil {
 		return
 	}
-	qr := query.Header.QueryDuration + query.Header.ModelBuild
+	qr := query.QueryDuration
 
 	logs := make([]any, 0)
 	logs = append(logs, "database", c.databaseName)
@@ -253,7 +283,7 @@ func (c DatabaseConfig) InfoHandler(ctx context.Context, query Query) {
 	c.Logger.InfoContext(ctx, "query_runned", logs...)
 }
 
-func (c DatabaseConfig) Schemas() []string {
+func (c *DatabaseConfig) Schemas() []string {
 	return c.schemas
 }
 
@@ -269,7 +299,7 @@ func (c *DatabaseConfig) SetInitCallback(f func() error) {
 	c.initCallback = f
 }
 
-func (c DatabaseConfig) InitCallback() func() error {
+func (c *DatabaseConfig) InitCallback() func() error {
 	return c.initCallback
 }
 

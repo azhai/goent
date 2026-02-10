@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/azhai/goent/enum"
 	"github.com/azhai/goent/model"
 )
 
@@ -78,9 +77,9 @@ func (dr *Driver) MigrateContext(ctx context.Context, migrator *model.Migrator) 
 
 func (dr *Driver) rawExecContext(ctx context.Context, rawSql string, args ...any) error {
 	if dr.config.MigratePath == "" {
-		query := model.Query{Type: enum.RawQuery, RawSql: rawSql, Arguments: args}
-		query.Header.Err = wrapperExec(ctx, dr.NewConnection(), &query)
-		if query.Header.Err != nil {
+		query := model.CreateQuery(rawSql, args)
+		query.Err = wrapperExec(ctx, dr.NewConnection(), &query)
+		if query.Err != nil {
 			return dr.GetDatabaseConfig().ErrorQueryHandler(ctx, query)
 		}
 		dr.GetDatabaseConfig().InfoHandler(ctx, query)
@@ -104,14 +103,13 @@ func (dr *Driver) rawExecContext(ctx context.Context, rawSql string, args ...any
 
 func wrapperExec(ctx context.Context, conn model.Connection, query *model.Query) error {
 	queryStart := time.Now()
-	defer func() { query.Header.QueryDuration = time.Since(queryStart) }()
+	defer func() { query.QueryDuration = time.Since(queryStart) }()
 	return conn.ExecContext(ctx, query)
 }
 
 func (dr *Driver) DropTable(schema, table string) error {
 	if len(schema) > 2 {
 		table = schema + "." + table
-		checkAttach(dr.sql, dr.dsn, map[string]bool{schema[1 : len(schema)-1]: true})
 	}
 	return dr.rawExecContext(context.TODO(), fmt.Sprintf("DROP TABLE IF EXISTS %v;", table))
 }
@@ -127,7 +125,6 @@ func (dr *Driver) RenameTable(schema, table, newTable string) error {
 func (dr *Driver) RenameColumn(schema, table, oldColumn, newColumn string) error {
 	if len(schema) > 2 {
 		table = schema + "." + table
-		checkAttach(dr.sql, dr.dsn, map[string]bool{schema[1 : len(schema)-1]: true})
 	}
 	return dr.rawExecContext(context.TODO(), renameColumn(table, oldColumn, newColumn))
 }
@@ -135,7 +132,6 @@ func (dr *Driver) RenameColumn(schema, table, oldColumn, newColumn string) error
 func (dr *Driver) DropColumn(schema, table, column string) error {
 	if len(schema) > 2 {
 		table = schema + "." + table
-		checkAttach(dr.sql, dr.dsn, map[string]bool{schema[1 : len(schema)-1]: true})
 	}
 	return dr.rawExecContext(context.TODO(), dropColumn(table, column))
 }

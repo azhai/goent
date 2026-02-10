@@ -162,7 +162,7 @@ func TestDelete(t *testing.T) {
 					{Name: "Forest Cat"},
 					{Name: "Catt"},
 				}
-				err = db.Animal.Insert().All(animals)
+				err = db.Animal.Insert().All(true, animals)
 				if err != nil {
 					t.Fatalf("Expected a insert, got error: %v", err)
 				}
@@ -196,12 +196,12 @@ func TestDelete(t *testing.T) {
 		{
 			desc: "Delete_All_Records_Tx_Commit",
 			testCase: func(t *testing.T) {
-				animals := []Animal{
+				animals := []*Animal{
 					{Name: "Cat"},
 					{Name: "Forest Cat"},
 					{Name: "Catt"},
 				}
-				err = db.Animal.Insert().All(animals)
+				err = db.Animal.Insert().All(true, animals)
 				if err != nil {
 					t.Fatalf("Expected a insert, got error: %v", err)
 				}

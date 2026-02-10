@@ -83,50 +83,50 @@ func TestSelect(t *testing.T) {
 		t.Fatalf("Expected delete exams, got error: %v", err)
 	}
 
-	weathers := []Weather{
+	weathers := []*Weather{
 		{Name: "Hot"},
 		{Name: "Cold"},
 		{Name: "Wind"},
 		{Name: "Nice"},
 		{Name: "Ocean"},
 	}
-	err = db.Weather.Insert().All(weathers)
+	err = db.Weather.Insert().All(true, weathers)
 	if err != nil {
 		t.Fatalf("Expected insert weathers, got error: %v", err)
 	}
 
-	habitats := []Habitat{
+	habitats := []*Habitat{
 		{Id: uuid.New(), Name: "City", WeatherId: weathers[0].Id, NameWeather: "Test"},
 		{Id: uuid.New(), Name: "Jungle", WeatherId: weathers[3].Id},
 		{Id: uuid.New(), Name: "Savannah", WeatherId: weathers[0].Id},
 		{Id: uuid.New(), Name: "Ocean", WeatherId: weathers[2].Id},
 	}
-	err = db.Habitat.Insert().All(habitats)
+	err = db.Habitat.Insert().All(false, habitats)
 	if err != nil {
 		t.Fatalf("Expected insert habitats, got error: %v", err)
 	}
 
-	status := []Status{
+	status := []*Status{
 		{Name: "Cat Alive"},
 		{Name: "Dog Alive"},
 		{Name: "Big Dog Alive"},
 	}
 
-	err = db.Status.Insert().All(status)
+	err = db.Status.Insert().All(true, status)
 	if err != nil {
 		t.Fatalf("Expected insert habitats, got error: %v", err)
 	}
 
-	infos := []Info{
+	infos := []*Info{
 		{Id: uuid.New().NodeID(), Name: "Little Cat", StatusId: status[0].Id, NameStatus: "Test"},
 		{Id: uuid.New().NodeID(), Name: "Big Dog", StatusId: status[2].Id},
 	}
-	err = db.Info.Insert().All(infos)
+	err = db.Info.Insert().All(false, infos)
 	if err != nil {
 		t.Fatalf("Expected insert infos, got error: %v", err)
 	}
 
-	animals := []Animal{
+	animals := []*Animal{
 		{Name: "Cat", HabitatId: &habitats[0].Id, InfoId: &infos[0].Id},
 		{Name: "Dog", HabitatId: &habitats[0].Id, InfoId: &infos[1].Id},
 		{Name: "Forest Cat", HabitatId: &habitats[1].Id},
@@ -160,90 +160,90 @@ func TestSelect(t *testing.T) {
 		{Name: "Owl"},
 		{Name: "Fox"},
 	}
-	err = goent.Insert(db.Animal).All(animals)
+	err = db.Animal.Insert().All(true, animals)
 	if err != nil {
 		t.Fatalf("Expected insert animals, got error: %v", err)
 	}
 
-	foods := []Food{{Id: uuid.New(), Name: "Meat"}, {Id: uuid.New(), Name: "Grass"}}
-	err = goent.Insert(db.Food).All(foods)
+	foods := []*Food{{Id: uuid.New(), Name: "Meat"}, {Id: uuid.New(), Name: "Grass"}}
+	err = db.Food.Insert().All(true, foods)
 	if err != nil {
 		t.Fatalf("Expected insert foods, got error: %v", err)
 	}
 
-	animalFoods := []AnimalFood{
+	animalFoods := []*AnimalFood{
 		{FoodId: foods[0].Id, AnimalId: animals[0].Id},
 		{FoodId: foods[0].Id, AnimalId: animals[1].Id}}
-	err = goent.Insert(db.AnimalFood).All(animalFoods)
+	err = db.AnimalFood.Insert().All(true, animalFoods)
 	if err != nil {
 		t.Fatalf("Expected insert animalFoods, got error: %v", err)
 	}
 
-	users := []User{
+	users := []*User{
 		{Name: "Lauro Santana", Email: "lauro@email.com"},
 		{Name: "John Constantine", Email: "hunter@email.com"},
 		{Name: "Harry Potter", Email: "harry@email.com"},
 	}
-	err = goent.Insert(db.User).All(users)
+	err = db.User.Insert().All(true, users)
 	if err != nil {
 		t.Fatalf("Expected insert users, got error: %v", err)
 	}
 
-	roles := []Role{
+	roles := []*Role{
 		{Name: "Administrator"},
 		{Name: "User"},
 		{Name: "Mid-Level"},
 	}
-	err = goent.Insert(db.Role).All(roles)
+	err = db.Role.Insert().All(true, roles)
 	if err != nil {
 		t.Fatalf("Expected insert roles, got error: %v", err)
 	}
 
 	tt := time.Now().AddDate(0, 0, 10)
-	userRoles := []UserRole{
+	userRoles := []*UserRole{
 		{UserId: users[0].Id, RoleId: roles[0].Id, EndDate: &tt},
 		{UserId: users[1].Id, RoleId: roles[2].Id},
 	}
-	err = goent.Insert(db.UserRole).All(userRoles)
+	err = db.UserRole.Insert().All(true, userRoles)
 	if err != nil {
 		t.Fatalf("Expected insert user roles, got error: %v", err)
 	}
 
-	persons := []Person{
+	persons := []*Person{
 		{Name: "Jhon"},
 		{Name: "Laura"},
 		{Name: "Luana"},
 	}
-	err = goent.Insert(db.Person).All(persons)
+	err = db.Person.Insert().All(true, persons)
 	if err != nil {
 		t.Fatalf("Expected insert persons, got error: %v", err)
 	}
 
-	jobs := []JobTitle{
+	jobs := []*JobTitle{
 		{Name: "Developer"},
 		{Name: "Designer"},
 	}
-	err = goent.Insert(db.JobTitle).All(jobs)
+	err = db.JobTitle.Insert().All(true, jobs)
 	if err != nil {
 		t.Fatalf("Expected insert jobs, got error: %v", err)
 	}
 
-	personJobs := []PersonJobTitle{
+	personJobs := []*PersonJobTitle{
 		{PersonId: persons[0].Id, JobTitleId: jobs[0].Id, CreatedAt: time.Now()},
 		{PersonId: persons[1].Id, JobTitleId: jobs[0].Id, CreatedAt: time.Now()},
 		{PersonId: persons[2].Id, JobTitleId: jobs[1].Id, CreatedAt: time.Now()},
 	}
-	err = goent.Insert(db.PersonJobTitle).All(personJobs)
+	err = db.PersonJobTitle.Insert().All(true, personJobs)
 	if err != nil {
 		t.Fatalf("Expected insert personJobs, got error: %v", err)
 	}
 
-	exams := []Exam{
+	exams := []*Exam{
 		{Score: 9.9, Minimum: 5.5},
 		{Score: 4.9, Minimum: 5.5},
 		{Score: 5.5, Minimum: 5.5},
 	}
-	err = goent.Insert(db.Exam).All(exams)
+	err = db.Exam.Insert().All(true, exams)
 	if err != nil {
 		t.Fatalf("Expected insert exams, got error: %v", err)
 	}
@@ -255,7 +255,7 @@ func TestSelect(t *testing.T) {
 		{
 			desc: "Select",
 			testCase: func(t *testing.T) {
-				a := runSelect(t, goent.List(db.Animal).Rows())
+				a := runSelect(t, db.Animal.Select().Rows())
 				if len(a) != len(animals) {
 					t.Errorf("Expected %v animals, got %v", len(animals), len(a))
 				}
@@ -269,7 +269,7 @@ func TestSelect(t *testing.T) {
 					wg.Add(1)
 					go func() {
 						defer wg.Done()
-						goent.List(db.Animal).AsSlice()
+						db.Animal.Select().AsSlice()
 					}()
 				}
 				wg.Wait()
@@ -278,17 +278,17 @@ func TestSelect(t *testing.T) {
 		{
 			desc: "List",
 			testCase: func(t *testing.T) {
-				var a []Animal
-				a, err = goent.List(db.Animal).AsSlice()
+				var a []*Animal
+				a, err = db.Animal.Select().All()
 				if err != nil {
 					t.Fatalf("Expected List, got error: %v", err)
 				}
 				if len(a) != len(animals) {
 					t.Errorf("Expected %v animals, got %v", len(animals), len(a))
 				}
-				a, err = goent.List(db.Animal).
+				a, err = db.Animal.Select().
 					Join(&db.Animal.Id, &db.AnimalFood.AnimalId).
-					Join(&db.AnimalFood.FoodId, &db.Food.Id).AsSlice()
+					Join(&db.AnimalFood.FoodId, &db.Food.Id).All()
 				if err != nil {
 					t.Fatalf("Expected List, got error: %v", err)
 				}

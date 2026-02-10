@@ -5,26 +5,43 @@ import (
 	"reflect"
 )
 
+// Field represents a database field with its table reference and column name.
 type Field struct {
-	Table  uintptr
-	Column string
-	Func   string
+	Table    uintptr
+	FieldId  int
+	Column   string
+	Function string
+}
+
+func (f *Field) Func(name string) *Field {
+	f.Function = name
+	return f
+}
+
+func (f *Field) GetFid() int {
+	if f.FieldId < 0 && f.Column != "*" {
+		if col := GetTableColumn(f.Table, f.Column); col != nil {
+			f.FieldId = col.FieldId
+		}
+	}
+	return f.FieldId
 }
 
 func (f *Field) String() string {
 	res, err := f.Column, error(nil)
 	if res != "*" {
-		res, err = GetFieldName(f.Table, res)
+		res, err = GetFieldName(f.Table, f.Column)
 		if err != nil {
 			return ""
 		}
 	}
-	if f.Func != "" {
-		return fmt.Sprintf(f.Func, res)
+	if f.Function != "" {
+		return fmt.Sprintf(f.Function, res)
 	}
 	return res
 }
 
+// Value represents a value or list of values for use in query conditions.
 type Value struct {
 	Type   reflect.Kind
 	Args   []any
@@ -33,8 +50,9 @@ type Value struct {
 
 func NewValue(value any) *Value {
 	valueOf := reflect.ValueOf(value)
-	kind, size := valueOf.Kind(), valueOf.Len()
+	kind := valueOf.Kind()
 	if kind == reflect.Slice {
+		size := valueOf.Len()
 		args := make([]any, size)
 		for i := range args {
 			args[i] = valueOf.Index(i).Interface()
@@ -47,6 +65,7 @@ func NewValue(value any) *Value {
 	}
 }
 
+// Condition represents a SQL WHERE condition with a template and associated fields/values.
 type Condition struct {
 	Template string
 	Fields   []*Field
@@ -59,10 +78,10 @@ func (c Condition) IsEmpty() bool {
 
 // And Example
 //
-//	where.And(
-//		where.Equals(&db.Animal.Status, "Eating"),
-//		where.Like(&db.Animal.Name, "%Cat%"),
-//		where.GreaterThan(&db.Animal.Age, 3),
+//	goent.And(
+//		goent.Equals(db.Animal.Field("status"), "Eating"),
+//		goent.Like(db.Animal.Field("name"), "%Cat%"),
+//		goent.GreaterThan(db.Animal.Field("age"), 3),
 //	)
 func And(branches ...Condition) Condition {
 	var size int
@@ -73,10 +92,10 @@ func And(branches ...Condition) Condition {
 	}
 	res := Condition{Template: "("}
 	for i, cond := range branches {
-		res.Template += cond.Template
 		if i > 0 {
 			res.Template += ") AND ("
 		}
+		res.Template += cond.Template
 		res.Fields = append(res.Fields, cond.Fields...)
 		res.Values = append(res.Values, cond.Values...)
 	}
@@ -86,10 +105,10 @@ func And(branches ...Condition) Condition {
 
 // Or Example
 //
-//	where.Or(
-//		where.Equals(&db.Animal.Status, "Eating"),
-//		where.Like(&db.Animal.Name, "%Cat%"),
-//		where.LessThan(&db.Animal.Age, 1),
+//	goent.Or(
+//		goent.Equals(db.Animal.Field("status"), "Eating"),
+//		goent.Like(db.Animal.Field("name"), "%Cat%"),
+//		goent.LessThan(db.Animal.Field("age"), 1),
 //	)
 func Or(branches ...Condition) Condition {
 	var size int
@@ -100,20 +119,20 @@ func Or(branches ...Condition) Condition {
 	}
 	res := Condition{Template: ""}
 	for i, cond := range branches {
-		res.Template += cond.Template
 		if i > 0 {
 			res.Template += " OR "
 		}
+		res.Template += cond.Template
 		res.Fields = append(res.Fields, cond.Fields...)
 		res.Values = append(res.Values, cond.Values...)
 	}
 	return res
 }
 
-// Equals
+// Equals creates a condition that checks if a field is equal to a value.
 //
-//	// Example: using Table with field name
-//	where.Equals(&db.OrderDetail, "order_id", 1)
+//	Example: using Table with field name
+//	goent.Equals(db.OrderDetail.Field("order_id"), 1)
 func Equals(left *Field, value any) Condition {
 	right := NewValue(value)
 	if right.Length == 0 {
@@ -153,7 +172,7 @@ func EqualsMap(left *Field, data map[string]any) Condition {
 // Greater Example
 //
 //	// get all animals that was created after 09 of october 2024 at 11:50AM
-//	Where(where.Greater(&db.Animal.CreateAt, time.Date(2024, time.October, 9, 11, 50, 00, 00, time.Local)))
+//	Filter(goent.Greater(db.Animal.Field("create_at"), time.Date(2024, time.October, 9, 11, 50, 00, 00, time.Local)))
 func Greater(left *Field, value any) Condition {
 	return Condition{Template: "%s > ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }
@@ -165,39 +184,45 @@ func GreaterField(left, right *Field) Condition {
 // GreaterEquals Example
 //
 //	// get all animals that was created in or after 09 of october 2024 at 11:50AM
-//	Where(where.GreaterEquals(&db.Animal.CreateAt, time.Date(2024, time.October, 9, 11, 50, 00, 00, time.Local)))
+//	Filter(goent.GreaterEquals(db.Animal.Field("create_at"), time.Date(2024, time.October, 9, 11, 50, 00, 00, time.Local)))
 func GreaterEquals(left *Field, value any) Condition {
 	return Condition{Template: "%s >= ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }
 
+// GreaterEqualsField creates a condition that checks if one field is greater than or equal to another.
 func GreaterEqualsField(left, right *Field) Condition {
 	return Condition{Template: "%s >= %s", Fields: []*Field{left, right}, Values: []*Value{}}
 }
 
-// Less Example
+// Less creates a condition that checks if a field is less than a value.
 //
-//	// get all animals that was updated before 09 of october 2024 at 11:50AM
-//	Where(where.Less(&db.Animal.UpdateAt, time.Date(2024, time.October, 9, 11, 50, 00, 00, time.Local)))
+// Example: get all animals that was updated before 09 of october 2024 at 11:50AM
+//
+//	Filter(goent.Less(db.Animal.Field("update_at"), time.Date(2024, time.October, 9, 11, 50, 00, 00, time.Local)))
 func Less(left *Field, value any) Condition {
 	return Condition{Template: "%s < ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }
 
+// LessField creates a condition that checks if one field is less than another.
 func LessField(left, right *Field) Condition {
 	return Condition{Template: "%s < %s", Fields: []*Field{left, right}, Values: []*Value{}}
 }
 
-// LessEquals Example
+// LessEquals creates a condition that checks if a field is less than or equal to a value.
 //
-//	// get all animals that was updated in or before 09 of october 2024 at 11:50AM
-//	Where(where.LessEquals(&db.Animal.UpdateAt, time.Date(2024, time.October, 9, 11, 50, 00, 00, time.Local)))
+// Example: get all animals that was updated in or before 09 of october 2024 at 11:50AM
+//
+//	Filter(goent.LessEquals(db.Animal.Field("update_at"), time.Date(2024, time.October, 9, 11, 50, 00, 00, time.Local)))
 func LessEquals(left *Field, value any) Condition {
 	return Condition{Template: "%s <= ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }
 
+// LessEqualsField creates a condition that checks if one field is less than or equal to another.
 func LessEqualsField(left, right *Field) Condition {
 	return Condition{Template: "%s <= %s", Fields: []*Field{left, right}, Values: []*Value{}}
 }
 
+// In creates a condition that checks if a field value is in a list of values.
 func In(left *Field, value any) Condition {
 	right := NewValue(value)
 	if right.Length <= 1 {
@@ -206,6 +231,7 @@ func In(left *Field, value any) Condition {
 	return Condition{Template: "%s IN ?", Fields: []*Field{left}, Values: []*Value{right}}
 }
 
+// NotIn creates a condition that checks if a field value is not in a list of values.
 func NotIn(left *Field, value any) Condition {
 	right := NewValue(value)
 	if right.Length <= 1 {
@@ -214,14 +240,16 @@ func NotIn(left *Field, value any) Condition {
 	return Condition{Template: "%s NOT IN ?", Fields: []*Field{left}, Values: []*Value{right}}
 }
 
-// Like
+// Like creates a condition that checks if a field matches a LIKE pattern.
 //
-//	// Example: get all animals that has a "at" in his name
-//	where.Like(&db.Animal.Name, "%at%")
+// Example: get all animals that has a "at" in his name
+//
+//	goent.Like(db.Animal.Field("name"), "%at%")
 func Like(left *Field, value string) Condition {
 	return Condition{Template: "%s LIKE ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }
 
+// NotLike creates a condition that checks if a field does not match a LIKE pattern.
 func NotLike(left *Field, value string) Condition {
 	return Condition{Template: "%s NOT LIKE ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }

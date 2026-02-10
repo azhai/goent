@@ -1,5 +1,6 @@
 package enum
 
+// WhereType represents the type of WHERE clause condition.
 type WhereType uint
 
 const (
@@ -11,17 +12,20 @@ const (
 	OperationInWhere
 )
 
+// QueryType represents the type of SQL query (SELECT, INSERT, UPDATE, DELETE, etc.).
 type QueryType uint
 
 const (
 	_ QueryType = iota
 	SelectQuery
 	InsertQuery
+	InsertAllQuery
 	UpdateQuery
 	DeleteQuery
 	RawQuery
 )
 
+// AggregateType represents the type of SQL aggregate function (COUNT, SUM, AVG, etc.).
 type AggregateType uint
 
 const (
@@ -33,6 +37,7 @@ const (
 	AvgAggregate
 )
 
+// FunctionType represents the type of SQL string function (UPPER, LOWER, etc.).
 type FunctionType uint
 
 const (
@@ -41,15 +46,16 @@ const (
 	LowerFunction
 )
 
-type JoinType uint
+// JoinType represents the type of SQL JOIN (INNER JOIN, LEFT JOIN, RIGHT JOIN).
+type JoinType string
 
 const (
-	_ JoinType = iota
-	Join
-	LeftJoin
-	RightJoin
+	Join      JoinType = "JOIN"
+	LeftJoin  JoinType = "LEFT JOIN"
+	RightJoin JoinType = "RIGHT JOIN"
 )
 
+// OperatorType represents the type of comparison operator in SQL conditions.
 type OperatorType uint
 
 const (

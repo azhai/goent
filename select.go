@@ -4,14 +4,13 @@ import (
 	"context"
 	"iter"
 	"math"
-	"reflect"
 	"strings"
 
 	"github.com/azhai/goent/enum"
 	"github.com/azhai/goent/model"
-	"github.com/azhai/goent/query/aggregate"
 )
 
+// StateSelect represents a SELECT query state with type parameters for table and result types.
 type StateSelect[T, R any] struct {
 	fields []fieldSelect
 	table  *Table[T]
@@ -19,28 +18,17 @@ type StateSelect[T, R any] struct {
 	*StateWhere
 }
 
-func NewStateSelect[T, R any](ctx context.Context, table *Table[T], col any) *StateSelect[T, R] {
+// NewStateSelect creates a new StateSelect for querying data from a table.
+func NewStateSelect[T, R any](ctx context.Context, table *Table[T]) *StateSelect[T, R] {
 	s := NewStateWhere(ctx)
 	s.builder.Type = enum.SelectQuery
-	s.builder.Table = model.Table{
-		Schema: table.Schema,
-		Name:   table.TableName,
-	}
-	sel := &StateSelect[T, R]{table: table, StateWhere: s}
-	if col != nil {
-		if a, ok := col.(model.Aggregate); ok {
-			if f, ok := a.(interface{ GetField() any }).GetField().(*Column); ok {
-				agg := createAggregateFromTable(table, f, a.Aggregate())
-				sel.fields = append(sel.fields, agg)
-				s.builder.Selects = append(s.builder.Selects, agg)
-			}
-		}
-	}
-	return sel
+	s.builder.SetTable(table.TableInfo)
+	return &StateSelect[T, R]{table: table, StateWhere: s}
 }
 
 func (s *StateSelect[T, R]) CopyFrom(ob *Builder, conn model.Connection) *StateSelect[T, R] {
 	// copy joins
+	// s.builder.Selects = ob.Selects
 	s.builder.Joins = ob.Joins
 	// copy operations
 	s.builder.Where = ob.Where
@@ -54,22 +42,39 @@ func (s *StateSelect[T, R]) CopyFrom(ob *Builder, conn model.Connection) *StateS
 	return s
 }
 
-// AsQuery return a [model.Query] for use inside a [where.In].
-func (s *StateSelect[T, R]) AsQuery() model.Query {
-	s.builder.buildSqlSelect()
-	return s.builder.query
+func (s *StateSelect[T, R]) Select(args ...any) *StateSelect[T, R] {
+	for _, arg := range args {
+		if col, ok := arg.(*Field); ok {
+			s.builder.Selects = append(s.builder.Selects, col)
+		} else if col, ok := arg.(string); ok {
+			fld := s.table.Field(col)
+			s.builder.Selects = append(s.builder.Selects, fld)
+		}
+	}
+	return s
 }
 
+// AsQuery return a [model.Query] for use inside a [where.In].
+// func (s *StateSelect[T, R]) AsQuery() model.Query {
+// 	sql, args := s.builder.Build()
+// 	return model.Query{
+// 		Type:       s.builder.Type,
+// 		RawSql:     sql,
+// 		Arguments:  args,
+// 		WhereIndex: 1,
+// 	}
+// }
+
 // Rows return a iterator on rows.
-func (s *StateSelect[T, R]) Rows() iter.Seq2[R, error] {
-	s.builder.buildSqlSelect()
-	dc, size := s.prepare(s.table.db.driver), len(s.builder.Selects)
-	return handlerResult[R](s.ctx, s.conn, s.builder, size, dc)
+func (s *StateSelect[T, R]) Rows() iter.Seq2[*R, error] {
+	qr := model.CreateQuery(s.builder.Build())
+	hd := s.Prepare(s.table.db.driver)
+	return QueryResult[R](hd, qr)
 }
 
 func (s *StateSelect[T, R]) One() (*R, error) {
 	for row, err := range s.Take(1).Rows() {
-		return &row, err
+		return row, err
 	}
 	return nil, ErrNotFound
 }
@@ -80,7 +85,7 @@ func (s *StateSelect[T, R]) All() ([]*R, error) {
 		if err != nil {
 			return nil, err
 		}
-		rows = append(rows, &row)
+		rows = append(rows, row)
 	}
 	return rows, nil
 }
@@ -101,7 +106,7 @@ func (s *StateSelect[T, R]) Filter(args ...Condition) *StateSelect[T, R] {
 }
 
 func (s *StateSelect[T, R]) Match(obj T) *StateSelect[T, R] {
-	s.StateWhere = MatchWhere[T](s.StateWhere, s.table, obj)
+	s.StateWhere = MatchWhere(s.StateWhere, s.table, obj)
 	return s
 }
 
@@ -110,7 +115,7 @@ func (s *StateSelect[T, R]) OrderBy(args ...string) *StateSelect[T, R] {
 	var desc bool
 	for _, arg := range args {
 		pieces := strings.Fields(arg)
-		if len(pieces) == 2 && strings.ToLower(pieces[1]) == "desc" {
+		if len(pieces) == 2 && strings.ToUpper(pieces[1]) == "DESC" {
 			arg, desc = pieces[0], true
 		}
 		ord := &Order{Field: s.table.Field(arg), Desc: desc}
@@ -140,21 +145,21 @@ func (s *StateSelect[T, R]) Skip(i int) *StateSelect[T, R] {
 	return s
 }
 
-func (s *StateSelect[T, R]) Join(left, right any) *StateSelect[T, R] {
-	s.builder.buildSelectJoins(enum.Join, getArgsJoin(addrMap.mapField, left, right))
+// Join joins another table with a condition
+func (s *StateSelect[T, R]) Join(joinType enum.JoinType, on Condition) *StateSelect[T, R] {
+	s.builder.Joins = append(s.builder.Joins, &JoinTable{
+		JoinType: joinType, On: on,
+		Table: s.table.TableInfo.Table(),
+	})
 	return s
 }
 
-func (s *StateSelect[T, R]) LeftJoin(left, right any) *StateSelect[T, R] {
-	s.builder.buildSelectJoins(enum.LeftJoin, getArgsJoin(addrMap.mapField, left, right))
-	return s
+// LeftJoin joins another table with a condition on left table
+func (s *StateSelect[T, R]) LeftJoin(table *Table[T], left, right string) *StateSelect[T, R] {
+	return s.Join(enum.LeftJoin, EqualsField(s.table.Field(left), table.Field(right)))
 }
 
-func (s *StateSelect[T, R]) RightJoin(left, right any) *StateSelect[T, R] {
-	s.builder.buildSelectJoins(enum.RightJoin, getArgsJoin(addrMap.mapField, left, right))
-	return s
-}
-
+// Pagination holds paginated query results with metadata.
 type Pagination[T, R any] struct {
 	TotalValues int64 `json:"totalValues"`
 	TotalPages  int   `json:"totalPages"`
@@ -184,18 +189,18 @@ func (s *StateSelect[T, R]) Pagination(page, size int) (*Pagination[T, R], error
 		page = 1
 	}
 
-	counter := NewStateSelect[T, ResultCount](s.ctx, s.table, aggregate.Count(s.table))
+	fld := &Field{Table: s.table.TableAddr, Column: "*", Function: "COUNT(%s)"}
+	counter := NewStateSelect[T, ResultCount](s.ctx, s.table).Select(fld)
 	counter.CopyFrom(s.builder, s.conn)
 	count, err := FetchCountResult(counter)
 	if err != nil {
 		return nil, err
 	}
 
-	s.builder.query.Offset = size * (page - 1)
-	s.builder.query.Limit = size
+	s.builder.Offset = size * (page - 1)
+	s.builder.Limit = size
 
 	p := new(Pagination[T, R])
-
 	p.Values, err = s.All()
 	if err != nil {
 		return nil, err
@@ -232,321 +237,4 @@ func (s *StateSelect[T, R]) Pagination(page, size int) (*Pagination[T, R], error
 	}
 
 	return p, nil
-}
-
-type getArgs struct {
-	addrMap   map[uintptr]field
-	value     any
-	tableArgs []any
-}
-
-func getNonZeroFields(a getArgs) ([]any, []any, bool) {
-	args, values := make([]any, 0), make([]any, 0)
-
-	valueOf := reflect.ValueOf(a.value)
-	for i := 0; i < valueOf.NumField(); i++ {
-		if !valueOf.Field(i).IsZero() {
-			args = append(args, a.tableArgs[i])
-			values = append(values, valueOf.Field(i).Interface())
-		}
-	}
-
-	if len(args) == 0 {
-		return nil, nil, true
-	}
-	return args, values, false
-}
-
-type argsSelect struct {
-	fields    []fieldSelect
-	tableArgs []any
-}
-
-func createFunction(field field, a any) fieldSelect {
-	if f, ok := a.(model.FunctionType); ok {
-		return functionResult{
-			tableName:     field.table(),
-			schemaName:    field.schema(),
-			tableId:       field.getTableId(),
-			db:            field.getDb(),
-			attributeName: field.getAttributeName(),
-			functionType:  f.GetType()}
-	}
-
-	return nil
-}
-
-func createAggregate(field field, a any) fieldSelect {
-	if ag, ok := a.(model.Aggregate); ok {
-		return aggregateResult{
-			tableName:     field.table(),
-			schemaName:    field.schema(),
-			tableId:       field.getTableId(),
-			db:            field.getDb(),
-			attributeName: field.getAttributeName(),
-			aggregateType: ag.Aggregate()}
-	}
-
-	return nil
-}
-
-func createAggregateFromTable[T any](table *Table[T], col *Column, aggType enum.AggregateType) fieldSelect {
-	schemaName := table.SchemaName
-	if schemaName == "" {
-		schemaName = "public"
-	}
-	return aggregateResult{
-		tableName:     table.TableName,
-		schemaName:    &schemaName,
-		tableId:       table.TableId,
-		db:            table.db,
-		attributeName: col.ColumnName,
-		aggregateType: aggType}
-}
-
-func getArgsJoin(addrMap map[uintptr]field, args ...any) []field {
-	fields := make([]field, 2)
-	var ptr uintptr
-	var valueOf reflect.Value
-	var f field
-	for i := range args {
-		valueOf = reflect.ValueOf(args[i])
-		if valueOf.Kind() == reflect.Pointer {
-			ptr = uintptr(valueOf.UnsafePointer())
-			f = addrMap[ptr]
-			if f != nil {
-				fields[i] = f
-			}
-			continue
-		}
-		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
-	}
-
-	if fields[0] == nil || fields[1] == nil {
-		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
-	}
-	return fields
-}
-
-func getArgFunction(arg any, addrMap map[uintptr]field, operation *Condition) field {
-	value := reflect.ValueOf(arg)
-	if value.IsNil() {
-		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
-	}
-
-	if fun, ok := value.Elem().Interface().(model.Attributer); ok {
-		operation.Function = fun.Attribute(model.Body{}).FunctionType
-		return getArg(fun.GetField(), addrMap, nil)
-	}
-	return getArg(arg, addrMap, nil)
-}
-
-func getArg(arg any, addrMap map[uintptr]field, operation *Condition) field {
-	v := reflect.ValueOf(arg)
-	if v.Kind() != reflect.Pointer {
-		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
-	}
-
-	if operation != nil {
-		return getArgFunction(arg, addrMap, operation)
-	}
-
-	addr := uintptr(v.UnsafePointer())
-	if addrMap[addr] != nil {
-		return addrMap[addr]
-	}
-	// any as pointer, used on StateSave2, StateFind, StateRemove and list
-	return getAnyArg(v, addrMap)
-}
-
-// used only inside getArg
-func getAnyArg(value reflect.Value, addrMap map[uintptr]field) field {
-	if value.IsNil() {
-		return nil
-	}
-
-	value = reflect.ValueOf(value.Elem().Interface())
-	if value.Kind() != reflect.Pointer {
-		return nil
-	}
-
-	addr := uintptr(value.UnsafePointer())
-	if addrMap[addr] != nil {
-		return addrMap[addr]
-	}
-	return nil
-}
-
-func getAttribute(arg any, addrMap map[uintptr]field) (model.Attribute, bool) {
-	v := reflect.ValueOf(arg)
-	if v.Kind() != reflect.Pointer {
-		panic("goent: invalid argument. try sending a pointer to a database mapped struct as argument")
-	}
-
-	f := addrMap[uintptr(v.UnsafePointer())]
-	if f != nil {
-		return model.Attribute{Table: f.table(), Name: f.getAttributeName()}, true
-	}
-
-	if a, ok := v.Elem().Interface().(model.Attributer); ok {
-		f = addrMap[uintptr(reflect.ValueOf(a.GetField()).UnsafePointer())]
-		if f != nil {
-			return a.Attribute(model.Body{
-				Table: f.table(),
-				Name:  f.getAttributeName(),
-			}), true
-		}
-	}
-
-	return model.Attribute{}, false
-}
-
-func helperWhere(builder *builder, addrMap map[uintptr]field, br Condition) {
-	switch br.Type {
-	case enum.OperationWhere, enum.OperationInWhere:
-		a := getArg(br.Arg, addrMap, &br)
-		if a == nil {
-			return
-		}
-		br.Table = model.Table{Schema: a.schema(), Name: a.table()}
-		br.TableId = a.getTableId()
-		br.Attribute = a.getAttributeName()
-
-		builder.brs = append(builder.brs, br)
-	case enum.OperationAttributeWhere:
-		a, b := getArg(br.Arg, addrMap, nil), getArg(br.Value.GetValue(), addrMap, nil)
-		if a == nil || b == nil {
-			return
-		}
-		br.Table = model.Table{Schema: a.schema(), Name: a.table()}
-		br.TableId = a.getTableId()
-		br.Attribute = a.getAttributeName()
-
-		br.AttributeValue = b.getAttributeName()
-		br.AttributeValueTable = model.Table{Schema: b.schema(), Name: b.table()}
-		br.AttributeTableId = b.getTableId()
-		builder.brs = append(builder.brs, br)
-	case enum.OperationIsWhere:
-		a := getArg(br.Arg, addrMap, nil)
-		if a == nil {
-			return
-		}
-		br.Table = model.Table{Schema: a.schema(), Name: a.table()}
-		br.TableId = a.getTableId()
-		br.Attribute = a.getAttributeName()
-
-		builder.brs = append(builder.brs, br)
-	case enum.LogicalWhere:
-		for i, op := range br.Branches {
-			if i > 0 {
-				builder.brs = append(builder.brs, br)
-			}
-			helperWhere(builder, addrMap, op)
-		}
-	}
-}
-
-func helperFilter(builder *builder, addrMap map[uintptr]field, br Condition) bool {
-	switch br.Type {
-	case enum.OperationWhere, enum.OperationInWhere:
-		if !reflect.ValueOf(br.Value.GetValue()).IsZero() {
-			a := getArg(br.Arg, addrMap, &br)
-			br.Table = model.Table{Schema: a.schema(), Name: a.table()}
-			br.TableId = a.getTableId()
-			br.Attribute = a.getAttributeName()
-
-			builder.filters = append(builder.filters, br)
-			return true
-		}
-	case enum.OperationAttributeWhere:
-		a, b := getArg(br.Arg, addrMap, nil), getArg(br.Value.GetValue(), addrMap, nil)
-		br.Table = model.Table{Schema: a.schema(), Name: a.table()}
-		br.TableId = a.getTableId()
-		br.Attribute = a.getAttributeName()
-
-		br.AttributeValue = b.getAttributeName()
-		br.AttributeValueTable = model.Table{Schema: b.schema(), Name: b.table()}
-		br.AttributeTableId = b.getTableId()
-		builder.filters = append(builder.filters, br)
-		return true
-	case enum.LogicalWhere:
-		var currFlag, lastFlag bool
-		for i, op := range br.Branches {
-			currFlag = helperFilter(builder, addrMap, op)
-			if i > 0 && currFlag && lastFlag {
-				builder.filters = append(builder.filters, br)
-			}
-			lastFlag = currFlag
-		}
-		return true
-	}
-	return false
-}
-
-func getArgsSelect(args ...any) argsSelect {
-	addrMap := addrMap.mapField
-	fields := make([]fieldSelect, 0, len(args))
-
-	for _, arg := range args {
-		if f, ok := arg.(field); ok {
-			fields = append(fields, f)
-			continue
-		}
-		if a, ok := arg.(model.Aggregate); ok {
-			if f, ok := a.(interface{ GetField() any }).GetField().(field); ok {
-				fields = append(fields, createAggregate(f, a))
-				continue
-			}
-		}
-		if a, ok := arg.(model.FunctionType); ok {
-			if f, ok := a.(interface{ GetField() any }).GetField().(field); ok {
-				fields = append(fields, createFunction(f, a))
-				continue
-			}
-		}
-		if a, ok := arg.(model.Attributer); ok {
-			if f, ok := a.GetField().(field); ok {
-				fields = append(fields, f)
-				continue
-			}
-		}
-		fieldOf := reflect.ValueOf(arg)
-		if fieldOf.Kind() == reflect.Ptr && !fieldOf.IsNil() {
-			f := addrMap[uintptr(fieldOf.UnsafePointer())]
-			if f != nil {
-				fields = append(fields, f)
-				continue
-			}
-		}
-	}
-
-	if len(fields) == 0 {
-		panic("goent: invalid argument. try sending a pointer to a database mapped argument")
-	}
-
-	return argsSelect{fields: fields, tableArgs: args}
-}
-
-func getArgsList(args ...any) argsSelect {
-	addrMap := addrMap.mapField
-	fields := make([]fieldSelect, 0, len(args))
-	tableArgs := make([]any, 0, len(args))
-
-	for _, arg := range args {
-		structOf := reflect.ValueOf(arg).Elem()
-		var fieldOf reflect.Value
-		for i := 0; i < structOf.NumField(); i++ {
-			fieldOf = structOf.Field(i)
-			if f := addrMap[uintptr(fieldOf.Addr().UnsafePointer())]; f != nil {
-				fields = append(fields, f)
-				tableArgs = append(tableArgs, fieldOf.Addr().Interface())
-			}
-		}
-	}
-
-	if len(fields) == 0 {
-		panic("goent: invalid argument. try sending a pointer to a database mapped argument")
-	}
-
-	return argsSelect{fields: fields, tableArgs: tableArgs}
 }

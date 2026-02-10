@@ -4,40 +4,57 @@ import (
 	"context"
 	"reflect"
 
+	"github.com/azhai/goent/enum"
 	"github.com/azhai/goent/model"
 )
 
+// StateWhere represents a query state with WHERE clause building capabilities.
 type StateWhere struct {
 	builder *Builder
 	conn    model.Connection
 	ctx     context.Context
 }
 
+// NewStateWhere creates a new StateWhere with the given context.
 func NewStateWhere(ctx context.Context) *StateWhere {
 	return &StateWhere{ctx: ctx, builder: GetBuilder()}
 }
 
+// MatchWhere creates a StateWhere with conditions matching the non-zero fields of the given object.
 func MatchWhere[T any](s *StateWhere, table *Table[T], obj T) *StateWhere {
-	if et, ok := any(obj).(Entity); ok {
-		pkey, id := table.PrimaryKeys[0], et.GetID()
-		col := table.TableInfo.Field(pkey.ColumnName)
-		return s.Filter(Equals(col, id))
+	valueOf := reflect.Indirect(reflect.ValueOf(obj))
+	data := make(Dict)
+	for _, col := range table.Columns {
+		fieldOf := valueOf.FieldByName(col.FieldName)
+		if fieldOf.IsZero() || fieldOf.Kind() == reflect.Ptr && fieldOf.IsNil() {
+			continue
+		}
+		data[col.ColumnName] = fieldOf.Interface()
 	}
-	data, valueOf := make(dict), reflect.ValueOf(obj)
-	for _, key := range table.PrimaryKeys {
-		data[key.ColumnName] = valueOf.FieldByName(key.FieldName).Interface()
+	if len(data) == 0 {
+		return nil
 	}
 	col := &Field{Table: table.TableAddr}
 	return s.Filter(EqualsMap(col, data))
 }
 
-func (s *StateWhere) Filter(args ...Condition) *StateWhere {
-	cond := And(args...)
-	if s.builder.Where.IsEmpty() {
-		s.builder.Where = cond
-	} else {
-		s.builder.Where = And(s.builder.Where, cond)
+func (s *StateWhere) Filter(conds ...Condition) *StateWhere {
+	if !s.builder.Where.IsEmpty() {
+		conds = append(conds, s.builder.Where)
 	}
+	s.builder.Where = And(conds...)
+	return s
+}
+
+func (s *StateWhere) Where(where string, args ...any) *StateWhere {
+	cond := Condition{Template: where, Values: make([]*Value, len(args))}
+	for i, arg := range args {
+		cond.Values[i] = NewValue(arg)
+	}
+	if !s.builder.Where.IsEmpty() {
+		cond = And(s.builder.Where, cond)
+	}
+	s.builder.Where = cond
 	return s
 }
 
@@ -46,48 +63,28 @@ func (s *StateWhere) OnTransaction(tx model.Transaction) *StateWhere {
 	return s
 }
 
-func (s *StateWhere) prepare(drv model.Driver) *model.DatabaseConfig {
+func (s *StateWhere) Prepare(drv model.Driver) *Handler {
 	if s.conn == nil {
 		s.conn = drv.NewConnection()
 	}
-	return drv.GetDatabaseConfig()
+	cfg := drv.GetDatabaseConfig()
+	return NewHandler(s.ctx, s.conn, cfg)
 }
 
-func (s *StateWhere) exec(drv model.Driver) error {
-	// TODO: add table to builder
-	dc := s.prepare(drv)
-	return handlerValues(s.ctx, s.conn, s.builder, dc)
-}
-
+// StateDelete represents a DELETE query state for removing records from a table.
 type StateDelete[T any] struct {
 	table *Table[T]
 	*StateWhere
 }
 
 func (s *StateDelete[T]) Exec() error {
-	// TODO: add table to builder
-	return s.exec(s.table.db.driver)
+	s.builder.Type = enum.DeleteQuery
+	s.builder.SetTable(s.table.TableInfo)
+	qr := model.CreateQuery(s.builder.Build())
+	hd := s.Prepare(s.table.db.driver)
+	return hd.ExecuteNoReturn(qr)
 }
 
-// OnTransaction sets a transaction on the query.
-//
-// # Example
-//
-//	tx, err = db.NewTransaction()
-//	if err != nil {
-//		// handler error
-//	}
-//	defer tx.Rollback()
-//
-//	err = db.Animal.Delete().OnTransaction(tx).All()
-//	if err != nil {
-//		// handler error
-//	}
-//
-//	err = tx.Commit()
-//	if err != nil {
-//		// handler error
-//	}
 func (s *StateDelete[T]) OnTransaction(tx model.Transaction) *StateDelete[T] {
 	s.StateWhere.conn = tx
 	return s

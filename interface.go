@@ -12,7 +12,6 @@ type field interface {
 	getFieldId() int
 	getDefault() bool
 	getAttributeName() string
-	buildAttributeInsert(*builder)
 }
 
 type fieldDb interface {

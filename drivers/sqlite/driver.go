@@ -16,6 +16,7 @@ import (
 	"modernc.org/sqlite"
 )
 
+// Driver implements the SQLite database driver.
 type Driver struct {
 	dsn string
 	sql *sql.DB
@@ -26,11 +27,13 @@ func (dr *Driver) GetDatabaseConfig() *model.DatabaseConfig {
 	return &dr.config.DatabaseConfig
 }
 
+// ExecQuerierContext combines ExecerContext and QueryerContext interfaces.
 type ExecQuerierContext interface {
 	driver.ExecerContext
 	driver.QueryerContext
 }
 
+// ConnectionHook is a callback function called after each connection is opened.
 type ConnectionHook func(
 	conn ExecQuerierContext,
 	dsn string,
@@ -42,6 +45,7 @@ type config struct {
 	ConnectionHook ConnectionHook
 }
 
+// Config contains SQLite driver configuration options.
 type Config struct {
 	Logger           model.Logger
 	IncludeArguments bool          // include all arguments used on query
@@ -203,6 +207,7 @@ func (dr *Driver) NewConnection() model.Connection {
 	return Connection{sql: dr.sql, config: dr.config, dsn: dr.dsn}
 }
 
+// Connection represents a SQLite database connection.
 type Connection struct {
 	dsn    string
 	config config
@@ -210,22 +215,15 @@ type Connection struct {
 }
 
 func (c Connection) QueryContext(ctx context.Context, query *model.Query) (model.Rows, error) {
-	buildSql(query)
-	rows, err := c.sql.QueryContext(ctx, query.RawSql, query.Arguments...)
-	return Rows{rows: rows}, err
+	return c.sql.QueryContext(ctx, query.RawSql, query.Arguments...)
 }
 
 func (c Connection) QueryRowContext(ctx context.Context, query *model.Query) model.Row {
-	buildSql(query)
-	row := c.sql.QueryRowContext(ctx, query.RawSql, query.Arguments...)
-
-	return Row{row: row}
+	return c.sql.QueryRowContext(ctx, query.RawSql, query.Arguments...)
 }
 
 func (c Connection) ExecContext(ctx context.Context, query *model.Query) error {
-	buildSql(query)
 	_, err := c.sql.ExecContext(ctx, query.RawSql, query.Arguments...)
-
 	return err
 }
 
@@ -234,6 +232,7 @@ func (dr *Driver) NewTransaction(ctx context.Context, opts *sql.TxOptions) (mode
 	return Transaction{tx: tx, config: dr.config, dsn: dr.dsn}, err
 }
 
+// Transaction represents a SQLite database transaction.
 type Transaction struct {
 	dsn    string
 	config config
@@ -242,20 +241,15 @@ type Transaction struct {
 }
 
 func (t Transaction) QueryContext(ctx context.Context, query *model.Query) (model.Rows, error) {
-	buildSql(query)
-	rows, err := t.tx.QueryContext(ctx, query.RawSql, query.Arguments...)
-	return Rows{rows: rows}, err
+	return t.tx.QueryContext(ctx, query.RawSql, query.Arguments...)
 }
 
 func (t Transaction) QueryRowContext(ctx context.Context, query *model.Query) model.Row {
-	buildSql(query)
-	return Row{row: t.tx.QueryRowContext(ctx, query.RawSql, query.Arguments...)}
+	return t.tx.QueryRowContext(ctx, query.RawSql, query.Arguments...)
 }
 
 func (t Transaction) ExecContext(ctx context.Context, query *model.Query) error {
-	buildSql(query)
 	_, err := t.tx.ExecContext(ctx, query.RawSql, query.Arguments...)
-
 	return err
 }
 
@@ -277,6 +271,7 @@ func (t Transaction) Rollback() error {
 	return nil
 }
 
+// SavePoint represents a transaction savepoint for partial rollbacks.
 type SavePoint struct {
 	name string
 	tx   Transaction
@@ -309,28 +304,4 @@ func (s SavePoint) Commit() error {
 		return s.tx.config.ErrorHandler(context.TODO(), err)
 	}
 	return nil
-}
-
-type Rows struct {
-	rows *sql.Rows
-}
-
-func (rs Rows) Close() error {
-	return rs.rows.Close()
-}
-
-func (rs Rows) Next() bool {
-	return rs.rows.Next()
-}
-
-func (rs Rows) Scan(dest ...any) error {
-	return rs.rows.Scan(dest...)
-}
-
-type Row struct {
-	row *sql.Row
-}
-
-func (r Row) Scan(dest ...any) error {
-	return r.row.Scan(dest...)
 }

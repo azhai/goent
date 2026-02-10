@@ -74,7 +74,7 @@ func travelSchemas(db *DB, dbId int, valueOf reflect.Value) ([]string, error) {
 			schema = utils.ToSnakeCase(SchemaName)
 		}
 		schemas = append(schemas, schema)
-		schemasMap[SchemaName] = &schema
+		schemaRegistry[SchemaName] = &schema
 
 		for j := range schemaOf.NumField() { // Table
 			tableField := schemaOf.Field(j)
@@ -133,7 +133,6 @@ type body struct {
 	fieldTypeOf reflect.Type
 	mapp        *infosMap     // used on map
 	migrate     *infosMigrate // used on migrate
-	schemasMap  map[string]*string
 	fieldId     int
 	driver      model.Driver
 	nullable    bool
@@ -151,6 +150,7 @@ func skipPrimaryKey[T comparable](slice []T, value T, tables reflect.Value, fiel
 	return false
 }
 
+// InitField initializes the fields of a model struct, setting up primary keys and attributes.
 func InitField(db *DB, schema *string, tableId int, tables, modelOf reflect.Value) error {
 	pks, fieldIds, err := getPk(db, schema, modelOf, tableId, db.driver)
 	if err != nil {
@@ -211,10 +211,10 @@ func InitField(db *DB, schema *string, tableId int, tables, modelOf reflect.Valu
 			})
 		}
 	}
-	for i := range pks {
-		addr := uintptr(modelOf.Field(fieldIds[i]).Addr().UnsafePointer())
-		addrMap.set(addr, pks[i])
-	}
+	// for i := range pks {
+	// 	addr := uintptr(modelOf.Field(fieldIds[i]).Addr().UnsafePointer())
+	// 	addrMap.set(addr, pks[i])
+	// }
 	return nil
 }
 
@@ -230,39 +230,45 @@ func handlerSlice(b body, helper func(b body) error) error {
 	return nil
 }
 
-func newAttr(b body) error {
-	goeTag := b.valueOf.Type().Field(b.fieldId).Tag.Get("goe")
-	at := createAtt(
-		b.mapp.db,
-		b.valueOf.Type().Field(b.fieldId).Name,
-		b.schema,
-		b.mapp.pks[0].tableName,
-		b.mapp.tableId,
-		b.fieldId,
-		getTagValue(goeTag, "default:") != "",
-		b.driver,
-	)
-	addrMap.set(b.mapp.addr, at)
-	return nil
-}
+// func newAttr(b body) error {
+// 	goeTag := b.valueOf.Type().Field(b.fieldId).Tag.Get("goe")
+// 	at := createAtt(
+// 		b.mapp.db,
+// 		b.valueOf.Type().Field(b.fieldId).Name,
+// 		b.schema,
+// 		b.mapp.pks[0].tableName,
+// 		b.mapp.tableId,
+// 		b.fieldId,
+// 		getTagValue(goeTag, "default:") != "",
+// 		b.driver,
+// 	)
+// 	addrMap.set(b.mapp.addr, at)
+// 	return nil
+// }
 
-func getPks(typeOf reflect.Type) []reflect.StructField {
-	var pks []reflect.StructField
-	pks = append(pks, fieldsByTags("pk", typeOf)...)
+// func getPks(typeOf reflect.Type) []reflect.StructField {
+// 	var pks []reflect.StructField
+// 	pks = append(pks, fieldsByTags("pk", typeOf)...)
 
-	id, valid := utils.GetTableID(typeOf)
-	isSameName := func(f reflect.StructField) bool {
-		return f.Name == id.Name
-	}
-	if valid && !slices.ContainsFunc(pks, isSameName) {
-		pks = append(pks, id)
-	}
-	return pks
-}
+// 	id, valid := utils.GetTableID(typeOf)
+// 	isSameName := func(f reflect.StructField) bool {
+// 		return f.Name == id.Name
+// 	}
+// 	if valid && !slices.ContainsFunc(pks, isSameName) {
+// 		pks = append(pks, id)
+// 	}
+// 	return pks
+// }
 
 func getPk(db *DB, schema *string, valueOf reflect.Value, tableId int, driver model.Driver) ([]pk, []int, error) {
 	typeOf := valueOf.Type()
-	fields := getPks(typeOf)
+	fields := fieldsByTags("pk", typeOf)
+	if len(fields) == 0 {
+		id, valid := utils.GetTableID(typeOf)
+		if valid {
+			fields = append(fields, id)
+		}
+	}
 	if len(fields) == 0 {
 		return nil, nil, fmt.Errorf("goent: getPk() struct %q don't have a primary key setted", typeOf.Name())
 	}
@@ -277,6 +283,23 @@ func getPk(db *DB, schema *string, valueOf reflect.Value, tableId int, driver mo
 	}
 
 	return pks, fieldIds, nil
+}
+
+func createPk(db *DB, schema *string, table string, attributeName string, autoIncrement bool, tableId, fieldId int, Driver model.Driver) pk {
+	table = Driver.KeywordHandler(table)
+	attStr := createAttributeStrings(db, schema, table, attributeName, tableId, fieldId, Driver)
+	return pk{attributeStrings: attStr, autoIncrement: autoIncrement}
+}
+
+func fieldsByTags(tag string, typeOf reflect.Type) []reflect.StructField {
+	var fields []reflect.StructField
+	for i := 0; i < typeOf.NumField(); i++ {
+		field := typeOf.Field(i)
+		if utils.HasTagValue(field.Tag.Get("goe"), tag) {
+			fields = append(fields, field)
+		}
+	}
+	return fields
 }
 
 func getFieldId(typeOf reflect.Type, fieldName string) int {
@@ -329,33 +352,6 @@ func createRelation(b body, createMany RelationFunc, createOne RelationFunc) any
 	return createOne(b, fieldOf.Type()) // O2M/O2O
 }
 
-func primaryKeys(str reflect.Type) (pks []reflect.StructField) {
-	field, exists := utils.GetTableID(str)
-	if exists {
-		pks := make([]reflect.StructField, 1)
-		pks[0] = field
-		return pks
-	} else {
-		// TODO: Return anonymous pk para len(pks) == 0
-		return fieldsByTags("pk", str)
-	}
-}
-
-func fieldsByTags(tag string, str reflect.Type) (f []reflect.StructField) {
-	f = make([]reflect.StructField, 0)
-	if str.Kind() != reflect.Struct {
-		return f
-	}
-	tag = ";" + tag + ";"
-	for i := 0; i < str.NumField(); i++ {
-		goeTag := str.Field(i).Tag.Get("goe")
-		if strings.Contains(";"+goeTag+";", tag) {
-			f = append(f, str.Field(i))
-		}
-	}
-	return f
-}
-
 func getTagValue(FieldTag string, subTag string) string {
 	values := strings.Split(FieldTag, ";")
 	for _, v := range values {
@@ -375,7 +371,7 @@ func foreignKeyNamePattern(dbTables reflect.Value, fieldName string) (table, suf
 			continue
 		}
 		foreign := utils.GetTableModel(dbTables.FieldByName(table))
-		if pks = getPks(foreign.Elem().Type()); len(pks) == 0 {
+		if pks = getPksFromType(foreign.Elem().Type()); len(pks) == 0 {
 			continue
 		}
 		pkName := compareForeignKey(suffix, pks)
@@ -422,9 +418,9 @@ func helperAttribute(b body) error {
 	}
 	switch v := rel.(type) {
 	case ManyToSomeRelation:
-		if addrMap.get(b.mapp.addr) == nil {
-			addrMap.set(b.mapp.addr, v)
-		}
+		// if addrMap.get(b.mapp.addr) == nil {
+		// 	addrMap.set(b.mapp.addr, v)
+		// }
 		for i := range b.mapp.pks {
 			if !b.nullable && b.mapp.pks[i].fieldId == v.fieldId {
 				b.mapp.pks[i].autoIncrement = false
@@ -433,9 +429,9 @@ func helperAttribute(b body) error {
 	case OneToSomeRelation:
 		goeTag := fieldAtt.Tag.Get("goe")
 		v.IsOneToMany = utils.HasTagValue(goeTag, "o2m")
-		if addrMap.get(b.mapp.addr) == nil {
-			addrMap.set(b.mapp.addr, v)
-		}
+		// if addrMap.get(b.mapp.addr) == nil {
+		// 	addrMap.set(b.mapp.addr, v)
+		// }
 	}
 	return nil
 }

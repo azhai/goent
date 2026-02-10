@@ -21,50 +21,45 @@ var (
 	dbDSN  = "postgres://dba:pass@127.0.0.1:5432/test?sslmode=disable"
 )
 
-type dict = map[string]any
-
 type Category struct {
-	ID   int
+	ID   int64
 	Name string
-	goent.Entity
 }
 
-func (Category) TableName() string {
+func (*Category) TableName() string {
 	return "t_category"
 }
 
-func (c *Category) GetID() int {
-	return c.ID
+func (m *Category) GetID() int64 {
+	return m.ID
 }
 
-func (c *Category) SetID(id int) {
-	c.ID = id
+func (m *Category) SetID(id int64) {
+	m.ID = id
 }
 
 type Product struct {
-	ID         int
-	CategoryID int `goe:"o2m"`
+	ID         int64
+	CategoryID int64 `goe:"o2m"`
 	Name       string
 	Color      string
 	Price      float64
-	Orders     []*Order
-	goent.Entity
 }
 
 func (*Product) TableName() string {
 	return "t_product"
 }
 
-func (p *Product) GetID() int {
-	return p.ID
+func (m *Product) GetID() int64 {
+	return m.ID
 }
 
-func (p *Product) SetID(id int) {
-	p.ID = id
+func (m *Product) SetID(id int64) {
+	m.ID = id
 }
 
 type Order struct {
-	ID       int
+	ID       int64
 	OrderNo  string `goe:"unique"`
 	Customer string
 	Total    float64
@@ -72,22 +67,21 @@ type Order struct {
 	Created  time.Time
 	Details  []*OrderDetail
 	Products []*Product
-	goent.Entity
 }
 
 func (*Order) TableName() string {
 	return "t_order"
 }
 
-func (o *Order) GetID() int {
-	return o.ID
+func (m *Order) GetID() int64 {
+	return m.ID
 }
 
-func (o *Order) SetID(id int) {
-	o.ID = id
+func (m *Order) SetID(id int64) {
+	m.ID = id
 }
 
-func (m *Order) GetProductIds() (ids []int) {
+func (m *Order) GetProductIds() (ids []int64) {
 	for _, dt := range m.Details {
 		ids = append(ids, dt.ProductID)
 	}
@@ -95,8 +89,8 @@ func (m *Order) GetProductIds() (ids []int) {
 }
 
 type OrderDetail struct {
-	OrderID   int `goe:"pk;not_incr"`
-	ProductID int `goe:"pk;not_incr"`
+	OrderID   int64 `goe:"pk;not_incr"`
+	ProductID int64 `goe:"pk;not_incr"`
 	Quantity  int
 	Price     float64
 }
@@ -128,6 +122,8 @@ func main() {
 		panic(err)
 	}
 
+	addForeignKeys(db)
+
 	if err = seedData(db); err != nil {
 		panic(err)
 	}
@@ -142,6 +138,30 @@ func main() {
 	}
 	if order != nil {
 		fmt.Printf("\n%+v\n%+v\n", order, order.Products)
+	}
+}
+
+func addForeignKeys(db *Database) {
+	db.Order.Foreigns = map[string]*goent.Foreign{
+		"Details": {
+			Type:       goent.O2M,
+			MountField: "Details",
+			ForeignKey: "id",
+			Reference:  db.OrderDetail.Field("order_id"),
+			Middle:     nil,
+		},
+		"Products": {
+			Type:       goent.M2M,
+			MountField: "Products",
+			ForeignKey: "id",
+			Reference:  db.Product.Field("id"),
+			Middle: &goent.ThirdParty{
+				Table: new(OrderDetail).TableName(),
+				Left:  "order_id",
+				Right: "product_id",
+				Where: goent.Condition{},
+			},
+		},
 	}
 }
 
@@ -189,7 +209,7 @@ func dataOrder(orderNo string) *Order {
 	}
 }
 
-func dataOrderDetail(orderID int) []*OrderDetail {
+func dataOrderDetail(orderID int64) []*OrderDetail {
 	return []*OrderDetail{
 		{OrderID: orderID, ProductID: 1, Quantity: 1, Price: 0.0},
 		{OrderID: orderID, ProductID: 3, Quantity: 5, Price: 0.0},
@@ -198,14 +218,14 @@ func dataOrderDetail(orderID int) []*OrderDetail {
 }
 
 func seedData(db *Database) error {
-	count, err := db.Category.Count("id")
+	count, err := db.Category.Count("*")
 	if err != nil || count > 0 {
 		return err
 	}
-	if err = db.Category.Insert().All(dataCategories()); err != nil {
+	if err = db.Category.Insert().All(false, dataCategories()); err != nil {
 		return err
 	}
-	if err = db.Product.Insert().All(dataProducts()); err != nil {
+	if err = db.Product.Insert().All(false, dataProducts()); err != nil {
 		return err
 	}
 	return nil
@@ -220,8 +240,9 @@ func createOrder(db *Database, orderNo string) error {
 	if err = db.Order.Insert().One(order); err != nil {
 		return err
 	}
+	fmt.Printf("%+v\n", order)
 	orderDetail := dataOrderDetail(order.ID)
-	if err = db.OrderDetail.Insert().All(orderDetail); err != nil {
+	if err = db.OrderDetail.Insert().All(true, orderDetail); err != nil {
 		return err
 	}
 	if _, err = CalcTotalPrice(db, order.ID); err != nil {
@@ -239,13 +260,11 @@ func findOrder(db *Database, orderNo string) (order *Order, err error) {
 	return
 }
 
-func CalcTotalPrice(db *Database, orderID int) (float64, error) {
-	fmt.Printf("DEBUG CalcTotalPrice: orderID=%d\n", orderID)
+func CalcTotalPrice(db *Database, orderID int64) (float64, error) {
 	order, err := db.Order.Select().Match(Order{ID: orderID}).One()
 	if err != nil || order == nil {
 		return 0.0, err
 	}
-	// fmt.Printf("Output:\n%+v\n%+v\n%+v\n", order, order.Details, order.Products)
 
 	filter := goent.Equals(db.OrderDetail.Field("order_id"), orderID)
 	query := db.OrderDetail.Select().OrderBy("product_id")
@@ -260,7 +279,7 @@ func CalcTotalPrice(db *Database, orderID int) (float64, error) {
 		return 0.0, err
 	}
 
-	productMap := make(map[int]*Product, len(order.Products))
+	productMap := make(map[int64]*Product, len(order.Products))
 	for _, p := range order.Products {
 		productMap[p.ID] = p
 	}
@@ -279,7 +298,7 @@ func CalcTotalPrice(db *Database, orderID int) (float64, error) {
 		}
 	}
 
-	err = db.Order.Save().OneMap(dict{"ID": orderID, "Total": total})
+	err = db.Order.Save().Map(goent.Dict{"id": orderID, "total": total})
 
 	fmt.Printf("Output:\n%+v\n%+v\n%+v\n", order, order.Details, order.Products)
 	return total, err
