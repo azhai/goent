@@ -16,12 +16,20 @@ var (
 	tableRegistry  = make(map[uintptr]*TableInfo)
 )
 
-// GetTableColumn returns the column info for a given table address and column name.
-func GetTableColumn(addr uintptr, name string) *Column {
+// GetTableInfo returns the table info for a given table address.
+func GetTableInfo(addr uintptr) *TableInfo {
 	if addr == 0 {
 		return nil
 	}
-	if info := tableRegistry[addr]; info != nil {
+	if info, ok := tableRegistry[addr]; ok {
+		return info
+	}
+	return nil
+}
+
+// GetTableColumn returns the column info for a given table address and column name.
+func GetTableColumn(addr uintptr, name string) *Column {
+	if info := GetTableInfo(addr); info != nil {
 		if col, ok := info.Columns[name]; ok {
 			return col
 		}
@@ -35,8 +43,8 @@ func GetFieldName(addr uintptr, name string) (string, error) {
 	if addr == 0 {
 		return name, nil
 	}
-	if info := tableRegistry[addr]; info != nil {
-		if _, ok := info.Columns[name]; ok {
+	if info := GetTableInfo(addr); info != nil {
+		if _, ok := info.Check(name); ok {
 			return fmt.Sprintf("%s.%s", info.String(), name), nil
 		}
 	}
@@ -87,26 +95,19 @@ func (db *DB) Stats() sql.DBStats {
 }
 
 func (db *DB) RawQueryContext(ctx context.Context, rawSql string, args ...any) (model.Rows, error) {
-	var rows model.Rows
-	query := model.CreateQuery(rawSql, args)
-	rows, query.Err = wrapperQuery(ctx, db.driver.NewConnection(), &query)
-	dc := db.driver.GetDatabaseConfig()
-	if query.Err != nil {
-		return nil, dc.ErrorQueryHandler(ctx, query)
-	}
-	dc.InfoHandler(ctx, query)
-	return rows, nil
+	conn := db.driver.NewConnection()
+	cfg := db.driver.GetDatabaseConfig()
+	hd := NewHandler(ctx, conn, cfg)
+	qr := model.CreateQuery(rawSql, args)
+	return hd.QueryResult(qr)
 }
 
 func (db *DB) RawExecContext(ctx context.Context, rawSql string, args ...any) error {
-	query := model.CreateQuery(rawSql, args)
-	query.Err = wrapperExec(ctx, db.driver.NewConnection(), &query)
-	dc := db.driver.GetDatabaseConfig()
-	if query.Err != nil {
-		return dc.ErrorQueryHandler(ctx, query)
-	}
-	dc.InfoHandler(ctx, query)
-	return nil
+	conn := db.driver.NewConnection()
+	cfg := db.driver.GetDatabaseConfig()
+	hd := NewHandler(ctx, conn, cfg)
+	qr := model.CreateQuery(rawSql, args)
+	return hd.ExecuteNoReturn(qr)
 }
 
 // NewTransaction creates a new Transaction on the database using the default level.

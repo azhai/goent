@@ -7,10 +7,15 @@ import (
 
 // Field represents a database field with its table reference and column name.
 type Field struct {
-	Table    uintptr
-	FieldId  int
-	Column   string
-	Function string
+	TableAddr  uintptr
+	FieldId    int
+	ColumnName string
+	AliasName  string
+	Function   string
+}
+
+func SameTable(field, another *Field) bool {
+	return field.TableAddr == another.TableAddr
 }
 
 func (f *Field) Func(name string) *Field {
@@ -19,21 +24,25 @@ func (f *Field) Func(name string) *Field {
 }
 
 func (f *Field) GetFid() int {
-	if f.FieldId < 0 && f.Column != "*" {
-		if col := GetTableColumn(f.Table, f.Column); col != nil {
+	if f.FieldId < 0 && f.ColumnName != "*" {
+		if col := GetTableColumn(f.TableAddr, f.ColumnName); col != nil {
 			f.FieldId = col.FieldId
 		}
 	}
 	return f.FieldId
 }
 
+func (f *Field) Simple() string {
+	if f.Function != "" {
+		return fmt.Sprintf(f.Function, f.ColumnName)
+	}
+	return f.ColumnName
+}
+
 func (f *Field) String() string {
-	res, err := f.Column, error(nil)
-	if res != "*" {
-		res, err = GetFieldName(f.Table, f.Column)
-		if err != nil {
-			return ""
-		}
+	res, err := GetFieldName(f.TableAddr, f.ColumnName)
+	if err != nil {
+		return ""
 	}
 	if f.Function != "" {
 		return fmt.Sprintf(f.Function, res)
@@ -90,14 +99,18 @@ func And(branches ...Condition) Condition {
 	} else if size == 1 {
 		return branches[0]
 	}
-	res := Condition{Template: "("}
-	for i, cond := range branches {
-		if i > 0 {
+	idx, res := 0, Condition{Template: "("}
+	for _, cond := range branches {
+		if cond.IsEmpty() {
+			continue
+		}
+		if idx > 0 {
 			res.Template += ") AND ("
 		}
 		res.Template += cond.Template
 		res.Fields = append(res.Fields, cond.Fields...)
 		res.Values = append(res.Values, cond.Values...)
+		idx += 1
 	}
 	res.Template += ")"
 	return res
@@ -117,14 +130,18 @@ func Or(branches ...Condition) Condition {
 	} else if size == 1 {
 		return branches[0]
 	}
-	res := Condition{Template: ""}
-	for i, cond := range branches {
-		if i > 0 {
+	idx, res := 0, Condition{Template: ""}
+	for _, cond := range branches {
+		if cond.IsEmpty() {
+			continue
+		}
+		if idx > 0 {
 			res.Template += " OR "
 		}
 		res.Template += cond.Template
 		res.Fields = append(res.Fields, cond.Fields...)
 		res.Values = append(res.Values, cond.Values...)
+		idx += 1
 	}
 	return res
 }
@@ -163,7 +180,7 @@ func NotEqualsField(left, right *Field) Condition {
 func EqualsMap(left *Field, data map[string]any) Condition {
 	var branches []Condition
 	for key, value := range data {
-		field := &Field{Table: left.Table, Column: key}
+		field := &Field{TableAddr: left.TableAddr, ColumnName: key}
 		branches = append(branches, Equals(field, value))
 	}
 	return And(branches...)
@@ -226,7 +243,7 @@ func LessEqualsField(left, right *Field) Condition {
 func In(left *Field, value any) Condition {
 	right := NewValue(value)
 	if right.Length <= 1 {
-		return Equals(left, right)
+		return Equals(left, value)
 	}
 	return Condition{Template: "%s IN ?", Fields: []*Field{left}, Values: []*Value{right}}
 }
@@ -235,7 +252,7 @@ func In(left *Field, value any) Condition {
 func NotIn(left *Field, value any) Condition {
 	right := NewValue(value)
 	if right.Length <= 1 {
-		return NotEquals(left, right)
+		return NotEquals(left, value)
 	}
 	return Condition{Template: "%s NOT IN ?", Fields: []*Field{left}, Values: []*Value{right}}
 }

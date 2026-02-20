@@ -18,9 +18,11 @@ type QueryType uint
 const (
 	_ QueryType = iota
 	SelectQuery
+	SelectJoinQuery
 	InsertQuery
 	InsertAllQuery
 	UpdateQuery
+	UpdateJoinQuery
 	DeleteQuery
 	RawQuery
 )

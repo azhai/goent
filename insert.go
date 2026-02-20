@@ -24,9 +24,9 @@ func (s *StateInsert[T]) One(obj *T) error {
 		s.builder.Changes[s.table.Field(name)] = val
 	}
 
-	qr := model.CreateQuery(s.builder.Build())
+	qr := model.CreateQuery(s.builder.Build(true))
 	hd := s.Prepare(s.table.db.driver)
-	if s.builder.Returning != "" {
+	if retFid >= 0 {
 		return hd.ExecuteReturning(qr, valueOf, retFid)
 	}
 	return hd.ExecuteNoReturn(qr)
@@ -72,9 +72,9 @@ func (s *StateInsert[T]) All(autoIncr bool, data []*T) error {
 		s.builder.MoreRows = append(s.builder.MoreRows, newbie)
 	}
 
-	qr := model.CreateQuery(s.builder.Build())
+	qr := model.CreateQuery(s.builder.Build(true))
 	hd := s.Prepare(s.table.db.driver)
-	if s.builder.Returning != "" {
+	if pkFid >= 0 {
 		valueOf := reflect.ValueOf(data[0]).Elem()
 		return hd.BatchReturning(qr, valueOf, pkFid)
 	}
@@ -95,12 +95,12 @@ type StateSave[T any] struct {
 func (s *StateSave[T]) getQuery(primary Dict) model.Query {
 	if len(primary) > 0 {
 		s.builder.Type = enum.UpdateQuery
-		fld := &Field{Table: s.table.TableAddr}
+		fld := &Field{TableAddr: s.table.TableAddr}
 		s.builder.Where = EqualsMap(fld, primary)
 	} else {
 		s.builder.Type = enum.InsertQuery
 	}
-	return model.CreateQuery(s.builder.Build())
+	return model.CreateQuery(s.builder.Build(true))
 }
 
 func (s *StateSave[T]) One(obj *T) error {
@@ -109,7 +109,7 @@ func (s *StateSave[T]) One(obj *T) error {
 
 	valueOf := reflect.ValueOf(obj).Elem()
 	primary, retFid := CollectFields(s.builder, s.table, valueOf)
-	qr := s.getQuery(primary)
+	qr := s.Take(1).getQuery(primary)
 	hd := s.Prepare(s.table.db.driver)
 	if s.builder.Returning != "" {
 		return hd.ExecuteReturning(qr, valueOf, retFid)
@@ -146,5 +146,13 @@ func (s *StateSave[T]) OnTransaction(tx model.Transaction) *StateSave[T] {
 
 func (s *StateSave[T]) Match(obj T) *StateSave[T] {
 	s.StateWhere = MatchWhere(s.StateWhere, s.table, obj)
+	return s
+}
+
+// Take takes i elements
+func (s *StateSave[T]) Take(i int) *StateSave[T] {
+	if i >= 0 {
+		s.builder.Limit = i
+	}
 	return s
 }

@@ -20,21 +20,27 @@ func NewStateWhere(ctx context.Context) *StateWhere {
 	return &StateWhere{ctx: ctx, builder: GetBuilder()}
 }
 
-// MatchWhere creates a StateWhere with conditions matching the non-zero fields of the given object.
-func MatchWhere[T any](s *StateWhere, table *Table[T], obj T) *StateWhere {
-	valueOf := reflect.Indirect(reflect.ValueOf(obj))
+// MatchData matches the non-zero fields of the given object to a dictionary of column names and values.
+func MatchData[T any](table *Table[T], obj T) Dict {
 	data := make(Dict)
+	valueOf := reflect.Indirect(reflect.ValueOf(obj))
 	for _, col := range table.Columns {
 		fieldOf := valueOf.FieldByName(col.FieldName)
-		if fieldOf.IsZero() || fieldOf.Kind() == reflect.Ptr && fieldOf.IsNil() {
+		if fieldOf.IsZero() || fieldOf.Kind() == reflect.Pointer && fieldOf.IsNil() {
 			continue
 		}
 		data[col.ColumnName] = fieldOf.Interface()
 	}
+	return data
+}
+
+// MatchWhere creates a StateWhere with conditions matching the non-zero fields of the given object.
+func MatchWhere[T any](s *StateWhere, table *Table[T], obj T) *StateWhere {
+	data := MatchData(table, obj)
 	if len(data) == 0 {
-		return nil
+		return s
 	}
-	col := &Field{Table: table.TableAddr}
+	col := &Field{TableAddr: table.TableAddr}
 	return s.Filter(EqualsMap(col, data))
 }
 
@@ -77,10 +83,15 @@ type StateDelete[T any] struct {
 	*StateWhere
 }
 
+func (s *StateDelete[T]) Match(obj T) *StateDelete[T] {
+	s.StateWhere = MatchWhere(s.StateWhere, s.table, obj)
+	return s
+}
+
 func (s *StateDelete[T]) Exec() error {
 	s.builder.Type = enum.DeleteQuery
 	s.builder.SetTable(s.table.TableInfo)
-	qr := model.CreateQuery(s.builder.Build())
+	qr := model.CreateQuery(s.builder.Build(true))
 	hd := s.Prepare(s.table.db.driver)
 	return hd.ExecuteNoReturn(qr)
 }

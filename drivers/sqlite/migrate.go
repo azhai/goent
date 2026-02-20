@@ -447,18 +447,18 @@ func createIndex(index model.IndexMigrate, table *model.TableMigrate) string {
 		}(),
 		table.EscapingName,
 		func() string {
-			var s string
+			var s strings.Builder
 			if index.Func != "" {
-				s += index.Func + "("
+				s.WriteString(index.Func + "(")
 			}
-			s += fmt.Sprintf("%v", index.Attributes[0].EscapingName)
+			s.WriteString(fmt.Sprintf("%v", index.Attributes[0].EscapingName))
 			for _, a := range index.Attributes[1:] {
-				s += fmt.Sprintf(",%v", a.EscapingName)
+				s.WriteString(fmt.Sprintf(",%v", a.EscapingName))
 			}
 			if index.Func != "" {
-				s += ")"
+				s.WriteString(")")
 			}
-			return s
+			return s.String()
 		}(),
 	)
 }

@@ -13,9 +13,8 @@ type StateUpdate[T any] struct {
 }
 
 func (s *StateUpdate[T]) Exec() error {
-	s.builder.Type = enum.UpdateQuery
 	s.builder.SetTable(s.table.TableInfo)
-	qr := model.CreateQuery(s.builder.Build())
+	qr := model.CreateQuery(s.builder.Build(true))
 	hd := s.Prepare(s.table.db.driver)
 	return hd.ExecuteNoReturn(qr)
 }
@@ -49,4 +48,27 @@ func (s *StateUpdate[T]) Filter(args ...Condition) *StateUpdate[T] {
 func (s *StateUpdate[T]) Match(obj T) *StateUpdate[T] {
 	s.StateWhere = MatchWhere(s.StateWhere, s.table, obj)
 	return s
+}
+
+// Take takes i elements
+func (s *StateUpdate[T]) Take(i int) *StateUpdate[T] {
+	if i >= 0 {
+		s.builder.Limit = i
+	}
+	return s
+}
+
+// Join joins another table with a condition
+func (s *StateUpdate[T]) Join(joinType enum.JoinType, info TableInfo, on Condition) *StateUpdate[T] {
+	s.builder.Type = enum.UpdateJoinQuery
+	s.builder.Joins = append(s.builder.Joins, &JoinTable{
+		JoinType: joinType, Table: info.Table(), On: Condition{},
+	})
+	return s.Filter(on)
+}
+
+// LeftJoin joins another table with a condition on left table
+func (s *StateUpdate[T]) LeftJoin(fkey string, refer *Field) *StateUpdate[T] {
+	info := GetTableInfo(refer.TableAddr)
+	return s.Join(enum.LeftJoin, *info, EqualsField(s.table.Field(fkey), refer))
 }

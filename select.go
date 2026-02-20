@@ -4,26 +4,38 @@ import (
 	"context"
 	"iter"
 	"math"
+	"reflect"
 	"strings"
 
 	"github.com/azhai/goent/enum"
 	"github.com/azhai/goent/model"
 )
 
+type FetchFunc func(target any) []any
+
 // StateSelect represents a SELECT query state with type parameters for table and result types.
 type StateSelect[T, R any] struct {
-	fields []fieldSelect
-	table  *Table[T]
-	others []*Table[T]
+	table     *Table[T]
+	sameModel bool
+	FetchRow  FetchFunc
 	*StateWhere
 }
 
 // NewStateSelect creates a new StateSelect for querying data from a table.
 func NewStateSelect[T, R any](ctx context.Context, table *Table[T]) *StateSelect[T, R] {
-	s := NewStateWhere(ctx)
-	s.builder.Type = enum.SelectQuery
-	s.builder.SetTable(table.TableInfo)
-	return &StateSelect[T, R]{table: table, StateWhere: s}
+	state := NewStateWhere(ctx)
+	return NewStateSelectFrom[T, R](state, table)
+}
+
+// NewStateSelectFrom creates a new StateSelect for querying data from a table
+func NewStateSelectFrom[T, R any](state *StateWhere, table *Table[T]) *StateSelect[T, R] {
+	if state == nil {
+		ctx := context.Background()
+		state = NewStateWhere(ctx)
+	}
+	state.builder.Type = enum.SelectQuery
+	state.builder.SetTable(table.TableInfo)
+	return &StateSelect[T, R]{table: table, StateWhere: state}
 }
 
 func (s *StateSelect[T, R]) CopyFrom(ob *Builder, conn model.Connection) *StateSelect[T, R] {
@@ -42,38 +54,62 @@ func (s *StateSelect[T, R]) CopyFrom(ob *Builder, conn model.Connection) *StateS
 	return s
 }
 
-func (s *StateSelect[T, R]) Select(args ...any) *StateSelect[T, R] {
-	for _, arg := range args {
-		if col, ok := arg.(*Field); ok {
-			s.builder.Selects = append(s.builder.Selects, col)
-		} else if col, ok := arg.(string); ok {
-			fld := s.table.Field(col)
-			s.builder.Selects = append(s.builder.Selects, fld)
+func (s *StateSelect[T, R]) Select(fields ...any) *StateSelect[T, R] {
+	var fld *Field
+	for _, one := range fields {
+		if col, ok := one.(string); ok {
+			fld = s.table.Field(col)
+		} else if fld, ok = one.(*Field); !ok {
+			continue
 		}
+		s.builder.Selects = append(s.builder.Selects, fld)
 	}
 	return s
 }
 
-// AsQuery return a [model.Query] for use inside a [where.In].
-// func (s *StateSelect[T, R]) AsQuery() model.Query {
-// 	sql, args := s.builder.Build()
-// 	return model.Query{
-// 		Type:       s.builder.Type,
-// 		RawSql:     sql,
-// 		Arguments:  args,
-// 		WhereIndex: 1,
-// 	}
-// }
+func (s *StateSelect[T, R]) GetFetchFunc() FetchFunc {
+	fields, foreign := s.builder.Selects, s.GetForeign()
+	return func(target any) []any {
+		valueOf := reflect.ValueOf(target).Elem()
+		if len(fields) > 0 && fields[0].Function != "" {
+			return FlattenDest(valueOf)
+		}
+		if len(fields) > 0 {
+			return AppendDestFields(fields, valueOf, foreign)
+		}
+		dest := AppendDestTable(s.table.TableInfo, valueOf)
+		if foreign != nil {
+			info := GetTableInfo(foreign.Reference.TableAddr)
+			if typeOf, ok := valueOf.Type().FieldByName(foreign.MountField); ok {
+				fieldOf := reflect.New(typeOf.Type.Elem())
+				valueOf.FieldByName(foreign.MountField).Set(fieldOf)
+				dest = append(dest, AppendDestTable(*info, fieldOf.Elem())...)
+			}
+		}
+		return dest
+	}
+}
 
 // Rows return a iterator on rows.
 func (s *StateSelect[T, R]) Rows() iter.Seq2[*R, error] {
-	qr := model.CreateQuery(s.builder.Build())
+	qr := model.CreateQuery(s.builder.Build(false))
+	defer PutBuilder(s.builder)
 	hd := s.Prepare(s.table.db.driver)
-	return QueryResult[R](hd, qr)
+	if s.FetchRow == nil {
+		s.FetchRow = s.GetFetchFunc()
+	}
+	return FetchResult[R](hd, qr, s.FetchRow)
 }
 
 func (s *StateSelect[T, R]) One() (*R, error) {
-	for row, err := range s.Take(1).Rows() {
+	limit := -1
+	if s.sameModel {
+		limit = 1
+	}
+	for row, err := range s.Take(limit).Rows() {
+		if s.sameModel {
+			s.table.CacheOne(row)
+		}
 		return row, err
 	}
 	return nil, ErrNotFound
@@ -85,9 +121,46 @@ func (s *StateSelect[T, R]) All() ([]*R, error) {
 		if err != nil {
 			return nil, err
 		}
+		if s.sameModel {
+			s.table.CacheOne(row)
+		}
 		rows = append(rows, row)
 	}
 	return rows, nil
+}
+
+func (s *StateSelect[T, R]) Map(key string) (map[int64]*R, error) {
+	res := make(map[int64]*R)
+	col := s.table.Columns[key]
+	for row, err := range s.Rows() {
+		if err != nil {
+			return nil, err
+		}
+		if s.sameModel {
+			s.table.CacheOne(row)
+		}
+		if val, ok := col.GetInt64(row); ok {
+			res[val] = row
+		}
+	}
+	return res, nil
+}
+
+func (s *StateSelect[T, R]) Rank(key string) (map[int64][]*R, error) {
+	res := make(map[int64][]*R)
+	col := s.table.Columns[key]
+	for row, err := range s.Rows() {
+		if err != nil {
+			return nil, err
+		}
+		if s.sameModel {
+			s.table.CacheOne(row)
+		}
+		if val, ok := col.GetInt64(row); ok {
+			res[val] = append(res[val], row)
+		}
+	}
+	return res, nil
 }
 
 func (s *StateSelect[T, R]) RollUP() *StateSelect[T, R] {
@@ -135,7 +208,9 @@ func (s *StateSelect[T, R]) GroupBy(args ...string) *StateSelect[T, R] {
 
 // Take takes i elements
 func (s *StateSelect[T, R]) Take(i int) *StateSelect[T, R] {
-	s.builder.Limit = i
+	if i >= 0 {
+		s.builder.Limit = i
+	}
 	return s
 }
 
@@ -145,18 +220,30 @@ func (s *StateSelect[T, R]) Skip(i int) *StateSelect[T, R] {
 	return s
 }
 
+func (s *StateSelect[T, R]) GetForeign() *Foreign {
+	if len(s.builder.Joins) == 0 {
+		return nil
+	}
+	tableName := s.builder.Joins[0].Table.Name
+	if foreign, ok := s.table.Foreigns[tableName]; ok {
+		return foreign
+	}
+	return nil
+}
+
 // Join joins another table with a condition
-func (s *StateSelect[T, R]) Join(joinType enum.JoinType, on Condition) *StateSelect[T, R] {
+func (s *StateSelect[T, R]) Join(joinType enum.JoinType, info TableInfo, on Condition) *StateSelect[T, R] {
+	s.builder.Type = enum.SelectJoinQuery
 	s.builder.Joins = append(s.builder.Joins, &JoinTable{
-		JoinType: joinType, On: on,
-		Table: s.table.TableInfo.Table(),
+		JoinType: joinType, Table: info.Table(), On: on,
 	})
 	return s
 }
 
 // LeftJoin joins another table with a condition on left table
-func (s *StateSelect[T, R]) LeftJoin(table *Table[T], left, right string) *StateSelect[T, R] {
-	return s.Join(enum.LeftJoin, EqualsField(s.table.Field(left), table.Field(right)))
+func (s *StateSelect[T, R]) LeftJoin(fkey string, refer *Field) *StateSelect[T, R] {
+	info := GetTableInfo(refer.TableAddr)
+	return s.Join(enum.LeftJoin, *info, EqualsField(s.table.Field(fkey), refer))
 }
 
 // Pagination holds paginated query results with metadata.
@@ -189,10 +276,10 @@ func (s *StateSelect[T, R]) Pagination(page, size int) (*Pagination[T, R], error
 		page = 1
 	}
 
-	fld := &Field{Table: s.table.TableAddr, Column: "*", Function: "COUNT(%s)"}
-	counter := NewStateSelect[T, ResultCount](s.ctx, s.table).Select(fld)
+	fld := &Field{TableAddr: s.table.TableAddr, ColumnName: "*", Function: "COUNT(%s)"}
+	counter := NewStateSelect[T, ResultLong](s.ctx, s.table).Select(fld)
 	counter.CopyFrom(s.builder, s.conn)
-	count, err := FetchCountResult(counter)
+	count, err := FetchSingleResult(counter)
 	if err != nil {
 		return nil, err
 	}

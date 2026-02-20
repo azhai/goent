@@ -13,7 +13,7 @@ func ParseTableNameByValue(valueOf reflect.Value) string {
 	}
 
 	actualValue := valueOf
-	if valueOf.Type().Kind() == reflect.Ptr {
+	if valueOf.Type().Kind() == reflect.Pointer {
 		actualValue = valueOf.Elem()
 	}
 
@@ -25,7 +25,7 @@ func ParseTableNameByValue(valueOf reflect.Value) string {
 			modelField, ok := actualValue.Type().FieldByName("Model")
 			if ok {
 				modelType := modelField.Type
-				if modelType.Kind() == reflect.Ptr {
+				if modelType.Kind() == reflect.Pointer {
 					modelType = modelType.Elem()
 				}
 				modelTypeString := modelType.String()
@@ -157,7 +157,7 @@ func IsFieldHasSchema(valueOf reflect.Value, i int) bool {
 		return true
 	}
 	field := valueOf.Field(i)
-	if field.Kind() == reflect.Ptr && !field.IsNil() {
+	if field.Kind() == reflect.Pointer && !field.IsNil() {
 		field = field.Elem()
 	}
 	if field.Kind() == reflect.Struct {
@@ -167,7 +167,7 @@ func IsFieldHasSchema(valueOf reflect.Value, i int) bool {
 }
 
 func GetElemValue(valueOf reflect.Value) reflect.Value {
-	if valueOf.Kind() == reflect.Ptr && !valueOf.IsNil() {
+	if valueOf.Kind() == reflect.Pointer && !valueOf.IsNil() {
 		return valueOf.Elem()
 	}
 	return valueOf
@@ -175,10 +175,10 @@ func GetElemValue(valueOf reflect.Value) reflect.Value {
 
 func GetElemType(valueOf reflect.Value) reflect.Type {
 	typeOf := valueOf.Type()
-	if valueOf.Kind() == reflect.Ptr && valueOf.IsNil() {
+	if valueOf.Kind() == reflect.Pointer && valueOf.IsNil() {
 		return typeOf.Elem()
 	}
-	if typeOf.Kind() == reflect.Ptr {
+	if typeOf.Kind() == reflect.Pointer {
 		return typeOf.Elem()
 	}
 	return typeOf
@@ -188,8 +188,8 @@ func GetFieldNames(typeOf reflect.Type) (names []string) {
 	if typeOf.Kind() != reflect.Struct {
 		return names
 	}
-	for i := 0; i < typeOf.NumField(); i++ {
-		names = append(names, typeOf.Field(i).Name)
+	for field := range typeOf.Fields() {
+		names = append(names, field.Name)
 	}
 	return
 }
@@ -199,7 +199,7 @@ func IsTableModel(fieldOf reflect.Value) bool {
 		return false
 	}
 	typ := fieldOf.Type()
-	if typ.Kind() == reflect.Ptr {
+	if typ.Kind() == reflect.Pointer {
 		typ = typ.Elem()
 	}
 	return strings.HasPrefix(typ.Name(), "Table")
@@ -210,7 +210,7 @@ func GetTableModel(fieldOf reflect.Value) reflect.Value {
 		return reflect.Value{}
 	}
 	if IsTableModel(fieldOf) {
-		if fieldOf.Kind() == reflect.Ptr {
+		if fieldOf.Kind() == reflect.Pointer {
 			return fieldOf.Elem().FieldByName("Model")
 		}
 		return fieldOf.FieldByName("Model")

@@ -39,7 +39,7 @@ func Equals[T any, A *T | **T](a A, v T) model.Operation {
 // EqualsTable creates an Equals condition using a Table and field name
 func EqualsTable(table any, fieldName string, v any) model.Operation {
 	tableValue := reflect.ValueOf(table)
-	if tableValue.Kind() != reflect.Ptr {
+	if tableValue.Kind() != reflect.Pointer {
 		return model.Operation{}
 	}
 	fieldMethod := tableValue.MethodByName("Field")
@@ -155,7 +155,7 @@ func In[T any, V []T | model.Query](a *T, mq V) model.Operation {
 // InTable creates an In condition using a Table and field name
 func InTable(table any, fieldName string, v any) model.Operation {
 	tableValue := reflect.ValueOf(table)
-	if tableValue.Kind() != reflect.Ptr {
+	if tableValue.Kind() != reflect.Pointer {
 		return model.Operation{}
 	}
 	fieldMethod := tableValue.MethodByName("Field")

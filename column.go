@@ -1,12 +1,13 @@
 package goent
 
 import (
+	"reflect"
+
 	"github.com/azhai/goent/model"
 )
 
 // Column represents a database column with its metadata and field information.
 type Column struct {
-	FieldAddr  uintptr
 	FieldName  string
 	FieldId    int
 	ColumnName string
@@ -15,8 +16,24 @@ type Column struct {
 	HasDefault bool
 	tableName  string
 	schemaName *string
-	db         *DB
 	isAutoIncr bool
+	db         *DB
+}
+
+func (c *Column) GetInt64(obj any) (int64, bool) {
+	if c.ColumnType != "int" && c.ColumnType != "int64" {
+		return 0, false
+	}
+	valueOf := reflect.ValueOf(obj).Elem()
+	return valueOf.Field(c.FieldId).Int(), true
+}
+
+func (c *Column) GetString(obj any) (string, bool) {
+	if c.ColumnType != "string" && c.ColumnType != "[]byte" {
+		return "", false
+	}
+	valueOf := reflect.ValueOf(obj).Elem()
+	return valueOf.Field(c.FieldId).String(), true
 }
 
 func (c *Column) Field(name string) field {
@@ -69,58 +86,28 @@ type Index struct {
 	*Column
 }
 
-// ResultCount holds the result of a COUNT query.
-type ResultCount struct {
-	Count int64
-}
-
-// FetchCountResult executes a count query and returns the count value.
-func FetchCountResult[T any](query *StateSelect[T, ResultCount]) (int64, error) {
-	row, err := query.One()
-	if err != nil {
-		return 0, err
-	}
-	return row.Count, nil
-}
-
-// Aggregate represents an aggregate function applied to a column.
-type Aggregate struct {
-	AggrType string
-	*Column
-}
-
-// ResultAggr holds the result of an aggregate function query (SUM, AVG, etc.).
-type ResultAggr struct {
-	Aggr float64
-}
-
-// FetchAggrResult executes an aggregate query and returns the aggregate value.
-func FetchAggrResult[T any](query *StateSelect[T, ResultAggr]) (float64, error) {
-	row, err := query.One()
-	if err != nil {
-		return 0.0, err
-	}
-	return row.Aggr, nil
-}
-
-// Function represents a SQL function applied to a column.
-// type Function struct {
-// 	FuncType string
-// 	*Column
-// }
-
+// ResultFunc holds the result of a function query.
 type ResultFunc[T any] struct {
 	Value T
 }
 
-type FuncStr = ResultFunc[string]
-type FuncInt = ResultFunc[int]
-type FuncLong = ResultFunc[int64]
-type FuncFloat = ResultFunc[float64]
+type ResultStr = ResultFunc[string]
+type ResultInt = ResultFunc[int]
+type ResultLong = ResultFunc[int64]
+type ResultFloat = ResultFunc[float64]
 
-// FetchFuncResult executes a function query and returns the string results.
-func FetchFuncResult[T any](query *StateSelect[T, FuncStr]) ([]string, error) {
-	var res []string
+// FetchSingleResult executes a single-row query and returns the result.
+func FetchSingleResult[T, V any](query *StateSelect[T, ResultFunc[V]]) (V, error) {
+	row, err := query.One()
+	if err != nil {
+		row = new(ResultFunc[V])
+	}
+	return row.Value, err
+}
+
+// FetchArrayResult executes a multi-row query and returns the result array.
+func FetchArrayResult[T, V any](query *StateSelect[T, ResultFunc[V]]) ([]V, error) {
+	var res []V
 	for row, err := range query.Rows() {
 		if err != nil {
 			return nil, err
@@ -129,3 +116,33 @@ func FetchFuncResult[T any](query *StateSelect[T, FuncStr]) ([]string, error) {
 	}
 	return res, nil
 }
+
+// // FetchCountResult executes a count query and returns the count value.
+// func FetchCountResult[T any](query *StateSelect[T, ResultLong]) (int64, error) {
+// 	row, err := query.One()
+// 	if err != nil {
+// 		return 0, err
+// 	}
+// 	return row.Value, nil
+// }
+//
+// // FetchAggrResult executes an aggregate query and returns the aggregate value.
+// func FetchAggrResult[T any](query *StateSelect[T, ResultFloat]) (float64, error) {
+// 	row, err := query.One()
+// 	if err != nil {
+// 		return 0.0, err
+// 	}
+// 	return row.Value, nil
+// }
+//
+// // FetchFuncResult executes a function query and returns the string results.
+// func FetchFuncResult[T any](query *StateSelect[T, ResultStr]) ([]string, error) {
+// 	var res []string
+// 	for row, err := range query.Rows() {
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 		res = append(res, row.Value)
+// 	}
+// 	return res, nil
+// }

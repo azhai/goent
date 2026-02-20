@@ -6,12 +6,17 @@ import (
 	"reflect"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/azhai/goent/enum"
 	"github.com/azhai/goent/model"
 	"github.com/azhai/goent/utils"
 )
+
+// Entity is the interface for entities that have an ID.
+type Entity interface {
+	GetID() int64
+	SetID(int64)
+}
 
 // TableInfo contains metadata about a database table including columns, primary keys, and indexes.
 type TableInfo struct {
@@ -26,6 +31,7 @@ type TableInfo struct {
 	Columns     map[string]*Column
 	Foreigns    map[string]*Foreign
 	Ignores     []string
+	simpleTable bool
 }
 
 func (t TableInfo) String() string {
@@ -45,14 +51,17 @@ func (t TableInfo) Table() *model.Table {
 }
 
 func (t TableInfo) Field(col string) *Field {
+	col = strings.TrimSpace(col)
 	if fid, ok := t.Check(col); ok {
-		return &Field{Table: t.TableAddr, FieldId: fid, Column: col}
+		return &Field{TableAddr: t.TableAddr, FieldId: fid, ColumnName: col}
 	}
 	panic(fmt.Sprintf("column %s not found in table %s", col, t.TableName))
 }
 
 func (t TableInfo) Check(col string) (int, bool) {
-	if col == "*" {
+	col = strings.TrimSpace(col)
+	if t.simpleTable || col == "" || col == "*" ||
+			strings.ContainsAny(col, " ,+*/%()") {
 		return -1, true
 	}
 	if info, ok := t.Columns[col]; ok {
@@ -78,17 +87,30 @@ func (t TableInfo) GetPrimaryInfo() (int, string, []string) {
 // Table represents a database table with its model and metadata.
 // It provides methods for querying, inserting, updating, and deleting records.
 type Table[T any] struct {
-	Model   *T
-	newbies []*T
-	exists  sync.Map
-	db      *DB
-	state   *StateWhere
+	Model *T
+	Cache *utils.CoMap[int64, T]
+	State *StateWhere
+	db    *DB
 	TableInfo
+}
+
+// SimpleTable creates a new Table instance for a simple table without foreign keys.
+// It is useful for tables that do not have complex relationships with other tables.
+func SimpleTable[T any](db *DB, tableName, SchemaName string) *Table[T] {
+	return &Table[T]{
+		db: db,
+		TableInfo: TableInfo{
+			TableName:   tableName,
+			SchemaName:  SchemaName,
+			simpleTable: true,
+		},
+	}
 }
 
 // NewTableReflect creates a new Table instance using reflection.
 // It analyzes the struct type to extract table metadata including columns, primary keys, and indexes.
-func NewTableReflect(db *DB, typeOf reflect.Type, fieldName, schema string, schemaId, tableId int) (reflect.Value, TableInfo) {
+func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schema string,
+		schemaId, tableId int) (reflect.Value, TableInfo) {
 	tb := reflect.New(typeOf)
 	modelField := tb.Elem().FieldByName("Model")
 	if !modelField.IsValid() {
@@ -105,29 +127,28 @@ func NewTableReflect(db *DB, typeOf reflect.Type, fieldName, schema string, sche
 	info := TableInfo{
 		SchemaId: schemaId, SchemaName: schema,
 		TableId: tableId, TableName: tableName,
-		FieldName: fieldName, Columns: make(map[string]*Column),
+		TableAddr: addr, FieldName: fieldName,
+		Columns:  make(map[string]*Column),
 		Foreigns: make(map[string]*Foreign),
 	}
 
 	// var attr field
 	modelValue = modelValue.Elem()
-	for i := 0; i < modelValue.NumField(); i++ {
+	for i := range modelValue.NumField() {
 		fieldOf := modelValue.Type().Field(i)
 		fieldKind := fieldOf.Type.Kind()
 		geoTag := fieldOf.Tag.Get("goe")
 		if geoTag == "-" || fieldKind == reflect.Slice ||
-			fieldKind == reflect.Interface || fieldKind == reflect.Func {
+				fieldKind == reflect.Interface || fieldKind == reflect.Func {
 			continue
 		}
-		addr := modelValue.Field(i).Addr()
 		columnName := utils.ToSnakeCase(fieldOf.Name)
 		_, exists := utils.GetTagValue(geoTag, "default")
 		column := &Column{
-			FieldAddr:  uintptr(addr.UnsafePointer()),
 			FieldName:  fieldOf.Name,
 			ColumnName: columnName,
-			ColumnType: fieldOf.Type.String(),
-			AllowNull:  fieldKind == reflect.Ptr,
+			ColumnType: fieldOf.Type.Kind().String(),
+			AllowNull:  fieldKind == reflect.Pointer,
 			HasDefault: exists,
 			FieldId:    i,
 			tableName:  tableName,
@@ -175,21 +196,6 @@ func (t *Table[T]) SetDB(db *DB) {
 	}
 }
 
-func (t *Table[T]) Load(foreign *Foreign) {
-	switch foreign.Type {
-	default:
-		return
-	case O2O:
-		return
-	case O2M:
-		return
-	case M2O:
-		return
-	case M2M:
-		return
-	}
-}
-
 // func (t *Table[T]) FieldInfo(name string) *Column {
 // 	if col, ok := t.Columns[name]; ok {
 // 		return col
@@ -217,6 +223,23 @@ func (t *Table[T]) Dest() (*T, []any) {
 }
 
 // ------------------------------
+// LoadOne/LoadAll ...
+// ------------------------------
+
+func (t *Table[T]) CacheOne(row any) {
+	var id int64
+	if row, ok := row.(Entity); ok {
+		id = row.GetID()
+	} else {
+		return
+	}
+	if t.Cache == nil {
+		t.Cache = utils.NewCoMap[int64, T]()
+	}
+	t.Cache.Set(id, row.(*T))
+}
+
+// ------------------------------
 // Filter ...
 // ------------------------------
 
@@ -225,12 +248,10 @@ func (t *Table[T]) Filter(args ...Condition) *Table[T] {
 }
 
 func (t *Table[T]) FilterContext(ctx context.Context, args ...Condition) *Table[T] {
-	if t.state == nil {
-		t.state = NewStateWhere(ctx)
+	if t.State == nil {
+		t.State = NewStateWhere(ctx)
 	}
-	if err := t.state.Filter(args...); err != nil {
-		panic(err)
-	}
+	t.State = t.State.Filter(args...)
 	return t
 }
 
@@ -251,7 +272,7 @@ func (t *Table[T]) Delete() *StateDelete[T] {
 
 func (t *Table[T]) DeleteContext(ctx context.Context) *StateDelete[T] {
 	var s *StateWhere
-	if s = t.state; s == nil {
+	if s = t.State; s == nil {
 		s = NewStateWhere(ctx)
 		s.builder.Type = enum.DeleteQuery
 	}
@@ -291,7 +312,7 @@ func (t *Table[T]) Update() *StateUpdate[T] {
 
 func (t *Table[T]) UpdateContext(ctx context.Context) *StateUpdate[T] {
 	var s *StateWhere
-	if s = t.state; s == nil {
+	if s = t.State; s == nil {
 		s = NewStateWhere(ctx)
 		s.builder.Type = enum.UpdateQuery
 	}
@@ -302,104 +323,20 @@ func (t *Table[T]) UpdateContext(ctx context.Context) *StateUpdate[T] {
 // Select ...
 // ------------------------------
 
-func (t *Table[T]) Select(cols ...any) *StateSelect[T, T] {
-	return t.SelectContext(context.Background(), cols...)
+func (t *Table[T]) Select(fields ...any) *StateSelect[T, T] {
+	return t.SelectContext(context.Background(), fields...)
 }
 
-func (t *Table[T]) SelectContext(ctx context.Context, cols ...any) *StateSelect[T, T] {
-	state := NewStateSelect[T, T](ctx, t)
-	if len(cols) > 0 {
-		state = state.Select(cols...)
+func (t *Table[T]) SelectContext(ctx context.Context, fields ...any) *StateSelect[T, T] {
+	var s *StateWhere
+	if s = t.State; s == nil {
+		s = NewStateWhere(ctx)
+	}
+	state := NewStateSelectFrom[T, T](s, t)
+	if len(fields) > 0 {
+		state.Select(fields...)
+	} else {
+		state.sameModel = true
 	}
 	return state
-}
-
-// ------------------------------
-// Count ...
-// ------------------------------
-
-func (s *StateSelect[T, R]) Count(col string) (int64, error) {
-	return s.CountContext(context.Background(), col)
-}
-
-func (s *StateSelect[T, R]) CountContext(ctx context.Context, col string) (int64, error) {
-	fld := &Field{Table: s.table.TableAddr, Column: col, Function: "COUNT(%s)"}
-	query := NewStateSelect[T, ResultCount](ctx, s.table).Select(fld)
-	return FetchCountResult(query)
-}
-
-func (t *Table[T]) Count(col string) (int64, error) {
-	return t.CountContext(context.Background(), col)
-}
-
-func (t *Table[T]) CountContext(ctx context.Context, col string) (int64, error) {
-	return NewStateSelect[T, ResultCount](ctx, t).CountContext(ctx, col)
-}
-
-// ------------------------------
-// Max/Min/Sum/Avg ...
-// ------------------------------
-
-func (t *Table[T]) Max(col string) (float64, error) {
-	return t.MaxContext(context.Background(), col)
-}
-
-func (t *Table[T]) MaxContext(ctx context.Context, col string) (float64, error) {
-	fld := &Field{Table: t.TableAddr, Column: col, Function: "MAX(%s)"}
-	query := NewStateSelect[T, ResultAggr](ctx, t).Select(fld)
-	return FetchAggrResult(query)
-}
-
-func (t *Table[T]) Min(col string) (float64, error) {
-	return t.MinContext(context.Background(), col)
-}
-
-func (t *Table[T]) MinContext(ctx context.Context, col string) (float64, error) {
-	fld := &Field{Table: t.TableAddr, Column: col, Function: "MIN(%s)"}
-	query := NewStateSelect[T, ResultAggr](ctx, t).Select(fld)
-	return FetchAggrResult(query)
-}
-
-func (t *Table[T]) Sum(col string) (float64, error) {
-	return t.SumContext(context.Background(), col)
-}
-
-func (t *Table[T]) SumContext(ctx context.Context, col string) (float64, error) {
-	fld := &Field{Table: t.TableAddr, Column: col, Function: "SUM(%s)"}
-	query := NewStateSelect[T, ResultAggr](ctx, t).Select(fld)
-	return FetchAggrResult(query)
-}
-
-func (t *Table[T]) Avg(col string) (float64, error) {
-	return t.AvgContext(context.Background(), col)
-}
-
-func (t *Table[T]) AvgContext(ctx context.Context, col string) (float64, error) {
-	fld := &Field{Table: t.TableAddr, Column: col, Function: "AVG(%s)"}
-	query := NewStateSelect[T, ResultAggr](ctx, t).Select(fld)
-	return FetchAggrResult(query)
-}
-
-// ------------------------------
-// ToUpper/ToLower ...
-// ------------------------------
-
-func (t *Table[T]) ToUpper(col string) ([]string, error) {
-	return t.ToUpperContext(context.Background(), col)
-}
-
-func (t *Table[T]) ToUpperContext(ctx context.Context, col string) (res []string, err error) {
-	fld := &Field{Table: t.TableAddr, Column: col, Function: "UPPER(%s)"}
-	query := NewStateSelect[T, FuncStr](ctx, t).Select(fld)
-	return FetchFuncResult(query)
-}
-
-func (t *Table[T]) ToLower(col string) ([]string, error) {
-	return t.ToLowerContext(context.Background(), col)
-}
-
-func (t *Table[T]) ToLowerContext(ctx context.Context, col string) (res []string, err error) {
-	fld := &Field{Table: t.TableAddr, Column: col, Function: "LOWER(%s)"}
-	query := NewStateSelect[T, FuncStr](ctx, t).Select(fld)
-	return FetchFuncResult(query)
 }

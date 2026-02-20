@@ -49,6 +49,7 @@ type Group struct {
 // Builder constructs SQL queries with support for SELECT, INSERT, UPDATE, and DELETE operations.
 type Builder struct {
 	argNo     int
+	holders   []string
 	Type      enum.QueryType
 	Table     *model.Table
 	Joins     []*JoinTable
@@ -97,6 +98,7 @@ func (b *Builder) ResetForSave() {
 	b.Changes = make(map[*Field]any)
 	b.MoreRows = make([][]any, 0)
 	b.argNo = 0
+	b.holders = make([]string, 0)
 	b.Returning = ""
 }
 
@@ -107,17 +109,22 @@ func (b *Builder) SetTable(table TableInfo) *Builder {
 
 func (b *Builder) BuildHead() []any {
 	var args []any
-
 	switch b.Type {
-	case enum.SelectQuery:
+	default:
 		b.WriteString("SELECT ")
 		if len(b.Selects) == 0 {
 			b.WriteString("*")
-		} else {
+		} else if b.Type == enum.SelectJoinQuery {
 			b.WriteString(b.Selects[0].String())
 			for _, f := range b.Selects[1:] {
 				b.WriteByte(',')
 				b.WriteString(f.String())
+			}
+		} else {
+			b.WriteString(b.Selects[0].Simple())
+			for _, f := range b.Selects[1:] {
+				b.WriteByte(',')
+				b.WriteString(f.Simple())
 			}
 		}
 		b.WriteString(" FROM ")
@@ -130,56 +137,30 @@ func (b *Builder) BuildHead() []any {
 			b.WriteString(b.Table.String())
 		}
 		b.WriteByte('(')
-		var columns, holders []string
+		var columns []string
 		for f, v := range b.Changes {
 			b.argNo += 1
-			holders = append(holders, "$"+strconv.Itoa(b.argNo))
+			b.holders = append(b.holders, "$"+strconv.Itoa(b.argNo))
 			args = append(args, v)
-			columns = append(columns, f.String())
+			columns = append(columns, f.Simple())
 		}
 		b.WriteString(strings.Join(columns, ", "))
-		b.WriteString(") VALUES (")
-		b.WriteString(strings.Join(holders, ", "))
-		b.WriteByte(')')
 	case enum.InsertAllQuery:
 		b.WriteString("INSERT INTO ")
 		if b.Table != nil {
 			b.WriteString(b.Table.String())
 		}
 		b.WriteByte('(')
-		size, last := len(b.Changes), len(b.MoreRows)-1
+		size := len(b.Changes)
 		columns := make([]string, size)
 		for f, v := range b.Changes {
-			columns[v.(int)] = f.Column
+			columns[v.(int)] = f.ColumnName
 		}
 		b.WriteString(strings.Join(columns, ", "))
-		b.WriteString(") VALUES (")
-		for i, row := range b.MoreRows {
-			holders := make([]string, size)
-			for j := range size {
-				b.argNo += 1
-				holders[j] = "$" + strconv.Itoa(b.argNo)
-			}
-			args = append(args, row...)
-			b.WriteString(strings.Join(holders, ", "))
-			if i != last {
-				b.WriteString("), (")
-			}
-		}
-		b.WriteByte(')')
-	case enum.UpdateQuery:
+	case enum.UpdateQuery, enum.UpdateJoinQuery:
 		b.WriteString("UPDATE ")
 		if b.Table != nil {
 			b.WriteString(b.Table.String())
-		}
-		b.WriteString(" SET ")
-		for f, v := range b.Changes {
-			b.argNo += 1
-			if b.argNo > 1 {
-				b.WriteString(", ")
-			}
-			b.WriteString(f.String() + "=$" + strconv.Itoa(b.argNo))
-			args = append(args, v)
 		}
 	case enum.DeleteQuery:
 		b.WriteString("DELETE FROM ")
@@ -191,12 +172,68 @@ func (b *Builder) BuildHead() []any {
 	return args
 }
 
+func (b *Builder) BuildDoing() []any {
+	var args []any
+	switch b.Type {
+	default:
+		return args
+	case enum.InsertQuery:
+		b.WriteString(") VALUES (")
+		b.WriteString(strings.Join(b.holders, ", "))
+		b.WriteByte(')')
+	case enum.InsertAllQuery:
+		size, last := len(b.Changes), len(b.MoreRows)-1
+		b.WriteString(") VALUES (")
+		for i, row := range b.MoreRows {
+			b.holders = make([]string, size)
+			for j := range size {
+				b.argNo += 1
+				b.holders[j] = "$" + strconv.Itoa(b.argNo)
+			}
+			args = append(args, row...)
+			b.WriteString(strings.Join(b.holders, ", "))
+			if i != last {
+				b.WriteString("), (")
+			}
+		}
+		b.WriteByte(')')
+	case enum.UpdateQuery:
+		b.WriteString(" SET ")
+		for f, v := range b.Changes {
+			b.argNo += 1
+			if b.argNo > 1 {
+				b.WriteString(", ")
+			}
+			b.WriteString(f.Simple() + "=$" + strconv.Itoa(b.argNo))
+			args = append(args, v)
+		}
+	case enum.UpdateJoinQuery:
+		b.WriteString(" SET ")
+		isFirst := true
+		for f, v := range b.Changes {
+			if !isFirst {
+				b.WriteString(", ")
+			}
+			if fld, ok := v.(*Field); ok {
+				b.WriteString(f.Simple() + "=" + fld.String())
+			} else {
+				b.argNo += 1
+				b.WriteString(f.Simple() + "=$" + strconv.Itoa(b.argNo))
+				args = append(args, v)
+			}
+			isFirst = false
+		}
+	}
+
+	return args
+}
+
 func (b *Builder) BuildTail() []any {
 	var args []any
 
 	if b.Type == enum.SelectQuery {
 		if len(b.Groups) != 0 {
-			b.WriteByte('\n')
+			b.WriteString(" ")
 			gp := b.Groups[0]
 			b.WriteString("GROUP BY " + gp.String())
 			for _, gp = range b.Groups[1:] {
@@ -205,7 +242,7 @@ func (b *Builder) BuildTail() []any {
 		}
 
 		if len(b.Orders) != 0 {
-			b.WriteByte('\n')
+			b.WriteString(" ")
 			ob := b.Orders[0]
 			if ob.Desc {
 				b.WriteString("ORDER BY " + ob.String() + " DESC")
@@ -222,12 +259,10 @@ func (b *Builder) BuildTail() []any {
 		}
 
 		if b.Limit != 0 {
-			b.WriteByte('\n')
-			b.WriteString("LIMIT " + strconv.Itoa(b.Limit))
+			b.WriteString(" LIMIT " + strconv.Itoa(b.Limit))
 		}
 		if b.Offset != 0 {
-			b.WriteByte('\n')
-			b.WriteString("OFFSET " + strconv.Itoa(b.Offset))
+			b.WriteString(" OFFSET " + strconv.Itoa(b.Offset))
 		}
 	}
 
@@ -246,21 +281,26 @@ func (b *Builder) BuildWhere() []any {
 		return nil
 	}
 
-	b.WriteString("\nWHERE ")
+	b.WriteString(" WHERE ")
 
+	fi, vi := 0, 0
 	template := b.Where.Template
-	fieldIndex, valueIndex := 0, 0
+	for idx := 0; idx < len(template); idx++ {
+		if idx+1 < len(template) && template[idx:idx+2] == "%s" {
+			if fi < len(b.Where.Fields) {
+				fld := b.Where.Fields[fi]
+				if b.Type == enum.SelectJoinQuery || b.Type == enum.UpdateJoinQuery {
+					b.WriteString(fld.String())
+				} else {
+					b.WriteString(fld.Simple())
+				}
 
-	for i := 0; i < len(template); i++ {
-		if i+1 < len(template) && template[i:i+2] == "%s" {
-			if fieldIndex < len(b.Where.Fields) {
-				b.WriteString(b.Where.Fields[fieldIndex].String())
-				fieldIndex++
+				fi++
 			}
-			i++
-		} else if template[i] == '?' {
-			if valueIndex < len(b.Where.Values) {
-				val := b.Where.Values[valueIndex]
+			idx++
+		} else if template[idx] == '?' {
+			if vi < len(b.Where.Values) {
+				val := b.Where.Values[vi]
 				if val.Type == reflect.Slice && len(val.Args) > 0 {
 					b.WriteString("(")
 					for j, arg := range val.Args {
@@ -278,10 +318,10 @@ func (b *Builder) BuildWhere() []any {
 					b.WriteString("$" + strconv.Itoa(b.argNo))
 					args = append(args, val.Args[0])
 				}
-				valueIndex++
+				vi++
 			}
 		} else {
-			b.WriteByte(template[i])
+			b.WriteByte(template[idx])
 		}
 	}
 
@@ -290,55 +330,57 @@ func (b *Builder) BuildWhere() []any {
 
 func (b *Builder) BuildJoins() []any {
 	var args []any
-
 	if len(b.Joins) == 0 {
+		return nil
+	}
+	if b.Type == enum.UpdateJoinQuery {
+		b.WriteString(" FROM ")
+		b.WriteString(b.Joins[0].Table.String())
 		return nil
 	}
 
 	for _, j := range b.Joins {
-		b.WriteByte('\n')
+		b.WriteString(" ")
 		b.WriteString(string(j.JoinType) + " ")
 		if j.Table != nil {
 			b.WriteString(j.Table.String())
 		}
 		b.WriteString(" ON ")
 		if j.On.Template != "" {
+			fi, vi, pi := 0, 0, 1
 			template := j.On.Template
-			fieldIndex := 0
-			valueIndex := 0
-			paramIndex := 1
 
-			for i := 0; i < len(template); i++ {
-				if i+1 < len(template) && template[i:i+2] == "%s" {
-					if fieldIndex < len(j.On.Fields) {
-						b.WriteString(j.On.Fields[fieldIndex].String())
-						fieldIndex++
+			for idx := 0; idx < len(template); idx++ {
+				if idx+1 < len(template) && template[idx:idx+2] == "%s" {
+					if fi < len(j.On.Fields) {
+						b.WriteString(j.On.Fields[fi].String())
+						fi++
 					}
-					i++
-				} else if template[i] == '?' {
-					if valueIndex < len(j.On.Values) {
-						val := j.On.Values[valueIndex]
+					idx++
+				} else if template[idx] == '?' {
+					if vi < len(j.On.Values) {
+						val := j.On.Values[vi]
 						if val.Type == reflect.Slice && len(val.Args) > 0 {
 							b.WriteString("(")
 							for j, arg := range val.Args {
 								if j > 0 {
-									b.WriteString(",$" + strconv.Itoa(paramIndex))
+									b.WriteString(",$" + strconv.Itoa(pi))
 								} else {
-									b.WriteString("$" + strconv.Itoa(paramIndex))
+									b.WriteString("$" + strconv.Itoa(pi))
 								}
 								args = append(args, arg)
-								paramIndex++
+								pi++
 							}
 							b.WriteByte(')')
 						} else if len(val.Args) > 0 {
-							b.WriteString("$" + strconv.Itoa(paramIndex))
+							b.WriteString("$" + strconv.Itoa(pi))
 							args = append(args, val.Args[0])
-							paramIndex++
+							pi++
 						}
-						valueIndex++
+						vi++
 					}
 				} else {
-					b.WriteByte(template[i])
+					b.WriteByte(template[idx])
 				}
 			}
 		}
@@ -347,13 +389,16 @@ func (b *Builder) BuildJoins() []any {
 	return args
 }
 
-func (b *Builder) Build() (sql string, args []any) {
+func (b *Builder) Build(destroy bool) (sql string, args []any) {
 	args = append(args, b.BuildHead()...)
+	args = append(args, b.BuildDoing()...)
 	args = append(args, b.BuildJoins()...)
 	args = append(args, b.BuildWhere()...)
 	args = append(args, b.BuildTail()...)
 	sql = b.String()
-	PutBuilder(b)
+	if destroy {
+		PutBuilder(b)
+	}
 	return
 }
 
@@ -372,7 +417,7 @@ func CollectFields[T any](builder *Builder, table *Table[T], valueOf reflect.Val
 			}
 			continue
 		}
-		if fieldOf.Kind() == reflect.Ptr && fieldOf.IsNil() {
+		if fieldOf.Kind() == reflect.Pointer && fieldOf.IsNil() {
 			continue
 		}
 		fld := table.Field(name)

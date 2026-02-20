@@ -79,9 +79,9 @@ func travelSchemas(db *DB, dbId int, valueOf reflect.Value) ([]string, error) {
 		for j := range schemaOf.NumField() { // Table
 			tableField := schemaOf.Field(j)
 			tableType := utils.GetElemType(tableField)
+			tableAddr := uintptr(tableField.Addr().UnsafePointer())
 			fieldName := schemaOf.Type().Field(j).Name
-			tableOf, info := NewTableReflect(db, tableType, fieldName, schema, i, j)
-			info.TableAddr = uintptr(tableField.Addr().UnsafePointer())
+			tableOf, info := NewTableReflect(db, tableType, tableAddr, fieldName, schema, i, j)
 			setDBMethod := tableOf.MethodByName("SetDB")
 			if setDBMethod.IsValid() {
 				setDBMethod.Call([]reflect.Value{reflect.ValueOf(db)})
@@ -320,8 +320,7 @@ func isReturningId(id reflect.StructField) bool {
 }
 
 func checkAllFields(valueOf reflect.Value, table string) bool {
-	for i := 0; i < valueOf.NumField(); i++ {
-		fieldN := valueOf.Field(i)
+	for _, fieldN := range valueOf.Fields() {
 		// check if there is a slice to typeOf
 		if fieldN.Kind() == reflect.Slice {
 			if fieldN.Type().Elem().Name() == table {
@@ -353,8 +352,8 @@ func createRelation(b body, createMany RelationFunc, createOne RelationFunc) any
 }
 
 func getTagValue(FieldTag string, subTag string) string {
-	values := strings.Split(FieldTag, ";")
-	for _, v := range values {
+	values := strings.SplitSeq(FieldTag, ";")
+	for v := range values {
 		if after, found := strings.CutPrefix(v, subTag); found {
 			return after
 		}

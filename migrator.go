@@ -59,7 +59,7 @@ func migrateFrom(ent any, db *DB) *dbMigrator {
 func (dm *dbMigrator) typeField(tm *model.TableMigrate, tables, elem reflect.Value, driver model.Driver) (*model.TableMigrate, error) {
 	elem = utils.GetTableModel(elem)
 	elemType := elem.Type()
-	if elemType.Kind() == reflect.Ptr {
+	if elemType.Kind() == reflect.Pointer {
 		elemType = elemType.Elem()
 		elem = elem.Elem()
 	}
@@ -71,7 +71,8 @@ func (dm *dbMigrator) typeField(tm *model.TableMigrate, tables, elem reflect.Val
 
 	for fieldId := range elem.NumField() {
 		fieldOf := elemType.Field(fieldId)
-		if skipPrimaryKey(fieldNames, fieldOf.Name, tables, fieldOf) {
+		goeTag := fieldOf.Tag.Get("goe")
+		if goeTag == "-" || skipPrimaryKey(fieldNames, fieldOf.Name, tables, fieldOf) {
 			continue
 		}
 
@@ -186,7 +187,7 @@ func (dm *dbMigrator) typeField(tm *model.TableMigrate, tables, elem reflect.Val
 // 	}
 //
 // 	var pks []string
-// 	fields := utils.NewCoMap()
+// 	fields := utils.NewCoMap[reflect.Value]()
 // 	for _, pk := range tm.PrimaryKeys {
 // 		pks = append(pks, pk.Name)
 // 		if f := modelOf.FieldByName(pk.FieldName); f.IsValid() {
@@ -292,7 +293,7 @@ func createOneToSomeMigrate(b body, typeOf reflect.Type) any {
 }
 
 func migratePk(typeOf reflect.Type, driver model.Driver) ([]*model.PrimaryKeyMigrate, []string, error) {
-	if typeOf.Kind() == reflect.Ptr {
+	if typeOf.Kind() == reflect.Pointer {
 		typeOf = typeOf.Elem()
 	}
 
@@ -305,7 +306,7 @@ func migratePk(typeOf reflect.Type, driver model.Driver) ([]*model.PrimaryKeyMig
 			modelField, ok := typeOf.FieldByName("Model")
 			if ok {
 				modelType := modelField.Type
-				if modelType.Kind() == reflect.Ptr {
+				if modelType.Kind() == reflect.Pointer {
 					modelType = modelType.Elem()
 				}
 				typeOf = modelType
@@ -378,8 +379,8 @@ func getIndex(field reflect.StructField) string {
 }
 
 func getIndexValue(valueTag string, tag string) string {
-	values := strings.Split(valueTag, " ")
-	for _, v := range values {
+	values := strings.SplitSeq(valueTag, " ")
+	for v := range values {
 		if _, value, ok := strings.Cut(v, tag); ok {
 			return value
 		}
@@ -452,7 +453,7 @@ func checkIndex(b body, at model.AttributeMigrate, skipUnique bool) error {
 	migTable, migField := b.migrate.table, b.migrate.field
 	indexFunc := getIndex(migField)
 	if indexFunc != "" {
-		for _, index := range strings.Split(indexFunc, ",") {
+		for index := range strings.SplitSeq(indexFunc, ",") {
 			indexName := getIndexValue(index, "n:")
 
 			if indexName == "" {
