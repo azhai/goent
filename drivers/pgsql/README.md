@@ -1,2 +1,2 @@
 # postgres
-A PostgreSQL Driver for GOE ORM
+A PostgreSQL Driver for Goent ORM

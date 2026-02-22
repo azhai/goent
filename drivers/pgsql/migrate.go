@@ -34,6 +34,7 @@ func (dr *Driver) MigrateContext(ctx context.Context, migrator *model.Migrator) 
 
 	sql := new(strings.Builder)
 	sqlColumns := new(strings.Builder)
+	sqlForeignKeys := new(strings.Builder)
 	schemas := strings.Builder{}
 	dbSchemas, err := getSchemas(dr.sql)
 	if err != nil {
@@ -59,11 +60,12 @@ func (dr *Driver) MigrateContext(ctx context.Context, migrator *model.Migrator) 
 
 	for _, t := range migrator.Tables {
 		if !t.Migrated {
-			createTable(t, dataMap, sql, migrator.Tables)
+			createTable(t, dataMap, sql, migrator.Tables, sqlForeignKeys)
 		}
 	}
 
 	sql.WriteString(sqlColumns.String())
+	sql.WriteString(sqlForeignKeys.String())
 
 	if sql.Len() != 0 {
 		schemas.WriteString(sql.String())
@@ -247,7 +249,7 @@ func foreignKeyIsPrimarykey(table *model.TableMigrate, attName string) bool {
 	return slices.ContainsFunc(table.PrimaryKeys, isSameName)
 }
 
-func createTable(tbl *model.TableMigrate, dataMap map[string]dataType, sql *strings.Builder, tables map[string]*model.TableMigrate) {
+func createTable(tbl *model.TableMigrate, dataMap map[string]dataType, sql *strings.Builder, tables map[string]*model.TableMigrate, sqlForeignKeys *strings.Builder) {
 	t := table{}
 	t.name = fmt.Sprintf("CREATE TABLE %v (", tbl.EscapingTableName())
 	for _, att := range tbl.PrimaryKeys {
@@ -264,37 +266,63 @@ func createTable(tbl *model.TableMigrate, dataMap map[string]dataType, sql *stri
 
 	for _, att := range tbl.Attributes {
 		att.DataType = checkDataType(att.DataType, dataMap).typeName
-		t.createAttrs = append(t.createAttrs, fmt.Sprintf("%v %v %v %v,", att.EscapingName, att.DataType, func() string {
-			if att.Nullable {
-				return "NULL"
-			} else {
-				return "NOT NULL"
+		if targetTable, targetCol := findForeignKey(tbl, att.Name); targetTable != "" {
+			feature := "NULL"
+			if !att.Nullable {
+				feature = "NOT NULL"
 			}
-		}(), setDefault(att.Default)))
+			t.createAttrs = append(t.createAttrs, fmt.Sprintf("%v %v %v,", att.EscapingName, att.DataType, feature))
+			sqlForeignKeys.WriteString(fmt.Sprintf("ALTER TABLE %v ADD CONSTRAINT fk_%v_%v FOREIGN KEY (%v) REFERENCES %v(%v);\n",
+				tbl.EscapingTableName(), tbl.Name, att.Name, att.EscapingName, targetTable, targetCol))
+		} else {
+			t.createAttrs = append(t.createAttrs, fmt.Sprintf("%v %v %v %v,", att.EscapingName, att.DataType, func() string {
+				if att.Nullable {
+					return "NULL"
+				} else {
+					return "NOT NULL"
+				}
+			}(), setDefault(att.Default)))
+		}
 	}
 
 	for _, att := range tbl.OneToSomes {
-		tb := tables[att.TargetTable]
-		if tb.Migrated {
-			t.createAttrs = append(t.createAttrs, foreignOneToSome(att, dataMap))
-		} else {
-			if tb != tbl {
-				createTable(tb, dataMap, sql, tables)
-			}
-			t.createAttrs = append(t.createAttrs, foreignOneToSome(att, dataMap))
+		if attributeExists(tbl, att.Name) {
+			continue
 		}
+		tb := tables[att.TargetTable]
+		if !tb.Migrated && tb != tbl {
+			createTable(tb, dataMap, sql, tables, sqlForeignKeys)
+		}
+		att.DataType = checkDataType(att.DataType, dataMap).typeName
+		feature := "NULL"
+		if !att.Nullable {
+			feature = "NOT NULL"
+		}
+		t.createAttrs = append(t.createAttrs, fmt.Sprintf("%v %v %v,", att.EscapingName, att.DataType, feature))
+		if !att.IsOneToMany {
+			sqlForeignKeys.WriteString(fmt.Sprintf("ALTER TABLE %v ADD CONSTRAINT uq_%v_%v UNIQUE (%v);\n",
+				tbl.EscapingTableName(), tbl.Name, att.Name, att.EscapingName))
+		}
+		sqlForeignKeys.WriteString(fmt.Sprintf("ALTER TABLE %v ADD CONSTRAINT fk_%v_%v FOREIGN KEY (%v) REFERENCES %v(%v);\n",
+			tbl.EscapingTableName(), tbl.Name, att.Name, att.EscapingName, att.EscapingTargetTableName(), att.EscapingTargetColumn))
 	}
 
 	for _, att := range tbl.ManyToSomes {
-		tb := tables[att.TargetTable]
-		if tb.Migrated {
-			t.createAttrs = append(t.createAttrs, foreignManyToSome(att, dataMap))
-		} else {
-			if tb != tbl {
-				createTable(tb, dataMap, sql, tables)
-			}
-			t.createAttrs = append(t.createAttrs, foreignManyToSome(att, dataMap))
+		if attributeExists(tbl, att.Name) {
+			continue
 		}
+		tb := tables[att.TargetTable]
+		if !tb.Migrated && tb != tbl {
+			createTable(tb, dataMap, sql, tables, sqlForeignKeys)
+		}
+		att.DataType = checkDataType(att.DataType, dataMap).typeName
+		feature := "NULL"
+		if !att.Nullable {
+			feature = "NOT NULL"
+		}
+		t.createAttrs = append(t.createAttrs, fmt.Sprintf("%v %v %v,", att.EscapingName, att.DataType, feature))
+		sqlForeignKeys.WriteString(fmt.Sprintf("ALTER TABLE %v ADD CONSTRAINT fk_%v_%v FOREIGN KEY (%v) REFERENCES %v(%v);\n",
+			tbl.EscapingTableName(), tbl.Name, att.Name, att.EscapingName, att.EscapingTargetTableName(), att.EscapingTargetColumn))
 	}
 
 	tbl.Migrated = true
@@ -304,6 +332,38 @@ func createTable(tbl *model.TableMigrate, dataMap map[string]dataType, sql *stri
 	}
 	t.createPk += ")"
 	createTableSql(t.name, t.createPk, t.createAttrs, sql)
+}
+
+func findForeignKey(tbl *model.TableMigrate, attrName string) (targetTable, targetColumn string) {
+	for _, fk := range tbl.ManyToSomes {
+		if fk.Name == attrName {
+			return fk.EscapingTargetTableName(), fk.EscapingTargetColumn
+		}
+	}
+	for _, fk := range tbl.OneToSomes {
+		if fk.Name == attrName {
+			return fk.EscapingTargetTableName(), fk.EscapingTargetColumn
+		}
+	}
+	return "", ""
+}
+
+func attributeExists(tbl *model.TableMigrate, attrName string) bool {
+	for _, attr := range tbl.Attributes {
+		if attr.Name == attrName {
+			return true
+		}
+	}
+	return false
+}
+
+func findTableByName(tables map[string]*model.TableMigrate, name string) *model.TableMigrate {
+	for _, tbl := range tables {
+		if tbl.EscapingName == name || tbl.Name == name {
+			return tbl
+		}
+	}
+	return nil
 }
 
 func setDefault(d string) string {

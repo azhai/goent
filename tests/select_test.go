@@ -255,7 +255,7 @@ func TestSelect(t *testing.T) {
 		{
 			desc: "Select",
 			testCase: func(t *testing.T) {
-				a := runSelect(t, db.Animal.Select().Rows())
+				a := runSelect(t, db.Animal.Select().IterRows())
 				if len(a) != len(animals) {
 					t.Errorf("Expected %v animals, got %v", len(animals), len(a))
 				}
@@ -303,7 +303,7 @@ func TestSelect(t *testing.T) {
 				for row, err := range goent.Select[struct {
 					Name      string
 					UpperName string
-				}](&db.Animal.Name, function.ToUpper(&db.Animal.Name)).Rows() {
+				}](&db.Animal.Name, function.ToUpper(&db.Animal.Name)).IterRows() {
 					if err != nil {
 						t.Fatalf("Expected select, got error: %v", err)
 					}
@@ -319,7 +319,7 @@ func TestSelect(t *testing.T) {
 				for row, err := range goent.Select[struct {
 					Name      string
 					LowerName string
-				}](&db.Animal.Name, function.ToLower(&db.Animal.Name)).Rows() {
+				}](&db.Animal.Name, function.ToLower(&db.Animal.Name)).IterRows() {
 					if err != nil {
 						t.Fatalf("Expected select, got error: %v", err)
 					}
@@ -385,7 +385,7 @@ func TestSelect(t *testing.T) {
 			testCase: func(t *testing.T) {
 				a := runSelect(t, goent.Select[struct {
 					Count int
-				}](aggregate.Count(&db.Animal.Id)).Rows())
+				}](aggregate.Count(&db.Animal.Id)).IterRows())
 
 				if int(a[0].Count) != len(animals) {
 					t.Errorf("Expected %v got: %v", len(animals), a[0].Count)
@@ -434,7 +434,7 @@ func TestSelect(t *testing.T) {
 				a := runSelect(t, goent.Select[struct {
 					Max float64
 					Min float64
-				}](aggregate.Max(&db.Exam.Score), aggregate.Min(&db.Exam.Score)).Rows())
+				}](aggregate.Max(&db.Exam.Score), aggregate.Min(&db.Exam.Score)).IterRows())
 
 				if a[0].Min != float64(exams[1].Score) {
 					t.Errorf("Expected %v got: %v", float64(exams[1].Score), a[0].Min)
@@ -450,7 +450,7 @@ func TestSelect(t *testing.T) {
 			testCase: func(t *testing.T) {
 				a := runSelect(t, goent.Select[struct {
 					Sum float64
-				}](aggregate.Sum(&db.Exam.Minimum)).Rows())
+				}](aggregate.Sum(&db.Exam.Minimum)).IterRows())
 
 				if a[0].Sum != 16.5 {
 					t.Errorf("Expected %v got: %v", float64(exams[1].Score), a[0].Sum)
@@ -462,7 +462,7 @@ func TestSelect(t *testing.T) {
 			testCase: func(t *testing.T) {
 				a := runSelect(t, goent.Select[struct {
 					Avg float64
-				}](aggregate.Avg(&db.Exam.Minimum)).Rows())
+				}](aggregate.Avg(&db.Exam.Minimum)).IterRows())
 
 				if a[0].Avg != float64(exams[0].Minimum) {
 					t.Errorf("Expected %v got: %v", float64(exams[0].Minimum), a[0].Avg)
@@ -955,14 +955,14 @@ func TestSelect(t *testing.T) {
 			desc: "Select_Where_Greater",
 			testCase: func(t *testing.T) {
 				e := runSelect(t, goent.List(db.Exam).
-					Where(where.GreaterArg[float32](&db.Exam.Score, &db.Exam.Minimum)).Rows())
+					Where(where.GreaterArg[float32](&db.Exam.Score, &db.Exam.Minimum)).IterRows())
 				if len(e) != 1 {
 					t.Errorf("Expected a %v, got %v", 1, len(e))
 				}
 
 				e = nil
 				e = runSelect(t, goent.List(db.Exam).
-					Where(where.Greater(&db.Exam.Score, float32(5.5))).Rows())
+					Where(where.Greater(&db.Exam.Score, float32(5.5))).IterRows())
 				if len(e) != 1 {
 					t.Errorf("Expected a %v, got %v", 1, len(e))
 				}
@@ -972,14 +972,14 @@ func TestSelect(t *testing.T) {
 			desc: "Select_Where_GreaterEquals",
 			testCase: func(t *testing.T) {
 				e := runSelect(t, goent.List(db.Exam).
-					Where(where.GreaterEqualsArg[float32](&db.Exam.Score, &db.Exam.Minimum)).Rows())
+					Where(where.GreaterEqualsArg[float32](&db.Exam.Score, &db.Exam.Minimum)).IterRows())
 				if len(e) != 2 {
 					t.Errorf("Expected a %v, got %v", 1, len(e))
 				}
 
 				e = nil
 				e = runSelect(t, goent.List(db.Exam).
-					Where(where.GreaterEquals(&db.Exam.Score, float32(5.5))).Rows())
+					Where(where.GreaterEquals(&db.Exam.Score, float32(5.5))).IterRows())
 				if len(e) != 2 {
 					t.Errorf("Expected a %v, got %v", 1, len(e))
 				}
@@ -989,14 +989,14 @@ func TestSelect(t *testing.T) {
 			desc: "Select_Where_Less",
 			testCase: func(t *testing.T) {
 				e := runSelect(t, goent.List(db.Exam).
-					Where(where.LessArg[float32](&db.Exam.Score, &db.Exam.Minimum)).Rows())
+					Where(where.LessArg[float32](&db.Exam.Score, &db.Exam.Minimum)).IterRows())
 				if len(e) != 1 {
 					t.Errorf("Expected %v, got %v", 1, len(e))
 				}
 
 				e = nil
 				e = runSelect(t, goent.List(db.Exam).
-					Where(where.Less(&db.Exam.Score, float32(5.5))).Rows())
+					Where(where.Less(&db.Exam.Score, float32(5.5))).IterRows())
 				if len(e) != 1 {
 					t.Errorf("Expected %v, got %v", 1, len(e))
 				}
@@ -1006,14 +1006,14 @@ func TestSelect(t *testing.T) {
 			desc: "Select_Where_LessEquals",
 			testCase: func(t *testing.T) {
 				e := runSelect(t, goent.List(db.Exam).
-					Where(where.LessEqualsArg[float32](&db.Exam.Score, &db.Exam.Minimum)).Rows())
+					Where(where.LessEqualsArg[float32](&db.Exam.Score, &db.Exam.Minimum)).IterRows())
 				if len(e) != 2 {
 					t.Errorf("Expected a %v, got %v", 1, len(e))
 				}
 
 				e = nil
 				e = runSelect(t, goent.List(db.Exam).
-					Where(where.LessEquals(&db.Exam.Score, float32(5.5))).Rows())
+					Where(where.LessEquals(&db.Exam.Score, float32(5.5))).IterRows())
 				if len(e) != 2 {
 					t.Errorf("Expected a %v, got %v", 1, len(e))
 				}
@@ -1023,7 +1023,7 @@ func TestSelect(t *testing.T) {
 			desc: "Select_Where_Like",
 			testCase: func(t *testing.T) {
 				a := runSelect(t, goent.List(db.Animal).
-					Where(where.Like(&db.Animal.Name, "%at%")).Rows())
+					Where(where.Like(&db.Animal.Name, "%at%")).IterRows())
 				if len(a) != 3 {
 					t.Errorf("Expected %v animals, got %v", 3, len(a))
 				}
@@ -1033,7 +1033,7 @@ func TestSelect(t *testing.T) {
 			desc: "Select_Where_NotLike",
 			testCase: func(t *testing.T) {
 				a := runSelect(t, goent.List(db.Animal).
-					Where(where.NotLike(&db.Animal.Name, "%at%")).Rows())
+					Where(where.NotLike(&db.Animal.Name, "%at%")).IterRows())
 				if len(a) != len(animals)-3 {
 					t.Errorf("Expected %v animals, got %v", len(animals)-3, len(a))
 				}
@@ -1042,7 +1042,7 @@ func TestSelect(t *testing.T) {
 		{
 			desc: "Select_Where_Equals_Nil",
 			testCase: func(t *testing.T) {
-				qr := goent.List(db.Animal).Where(where.Equals[*uuid.UUID](&db.Animal.HabitatId, nil)).Rows()
+				qr := goent.List(db.Animal).Where(where.Equals[*uuid.UUID](&db.Animal.HabitatId, nil)).IterRows()
 				a := runSelect(t, qr)
 				if len(a) != 24 {
 					t.Errorf("Expected %v animals, got %v", 22, len(a))
@@ -1053,7 +1053,7 @@ func TestSelect(t *testing.T) {
 			desc: "Select_Where_NotEquals_Nil",
 			testCase: func(t *testing.T) {
 				var bb *[]byte
-				qr := goent.List(db.Animal).Where(where.NotEquals(&db.Animal.InfoId, bb)).Rows()
+				qr := goent.List(db.Animal).Where(where.NotEquals(&db.Animal.InfoId, bb)).IterRows()
 				a := runSelect(t, qr)
 				if len(a) != len(infos) {
 					t.Errorf("Expected %v animals, got %v", len(infos), len(a))
@@ -1072,7 +1072,7 @@ func TestSelect(t *testing.T) {
 		{
 			desc: "Select_Order_By_Asc",
 			testCase: func(t *testing.T) {
-				qr := goent.List(db.Animal).OrderByAsc(&db.Animal.Id).Rows()
+				qr := goent.List(db.Animal).OrderByAsc(&db.Animal.Id).IterRows()
 				a := runSelect(t, qr)
 				if a[0].Id > a[1].Id {
 					t.Errorf("Expected animals order by asc, got %v", a)
@@ -1082,7 +1082,7 @@ func TestSelect(t *testing.T) {
 		{
 			desc: "Select_Order_By_Desc",
 			testCase: func(t *testing.T) {
-				qr := goent.List(db.Animal).OrderByDesc(&db.Animal.Id).Rows()
+				qr := goent.List(db.Animal).OrderByDesc(&db.Animal.Id).IterRows()
 				a := runSelect(t, qr)
 				if a[0].Id < a[1].Id {
 					t.Errorf("Expected animals order by desc, got %v", a)
@@ -1094,7 +1094,7 @@ func TestSelect(t *testing.T) {
 			testCase: func(t *testing.T) {
 				qr := goent.List(db.Animal).
 					Join(&db.Animal.Id, &db.AnimalFood.AnimalId).
-					Join(&db.Food.Id, &db.AnimalFood.FoodId).Rows()
+					Join(&db.Food.Id, &db.AnimalFood.FoodId).IterRows()
 				a := runSelect(t, qr)
 
 				if len(a) != len(animalFoods) {
@@ -1114,7 +1114,7 @@ func TestSelect(t *testing.T) {
 							where.EqualsArg[int](&db.Animal.Id, &db.AnimalFood.AnimalId),
 							where.EqualsArg[uuid.UUID](&db.Food.Id, &db.AnimalFood.FoodId),
 						),
-					).Rows()
+					).IterRows()
 				a := runSelect(t, qr)
 
 				if len(a) != len(animalFoods) {
@@ -1132,7 +1132,7 @@ func TestSelect(t *testing.T) {
 					Join(&db.Food.Id, &db.AnimalFood.FoodId).
 					Join(&db.Animal.Id, &db.AnimalFood.AnimalId).
 					Where(
-						where.Equals(&db.Animal.Name, animals[0].Name)).Rows()
+						where.Equals(&db.Animal.Name, animals[0].Name)).IterRows()
 				f := runSelect(t, qr)
 
 				if len(f) != 1 {
@@ -1149,7 +1149,7 @@ func TestSelect(t *testing.T) {
 				qr := goent.List(db.Animal).
 					Join(&db.Animal.Id, &db.AnimalFood.AnimalId).
 					Join(&db.Food.Id, &db.AnimalFood.FoodId).
-					OrderByAsc(&db.Animal.Id).Rows()
+					OrderByAsc(&db.Animal.Id).IterRows()
 				a := runSelect(t, qr)
 				if a[0].Id > a[1].Id {
 					t.Errorf("Expected animals order by asc, got %v", a)
@@ -1162,7 +1162,7 @@ func TestSelect(t *testing.T) {
 				qr := goent.List(db.Animal).
 					Join(&db.Animal.Id, &db.AnimalFood.AnimalId).
 					Join(&db.Food.Id, &db.AnimalFood.FoodId).
-					OrderByDesc(&db.Animal.Id).Rows()
+					OrderByDesc(&db.Animal.Id).IterRows()
 				a := runSelect(t, qr)
 				if a[0].Id < a[1].Id {
 					t.Errorf("Expected animals order by desc, got %v", a)
@@ -1177,7 +1177,7 @@ func TestSelect(t *testing.T) {
 					Join(&db.Food.Id, &db.AnimalFood.FoodId).
 					Where(
 						where.Equals(&db.Food.Id, foods[0].Id),
-					).OrderByAsc(&db.Animal.Id).Rows()
+					).OrderByAsc(&db.Animal.Id).IterRows()
 				a := runSelect(t, qr)
 
 				if len(a) != 2 {
@@ -1196,7 +1196,7 @@ func TestSelect(t *testing.T) {
 					Join(&db.Food.Id, &db.AnimalFood.FoodId).
 					Where(
 						where.Equals(&db.Food.Id, foods[0].Id),
-					).OrderByDesc(&db.Animal.Id).Rows()
+					).OrderByDesc(&db.Animal.Id).IterRows()
 				a := runSelect(t, qr)
 
 				if len(a) != 2 {
@@ -1214,7 +1214,7 @@ func TestSelect(t *testing.T) {
 					Join(&db.Food.Id, &db.AnimalFood.FoodId).
 					Join(&db.Animal.Id, &db.AnimalFood.AnimalId).
 					Join(&db.Animal.HabitatId, &db.Habitat.Id).
-					Where(where.Equals(&db.Habitat.Id, habitats[0].Id)).Rows()
+					Where(where.Equals(&db.Habitat.Id, habitats[0].Id)).IterRows()
 				f := runSelect(t, qr)
 
 				if len(f) != 2 {
@@ -1225,7 +1225,7 @@ func TestSelect(t *testing.T) {
 		{
 			desc: "Select_Join_One_To_One",
 			testCase: func(t *testing.T) {
-				qr := goent.List(db.Animal).Join(&db.Animal.InfoId, &db.Info.Id).Rows()
+				qr := goent.List(db.Animal).Join(&db.Animal.InfoId, &db.Info.Id).IterRows()
 				a := runSelect(t, qr)
 
 				if len(a) != 2 {
@@ -1241,7 +1241,7 @@ func TestSelect(t *testing.T) {
 					Join(&db.Animal.InfoId, &db.Info.Id).
 					Join(&db.Animal.Id, &db.AnimalFood.AnimalId).
 					Join(&db.Food.Id, &db.AnimalFood.FoodId).
-					Where(where.Equals(&db.Food.Id, foods[0].Id)).Rows()
+					Where(where.Equals(&db.Food.Id, foods[0].Id)).IterRows()
 				s := runSelect(t, qr)
 
 				if len(s) != 2 {
@@ -1253,7 +1253,7 @@ func TestSelect(t *testing.T) {
 			desc: "Select_Join_Name",
 			testCase: func(t *testing.T) {
 				qr := goent.List(db.Habitat).
-					Join(&db.Habitat.Name, &db.Weather.Name).Rows()
+					Join(&db.Habitat.Name, &db.Weather.Name).IterRows()
 				h := runSelect(t, qr)
 
 				if h[0].Name != "Ocean" {
@@ -1298,7 +1298,7 @@ func TestSelect(t *testing.T) {
 				}](&db.User.Name, &db.Role.Name, &db.UserRole.EndDate).
 					LeftJoin(&db.User.Id, &db.UserRole.UserId).
 					LeftJoin(&db.UserRole.RoleId, &db.Role.Id).
-					OrderByAsc(&db.User.Id).Rows() {
+					OrderByAsc(&db.User.Id).IterRows() {
 
 					if err != nil {
 						t.Fatal(err)
@@ -1329,7 +1329,7 @@ func TestSelect(t *testing.T) {
 					Role    string
 					EndTime *time.Time
 				}](&db.User.Name, &db.Role.Name, &db.UserRole.EndDate).RightJoin(&db.UserRole.UserId, &db.User.Id).RightJoin(&db.Role.Id, &db.UserRole.RoleId).
-					OrderByAsc(&db.Role.Id).Rows() {
+					OrderByAsc(&db.Role.Id).IterRows() {
 
 					if err != nil {
 						t.Fatal(err)
@@ -1358,7 +1358,7 @@ func TestSelect(t *testing.T) {
 					JobTitle string
 					Person   string
 				}](&db.JobTitle.Name, &db.Person.Name).
-					Join(&db.Person.Id, &db.PersonJobTitle.PersonId).Join(&db.PersonJobTitle.JobTitleId, &db.JobTitle.Id).Rows() {
+					Join(&db.Person.Id, &db.PersonJobTitle.PersonId).Join(&db.PersonJobTitle.JobTitleId, &db.JobTitle.Id).IterRows() {
 
 					if err != nil {
 						t.Fatal(err)
@@ -1377,7 +1377,7 @@ func TestSelect(t *testing.T) {
 			testCase: func(t *testing.T) {
 				ctx, cancel := context.WithCancel(context.Background())
 				cancel()
-				for _, err := range goent.ListContext(ctx, db.Animal).Rows() {
+				for _, err := range goent.ListContext(ctx, db.Animal).IterRows() {
 					if !errors.Is(err, context.Canceled) {
 						t.Errorf("Expected a context.Canceled, got error: %v", err)
 					}
@@ -1389,7 +1389,7 @@ func TestSelect(t *testing.T) {
 			testCase: func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond*1)
 				defer cancel()
-				for _, err := range goent.ListContext(ctx, db.Animal).Rows() {
+				for _, err := range goent.ListContext(ctx, db.Animal).IterRows() {
 					if !errors.Is(err, context.DeadlineExceeded) {
 						t.Errorf("Expected a context.DeadlineExceeded, got error: %v", err)
 					}

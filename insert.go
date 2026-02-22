@@ -3,7 +3,6 @@ package goent
 import (
 	"reflect"
 
-	"github.com/azhai/goent/enum"
 	"github.com/azhai/goent/model"
 )
 
@@ -14,7 +13,7 @@ type StateInsert[T any] struct {
 }
 
 func (s *StateInsert[T]) One(obj *T) error {
-	s.builder.Type = enum.InsertQuery
+	s.builder.Type = model.InsertQuery
 	s.builder.SetTable(s.table.TableInfo)
 	s.builder.ResetForSave()
 
@@ -38,7 +37,7 @@ func (s *StateInsert[T]) All(autoIncr bool, data []*T) error {
 	} else if len(data) == 1 {
 		return s.One(data[0])
 	}
-	s.builder.Type = enum.InsertAllQuery
+	s.builder.Type = model.InsertAllQuery
 	s.builder.SetTable(s.table.TableInfo)
 	s.builder.ResetForSave()
 
@@ -94,11 +93,11 @@ type StateSave[T any] struct {
 
 func (s *StateSave[T]) getQuery(primary Dict) model.Query {
 	if len(primary) > 0 {
-		s.builder.Type = enum.UpdateQuery
+		s.builder.Type = model.UpdateQuery
 		fld := &Field{TableAddr: s.table.TableAddr}
 		s.builder.Where = EqualsMap(fld, primary)
 	} else {
-		s.builder.Type = enum.InsertQuery
+		s.builder.Type = model.InsertQuery
 	}
 	return model.CreateQuery(s.builder.Build(true))
 }

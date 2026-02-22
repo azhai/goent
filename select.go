@@ -4,20 +4,16 @@ import (
 	"context"
 	"iter"
 	"math"
-	"reflect"
+	"slices"
 	"strings"
 
-	"github.com/azhai/goent/enum"
 	"github.com/azhai/goent/model"
 )
-
-type FetchFunc func(target any) []any
 
 // StateSelect represents a SELECT query state with type parameters for table and result types.
 type StateSelect[T, R any] struct {
 	table     *Table[T]
 	sameModel bool
-	FetchRow  FetchFunc
 	*StateWhere
 }
 
@@ -33,7 +29,7 @@ func NewStateSelectFrom[T, R any](state *StateWhere, table *Table[T]) *StateSele
 		ctx := context.Background()
 		state = NewStateWhere(ctx)
 	}
-	state.builder.Type = enum.SelectQuery
+	state.builder.Type = model.SelectQuery
 	state.builder.SetTable(table.TableInfo)
 	return &StateSelect[T, R]{table: table, StateWhere: state}
 }
@@ -67,38 +63,37 @@ func (s *StateSelect[T, R]) Select(fields ...any) *StateSelect[T, R] {
 	return s
 }
 
-func (s *StateSelect[T, R]) GetFetchFunc() FetchFunc {
-	fields, foreign := s.builder.Selects, s.GetForeign()
-	return func(target any) []any {
-		valueOf := reflect.ValueOf(target).Elem()
-		if len(fields) > 0 && fields[0].Function != "" {
-			return FlattenDest(valueOf)
-		}
-		if len(fields) > 0 {
-			return AppendDestFields(fields, valueOf, foreign)
-		}
-		dest := AppendDestTable(s.table.TableInfo, valueOf)
-		if foreign != nil {
-			info := GetTableInfo(foreign.Reference.TableAddr)
-			if typeOf, ok := valueOf.Type().FieldByName(foreign.MountField); ok {
-				fieldOf := reflect.New(typeOf.Type.Elem())
-				valueOf.FieldByName(foreign.MountField).Set(fieldOf)
-				dest = append(dest, AppendDestTable(*info, fieldOf.Elem())...)
-			}
-		}
-		return dest
-	}
-}
-
-// Rows return a iterator on rows.
-func (s *StateSelect[T, R]) Rows() iter.Seq2[*R, error] {
+// Query returns a Fetcher and a Query.
+func (s *StateSelect[T, R]) Query(creator FetchCreator) (*Fetcher[R], model.Query) {
 	qr := model.CreateQuery(s.builder.Build(false))
 	defer PutBuilder(s.builder)
-	hd := s.Prepare(s.table.db.driver)
-	if s.FetchRow == nil {
-		s.FetchRow = s.GetFetchFunc()
+	info, fields := s.table.TableInfo, slices.Clone(s.builder.Selects)
+	fet := &Fetcher[R]{
+		NewTarget: func() *R { return new(R) },
+		FetchTo:   creator(info, fields, s.GetJoinForeign()),
+		Handler:   s.Prepare(s.table.db.driver),
 	}
-	return FetchResult[R](hd, qr, s.FetchRow)
+	return fet, qr
+}
+
+// IterRows return a iterator on rows.
+func (s *StateSelect[T, R]) IterRows() iter.Seq2[*R, error] {
+	fet, qr := s.Query(CreateFetchFunc)
+	return fet.FetchResult(qr)
+}
+
+func (s *StateSelect[T, R]) Rows() (data []*R, err error) {
+	var rows model.Rows
+	limit := s.builder.Limit
+	fet, qr := s.Query(CreateFetchFunc)
+	if rows, err = fet.QueryResult(qr); err != nil {
+		return
+	}
+	data, qr.Err = fet.FetchRows(rows, err, limit)
+	if qr.Err != nil {
+		err = fet.ErrHandler(qr)
+	}
+	return
 }
 
 func (s *StateSelect[T, R]) One() (*R, error) {
@@ -106,8 +101,8 @@ func (s *StateSelect[T, R]) One() (*R, error) {
 	if s.sameModel {
 		limit = 1
 	}
-	for row, err := range s.Take(limit).Rows() {
-		if s.sameModel {
+	for row, err := range s.Take(limit).IterRows() {
+		if s.sameModel && row != nil {
 			s.table.CacheOne(row)
 		}
 		return row, err
@@ -117,11 +112,11 @@ func (s *StateSelect[T, R]) One() (*R, error) {
 
 func (s *StateSelect[T, R]) All() ([]*R, error) {
 	rows := make([]*R, 0, s.builder.Limit)
-	for row, err := range s.Rows() {
+	for row, err := range s.IterRows() {
 		if err != nil {
-			return nil, err
+			return rows, err
 		}
-		if s.sameModel {
+		if s.sameModel && row != nil {
 			s.table.CacheOne(row)
 		}
 		rows = append(rows, row)
@@ -130,13 +125,16 @@ func (s *StateSelect[T, R]) All() ([]*R, error) {
 }
 
 func (s *StateSelect[T, R]) Map(key string) (map[int64]*R, error) {
+	var col *Column
+	if col = s.table.ColumnInfo(key); col == nil {
+		return nil, NewColumnNotFoundError(key)
+	}
 	res := make(map[int64]*R)
-	col := s.table.Columns[key]
-	for row, err := range s.Rows() {
+	for row, err := range s.IterRows() {
 		if err != nil {
 			return nil, err
 		}
-		if s.sameModel {
+		if s.sameModel && row != nil {
 			s.table.CacheOne(row)
 		}
 		if val, ok := col.GetInt64(row); ok {
@@ -147,13 +145,16 @@ func (s *StateSelect[T, R]) Map(key string) (map[int64]*R, error) {
 }
 
 func (s *StateSelect[T, R]) Rank(key string) (map[int64][]*R, error) {
+	var col *Column
+	if col = s.table.ColumnInfo(key); col == nil {
+		return nil, NewColumnNotFoundError(key)
+	}
 	res := make(map[int64][]*R)
-	col := s.table.Columns[key]
-	for row, err := range s.Rows() {
+	for row, err := range s.IterRows() {
 		if err != nil {
 			return nil, err
 		}
-		if s.sameModel {
+		if s.sameModel && row != nil {
 			s.table.CacheOne(row)
 		}
 		if val, ok := col.GetInt64(row); ok {
@@ -175,6 +176,11 @@ func (s *StateSelect[T, R]) OnTransaction(tx model.Transaction) *StateSelect[T, 
 
 func (s *StateSelect[T, R]) Filter(args ...Condition) *StateSelect[T, R] {
 	s.StateWhere = s.StateWhere.Filter(args...)
+	return s
+}
+
+func (s *StateSelect[T, R]) Where(where string, args ...any) *StateSelect[T, R] {
+	s.StateWhere = s.StateWhere.Where(where, args...)
 	return s
 }
 
@@ -220,7 +226,7 @@ func (s *StateSelect[T, R]) Skip(i int) *StateSelect[T, R] {
 	return s
 }
 
-func (s *StateSelect[T, R]) GetForeign() *Foreign {
+func (s *StateSelect[T, R]) GetJoinForeign() *Foreign {
 	if len(s.builder.Joins) == 0 {
 		return nil
 	}
@@ -232,8 +238,8 @@ func (s *StateSelect[T, R]) GetForeign() *Foreign {
 }
 
 // Join joins another table with a condition
-func (s *StateSelect[T, R]) Join(joinType enum.JoinType, info TableInfo, on Condition) *StateSelect[T, R] {
-	s.builder.Type = enum.SelectJoinQuery
+func (s *StateSelect[T, R]) Join(joinType model.JoinType, info TableInfo, on Condition) *StateSelect[T, R] {
+	s.builder.Type = model.SelectJoinQuery
 	s.builder.Joins = append(s.builder.Joins, &JoinTable{
 		JoinType: joinType, Table: info.Table(), On: on,
 	})
@@ -243,7 +249,7 @@ func (s *StateSelect[T, R]) Join(joinType enum.JoinType, info TableInfo, on Cond
 // LeftJoin joins another table with a condition on left table
 func (s *StateSelect[T, R]) LeftJoin(fkey string, refer *Field) *StateSelect[T, R] {
 	info := GetTableInfo(refer.TableAddr)
-	return s.Join(enum.LeftJoin, *info, EqualsField(s.table.Field(fkey), refer))
+	return s.Join(model.LeftJoin, *info, EqualsField(s.table.Field(fkey), refer))
 }
 
 // Pagination holds paginated query results with metadata.

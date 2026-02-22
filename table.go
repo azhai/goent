@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/azhai/goent/enum"
 	"github.com/azhai/goent/model"
 	"github.com/azhai/goent/utils"
 )
@@ -50,6 +49,18 @@ func (t TableInfo) Table() *model.Table {
 	}
 }
 
+func (t TableInfo) ColumnInfo(name string) *Column {
+	if col, ok := t.Columns[name]; ok {
+		return col
+	}
+	for _, col := range t.Columns {
+		if strings.EqualFold(col.ColumnName, name) {
+			return col
+		}
+	}
+	return nil
+}
+
 func (t TableInfo) Field(col string) *Field {
 	col = strings.TrimSpace(col)
 	if fid, ok := t.Check(col); ok {
@@ -61,11 +72,11 @@ func (t TableInfo) Field(col string) *Field {
 func (t TableInfo) Check(col string) (int, bool) {
 	col = strings.TrimSpace(col)
 	if t.simpleTable || col == "" || col == "*" ||
-			strings.ContainsAny(col, " ,+*/%()") {
+		strings.ContainsAny(col, " ,+*/%()") {
 		return -1, true
 	}
-	if info, ok := t.Columns[col]; ok {
-		return info.FieldId, ok
+	if info := t.ColumnInfo(col); info != nil {
+		return info.FieldId, true
 	}
 	return -1, false
 }
@@ -110,7 +121,7 @@ func SimpleTable[T any](db *DB, tableName, SchemaName string) *Table[T] {
 // NewTableReflect creates a new Table instance using reflection.
 // It analyzes the struct type to extract table metadata including columns, primary keys, and indexes.
 func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schema string,
-		schemaId, tableId int) (reflect.Value, TableInfo) {
+	schemaId, tableId int) (reflect.Value, TableInfo) {
 	tb := reflect.New(typeOf)
 	modelField := tb.Elem().FieldByName("Model")
 	if !modelField.IsValid() {
@@ -138,12 +149,45 @@ func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schem
 		fieldOf := modelValue.Type().Field(i)
 		fieldKind := fieldOf.Type.Kind()
 		geoTag := fieldOf.Tag.Get("goe")
-		if geoTag == "-" || fieldKind == reflect.Slice ||
-				fieldKind == reflect.Interface || fieldKind == reflect.Func {
+		if geoTag == "-" || fieldKind == reflect.Interface || fieldKind == reflect.Func {
 			continue
 		}
+
 		columnName := utils.ToSnakeCase(fieldOf.Name)
 		_, exists := utils.GetTagValue(geoTag, "default")
+
+		if fieldKind == reflect.Slice {
+			if utils.HasTagValue(geoTag, "o2m") {
+				fkCol, _ := utils.GetTagValue(geoTag, "fk")
+				info.Foreigns[columnName] = &Foreign{
+					Type:       O2M,
+					MountField: fieldOf.Name,
+					ForeignKey: fkCol,
+					Reference:  nil,
+				}
+			} else if utils.HasTagValue(geoTag, "m2m") {
+				middle, _ := utils.GetTagValue(geoTag, "middle")
+				leftCol, _ := utils.GetTagValue(geoTag, "left")
+				rightCol, _ := utils.GetTagValue(geoTag, "right")
+				var middleInfo *ThirdParty
+				if middle != "" {
+					middleInfo = &ThirdParty{
+						Table: middle,
+						Left:  leftCol,
+						Right: rightCol,
+					}
+				}
+				info.Foreigns[columnName] = &Foreign{
+					Type:       M2M,
+					MountField: fieldOf.Name,
+					ForeignKey: "",
+					Reference:  nil,
+					Middle:     middleInfo,
+				}
+			}
+			continue
+		}
+
 		column := &Column{
 			FieldName:  fieldOf.Name,
 			ColumnName: columnName,
@@ -153,21 +197,44 @@ func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schem
 			FieldId:    i,
 			tableName:  tableName,
 			schemaName: &schema,
-			db:         db,
 		}
 		info.Columns[columnName] = column
 
 		if strings.EqualFold(fieldOf.Name, "id") || utils.HasTagValue(geoTag, "pk") {
 			isAutoIncr := !utils.HasTagValue(geoTag, "not_incr")
 			column.isAutoIncr = isAutoIncr
-			// attr = createPkFromColumn(db, column, tableId, isAutoIncr)
 			info.PrimaryKeys = append(info.PrimaryKeys, &Index{
 				IsUnique:   true,
 				IsAutoIncr: isAutoIncr,
 				Column:     column,
 			})
+		} else if utils.HasTagValue(geoTag, "m2o") {
+			mountField := strings.TrimSuffix(fieldOf.Name, "ID")
+			mountField = strings.TrimSuffix(mountField, "Id")
+			if mountField == fieldOf.Name {
+				mountField = strings.TrimSuffix(columnName, "_id")
+				mountField = utils.TitleCase(mountField)
+			}
+			info.Foreigns[columnName] = &Foreign{
+				Type:       M2O,
+				MountField: mountField,
+				ForeignKey: columnName,
+				Reference:  nil,
+			}
+		} else if utils.HasTagValue(geoTag, "o2o") {
+			mountField := strings.TrimSuffix(fieldOf.Name, "ID")
+			mountField = strings.TrimSuffix(mountField, "Id")
+			if mountField == fieldOf.Name {
+				mountField = strings.TrimSuffix(columnName, "_id")
+				mountField = utils.TitleCase(mountField)
+			}
+			info.Foreigns[columnName] = &Foreign{
+				Type:       O2O,
+				MountField: mountField,
+				ForeignKey: columnName,
+				Reference:  nil,
+			}
 		} else {
-			// attr = createAttFromColumn(db, column, tableId)
 			if utils.HasTagValue(geoTag, "unique") {
 				info.Indexes = append(info.Indexes, &Index{
 					IsUnique:   true,
@@ -182,7 +249,6 @@ func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schem
 				})
 			}
 		}
-		// addrMap.set(column.FieldAddr, attr)
 	}
 
 	tb.Elem().FieldByName("TableInfo").Set(reflect.ValueOf(info))
@@ -191,26 +257,7 @@ func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schem
 
 func (t *Table[T]) SetDB(db *DB) {
 	t.db = db
-	for _, col := range t.Columns {
-		col.db = db
-	}
 }
-
-// func (t *Table[T]) FieldInfo(name string) *Column {
-// 	if col, ok := t.Columns[name]; ok {
-// 		return col
-// 	}
-// 	for _, col := range t.Columns {
-// 		if strings.EqualFold(col.ColumnName, name) {
-// 			return col
-// 		}
-// 	}
-// 	return nil
-// }
-
-// func (t *Table[T]) Field(name string) field {
-// 	return t.FieldInfo(name)
-// }
 
 func (t *Table[T]) Dest() (*T, []any) {
 	obj, size := new(T), len(t.Columns)
@@ -240,7 +287,7 @@ func (t *Table[T]) CacheOne(row any) {
 }
 
 // ------------------------------
-// Filter ...
+// Filter/Where ...
 // ------------------------------
 
 func (t *Table[T]) Filter(args ...Condition) *Table[T] {
@@ -255,11 +302,23 @@ func (t *Table[T]) FilterContext(ctx context.Context, args ...Condition) *Table[
 	return t
 }
 
+func (t *Table[T]) Where(where string, args ...any) *Table[T] {
+	return t.WhereContext(context.Background(), where, args...)
+}
+
+func (t *Table[T]) WhereContext(ctx context.Context, where string, args ...any) *Table[T] {
+	if t.State == nil {
+		t.State = NewStateWhere(ctx)
+	}
+	t.State = t.State.Where(where, args...)
+	return t
+}
+
 func (t *Table[T]) Drop() error {
 	if t.db != nil {
 		return Migrate(t.db).OnTable(t.TableName).DropTable()
 	}
-	return fmt.Errorf("db not found")
+	return ErrDBNotFound
 }
 
 // ------------------------------
@@ -274,7 +333,7 @@ func (t *Table[T]) DeleteContext(ctx context.Context) *StateDelete[T] {
 	var s *StateWhere
 	if s = t.State; s == nil {
 		s = NewStateWhere(ctx)
-		s.builder.Type = enum.DeleteQuery
+		s.builder.Type = model.DeleteQuery
 	}
 	return &StateDelete[T]{table: t, StateWhere: s}
 }
@@ -289,7 +348,7 @@ func (t *Table[T]) Insert() *StateInsert[T] {
 
 func (t *Table[T]) InsertContext(ctx context.Context) *StateInsert[T] {
 	s := NewStateWhere(ctx)
-	s.builder.Type = enum.InsertQuery
+	s.builder.Type = model.InsertQuery
 	return &StateInsert[T]{table: t, StateWhere: s}
 }
 
@@ -314,7 +373,7 @@ func (t *Table[T]) UpdateContext(ctx context.Context) *StateUpdate[T] {
 	var s *StateWhere
 	if s = t.State; s == nil {
 		s = NewStateWhere(ctx)
-		s.builder.Type = enum.UpdateQuery
+		s.builder.Type = model.UpdateQuery
 	}
 	return &StateUpdate[T]{table: t, StateWhere: s}
 }

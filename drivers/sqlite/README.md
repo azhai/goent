@@ -1,5 +1,5 @@
 # SQLite
-This is a no CGO sqlite driver for GOE ORM based on https://pkg.go.dev/modernc.org/sqlite.
+This is a no CGO sqlite driver for Goent ORM based on https://pkg.go.dev/modernc.org/sqlite.
 
 ## Features
 

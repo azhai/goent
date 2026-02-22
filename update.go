@@ -1,7 +1,6 @@
 package goent
 
 import (
-	"github.com/azhai/goent/enum"
 	"github.com/azhai/goent/model"
 )
 
@@ -45,6 +44,11 @@ func (s *StateUpdate[T]) Filter(args ...Condition) *StateUpdate[T] {
 	return s
 }
 
+func (s *StateUpdate[T]) Where(where string, args ...any) *StateUpdate[T] {
+	s.StateWhere = s.StateWhere.Where(where, args...)
+	return s
+}
+
 func (s *StateUpdate[T]) Match(obj T) *StateUpdate[T] {
 	s.StateWhere = MatchWhere(s.StateWhere, s.table, obj)
 	return s
@@ -59,8 +63,8 @@ func (s *StateUpdate[T]) Take(i int) *StateUpdate[T] {
 }
 
 // Join joins another table with a condition
-func (s *StateUpdate[T]) Join(joinType enum.JoinType, info TableInfo, on Condition) *StateUpdate[T] {
-	s.builder.Type = enum.UpdateJoinQuery
+func (s *StateUpdate[T]) Join(joinType model.JoinType, info TableInfo, on Condition) *StateUpdate[T] {
+	s.builder.Type = model.UpdateJoinQuery
 	s.builder.Joins = append(s.builder.Joins, &JoinTable{
 		JoinType: joinType, Table: info.Table(), On: Condition{},
 	})
@@ -70,5 +74,5 @@ func (s *StateUpdate[T]) Join(joinType enum.JoinType, info TableInfo, on Conditi
 // LeftJoin joins another table with a condition on left table
 func (s *StateUpdate[T]) LeftJoin(fkey string, refer *Field) *StateUpdate[T] {
 	info := GetTableInfo(refer.TableAddr)
-	return s.Join(enum.LeftJoin, *info, EqualsField(s.table.Field(fkey), refer))
+	return s.Join(model.LeftJoin, *info, EqualsField(s.table.Field(fkey), refer))
 }

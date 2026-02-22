@@ -124,7 +124,7 @@ func main() {
 		panic(err)
 	}
 
-	addForeignKeys(db)
+	// addForeignKeys(db)
 
 	if err = seedData(db); err != nil {
 		panic(err)
@@ -140,10 +140,15 @@ func main() {
 		fmt.Println(err)
 	}
 	if order != nil {
-		if order.ID > 0 /*&& order.Total == 0.0*/ {
-			order.Total, err = CalcTotalPrice3(db, order)
+		if order.ID > 0 && order.Total == 0.0 {
+			order.Total, err = CalcTotalPrice2(db, order)
 		}
-		fmt.Printf("\n%+v\n\n%#v\n\n%#v\n", order, db.Order.Cache, db.Order.TableInfo)
+		// fmt.Printf("\n\nOrder:\n\n%+v\n\n%#v\n\n%#v\n", order, db.Order.Cache, db.Order.TableInfo)
+	}
+
+	products, _ := ListAllProducts(db)
+	if len(products) > 0 {
+		fmt.Printf("%+v\n", products[0])
 	}
 }
 
@@ -296,14 +301,14 @@ func CalcTotalPrice(db *Database, order *Order) (float64, error) {
 	}
 
 	var total float64
-	for i := range order.Details {
-		product := productMap[order.Details[i].ProductID]
+	for _, detail := range order.Details {
+		product := productMap[detail.ProductID]
 		if product == nil {
 			return total, err
 		}
-		order.Details[i].Price = product.Price
-		total += order.Details[i].Price * float64(order.Details[i].Quantity)
-		err = db.OrderDetail.Save().One(order.Details[i])
+		detail.Price = product.Price
+		total += detail.Price * float64(detail.Quantity)
+		err = db.OrderDetail.Save().One(detail)
 		if err != nil {
 			return total, err
 		}
@@ -322,6 +327,9 @@ func CalcTotalPrice2(db *Database, order *Order) (float64, error) {
 	filter := goent.Equals(db.OrderDetail.Field("order_id"), order.ID)
 	query := db.OrderDetail.Select().OrderBy("product_id").Filter(filter)
 	order.Details, err = query.LeftJoin("product_id", db.Product.Field("id")).All()
+	if err != nil {
+		return 0.0, err
+	}
 
 	var total float64
 	for _, detail := range order.Details {
@@ -362,4 +370,31 @@ func CalcTotalPrice3(db *Database, order *Order) (float64, error) {
 
 	err = db.Order.Save().Map(goent.Dict{"id": order.ID, "total": total})
 	return total, err
+}
+
+func ListAllProducts(db *Database) ([]*Product, error) {
+	filter := goent.LessEquals(db.Product.Field("price"), 100)
+	products, err := db.Product.Select().Filter(filter).All()
+	if err != nil {
+		return nil, err
+	}
+
+	_ = goent.QueryForeign(db.Product, db.Category)
+	_ = goent.QueryForeign(db.Order, db.OrderDetail)
+	_ = goent.QueryForeign(db.Order, db.Product)
+	_ = goent.QueryForeign(db.OrderDetail, db.Product)
+
+	// var cateIds []int64
+	// for _, p := range products {
+	// 	cateIds = append(cateIds, p.CategoryID)
+	// }
+	// filter := goent.In(db.Product.Field("id"), cateIds)
+	// _, err = db.Category.Select().Filter(filter).All()
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	fmt.Printf("\nCategory:\n%+v\n", db.Category.Cache)
+	fmt.Printf("\nProduct:\n%+v\n", db.Product.Cache)
+	return products, nil
 }

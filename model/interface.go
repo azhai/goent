@@ -3,8 +3,6 @@ package model
 import (
 	"context"
 	"database/sql"
-
-	"github.com/azhai/goent/enum"
 )
 
 type Driver interface {
@@ -61,27 +59,4 @@ type Rows interface {
 
 type Row interface {
 	Scan(dest ...any) error
-}
-
-type Joins interface {
-	FirstArg() any
-	Join() enum.JoinType
-	SecondArg() any
-}
-
-type Aggregate interface {
-	Aggregate() enum.AggregateType
-}
-
-type FunctionType interface {
-	GetType() enum.FunctionType
-}
-
-type ValueOperation interface {
-	GetValue() any
-}
-
-type Attributer interface {
-	Attribute(Body) Attribute
-	GetField() any
 }

@@ -19,14 +19,22 @@ func NewHandler(ctx context.Context, conn model.Connection, cfg *model.DatabaseC
 	return &Handler{ctx: ctx, conn: conn, cfg: cfg}
 }
 
+func (h *Handler) InfoHandler(query model.Query) {
+	h.cfg.InfoHandler(h.ctx, query)
+}
+
+func (h *Handler) ErrHandler(query model.Query) error {
+	return h.cfg.ErrorQueryHandler(h.ctx, query)
+}
+
 func (h *Handler) ExecuteNoReturn(query model.Query) error {
 	startTime := time.Now()
 	query.Err = h.conn.ExecContext(h.ctx, &query)
 	query.QueryDuration = time.Since(startTime)
 	if query.Err != nil {
-		return h.cfg.ErrorQueryHandler(h.ctx, query)
+		return h.ErrHandler(query)
 	}
-	h.cfg.InfoHandler(h.ctx, query)
+	h.InfoHandler(query)
 	return nil
 }
 
@@ -38,9 +46,9 @@ func (h *Handler) ExecuteReturning(query model.Query, valueOf reflect.Value, ret
 	fieldOf := valueOf.Field(returnFid)
 	query.Err = row.Scan(fieldOf.Addr().Interface())
 	if query.Err != nil {
-		return h.cfg.ErrorQueryHandler(h.ctx, query)
+		return h.ErrHandler(query)
 	}
-	h.cfg.InfoHandler(h.ctx, query)
+	h.InfoHandler(query)
 	return nil
 }
 
@@ -50,10 +58,10 @@ func (h *Handler) BatchReturning(query model.Query, valueOf reflect.Value, retur
 	rows, query.Err = h.conn.QueryContext(h.ctx, &query)
 	query.QueryDuration = time.Since(startTime)
 	if query.Err != nil {
-		return h.cfg.ErrorQueryHandler(h.ctx, query)
+		return h.ErrHandler(query)
 	}
 	defer rows.Close()
-	h.cfg.InfoHandler(h.ctx, query)
+	h.InfoHandler(query)
 
 	i := 0
 	for rows.Next() {
@@ -61,7 +69,7 @@ func (h *Handler) BatchReturning(query model.Query, valueOf reflect.Value, retur
 		query.Err = rows.Scan(fieldOf.Addr().Interface())
 		if query.Err != nil {
 			// TODO: add infos about row
-			return h.cfg.ErrorQueryHandler(h.ctx, query)
+			return h.ErrHandler(query)
 		}
 		i++
 	}
@@ -74,15 +82,49 @@ func (h *Handler) QueryResult(query model.Query) (model.Rows, error) {
 	rows, query.Err = h.conn.QueryContext(h.ctx, &query)
 	query.QueryDuration = time.Since(startTime)
 	if query.Err != nil {
-		err := h.cfg.ErrorQueryHandler(h.ctx, query)
+		err := h.ErrHandler(query)
 		return rows, err
 	}
-	h.cfg.InfoHandler(h.ctx, query)
+	h.InfoHandler(query)
 	return rows, nil
 }
 
-func FetchResult[R any](hd *Handler, query model.Query, to FetchFunc) iter.Seq2[*R, error] {
-	rows, err := hd.QueryResult(query)
+type FetchFunc func(target any) []any
+type FetchCreator func(TableInfo, []*Field, *Foreign) FetchFunc
+
+type Fetcher[R any] struct {
+	NewTarget func() *R
+	FetchTo   FetchFunc
+	*Handler
+}
+
+func NewFetcher[R any](hd *Handler, newTarget func() *R) *Fetcher[R] {
+	fet := &Fetcher[R]{Handler: hd, NewTarget: newTarget}
+	if fet.NewTarget == nil {
+		fet.NewTarget = func() *R { return new(R) }
+	}
+	return fet
+}
+
+func (f *Fetcher[R]) FetchRows(rows model.Rows, err error, limit int) ([]*R, error) {
+	if err != nil {
+		return nil, err
+	}
+	objs := make([]*R, 0, limit)
+	defer rows.Close()
+	for rows.Next() {
+		target := f.NewTarget()
+		err = rows.Scan(f.FetchTo(target)...)
+		if err != nil {
+			return nil, err
+		}
+		objs = append(objs, target)
+	}
+	return objs, nil
+}
+
+func (f *Fetcher[R]) FetchResult(query model.Query) iter.Seq2[*R, error] {
+	rows, err := f.QueryResult(query)
 	if err != nil {
 		return func(yield func(*R, error) bool) {
 			yield(nil, err)
@@ -92,12 +134,10 @@ func FetchResult[R any](hd *Handler, query model.Query, to FetchFunc) iter.Seq2[
 	return func(yield func(*R, error) bool) {
 		defer rows.Close()
 		for rows.Next() {
-			target := new(R)
-			dest := to(target)
-			query.Err = rows.Scan(dest...)
+			target := f.NewTarget()
+			query.Err = rows.Scan(f.FetchTo(target)...)
 			if query.Err != nil {
-				err = hd.cfg.ErrorQueryHandler(hd.ctx, query)
-				yield(target, err)
+				yield(target, f.ErrHandler(query))
 				return
 			}
 			if !yield(target, nil) {
@@ -107,8 +147,42 @@ func FetchResult[R any](hd *Handler, query model.Query, to FetchFunc) iter.Seq2[
 	}
 }
 
+func CreateFetchOne(tblInfo TableInfo, fields []*Field, foreign *Foreign) FetchFunc {
+	return func(target any) []any {
+		valueOf := reflect.ValueOf(target).Elem()
+		return []any{valueOf.Field(0).Addr().Interface()}
+	}
+}
+
+func CreateFetchFunc(tblInfo TableInfo, fields []*Field, foreign *Foreign) FetchFunc {
+	return func(target any) []any {
+		valueOf := reflect.ValueOf(target).Elem()
+		if len(fields) > 0 && fields[0].Function != "" {
+			return FlattenDest(valueOf)
+		}
+		if len(fields) > 0 {
+			return AppendDestFields(valueOf, fields, foreign)
+		}
+		dest := AppendDestTable(tblInfo, valueOf)
+		if foreign != nil {
+			dest = append(dest, CreateForeignDest(valueOf, foreign)...)
+		}
+		return dest
+	}
+}
+
+func CreateForeignDest(valueOf reflect.Value, foreign *Foreign) []any {
+	frnInfo := GetTableInfo(foreign.Reference.TableAddr)
+	if typeOf, ok := valueOf.Type().FieldByName(foreign.MountField); ok {
+		fieldOf := reflect.New(typeOf.Type.Elem())
+		valueOf.FieldByName(foreign.MountField).Set(fieldOf)
+		return AppendDestTable(*frnInfo, fieldOf.Elem())
+	}
+	return nil
+}
+
 // AppendDestFields returns a slice of pointers to the fields of a struct
-func AppendDestFields(fields []*Field, valueOf reflect.Value, foreign *Foreign) []any {
+func AppendDestFields(valueOf reflect.Value, fields []*Field, foreign *Foreign) []any {
 	var dest []any
 	for _, fld := range fields {
 		if fld.ColumnName == "*" {

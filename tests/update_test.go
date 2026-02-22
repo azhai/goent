@@ -433,7 +433,7 @@ func TestUpdate(t *testing.T) {
 				}](&db.JobTitle.Name, &db.Person.Name).OnTransaction(tx).
 					Join(&db.Person.Id, &db.PersonJobTitle.PersonId).
 					Join(&db.JobTitle.Id, &db.PersonJobTitle.JobTitleId).
-					Where(where.Equals(&db.JobTitle.Id, jobs[0].Id)).Rows() {
+					Where(where.Equals(&db.JobTitle.Id, jobs[0].Id)).IterRows() {
 
 					if err != nil {
 						t.Fatalf("Expected a select, got error: %v", err)
@@ -464,7 +464,7 @@ func TestUpdate(t *testing.T) {
 				}](&db.JobTitle.Name, &db.Person.Name).OnTransaction(tx).
 					Join(&db.Person.Id, &db.PersonJobTitle.PersonId).
 					Join(&db.JobTitle.Id, &db.PersonJobTitle.JobTitleId).
-					Where(where.Equals(&db.JobTitle.Id, jobs[0].Id)).Rows() {
+					Where(where.Equals(&db.JobTitle.Id, jobs[0].Id)).IterRows() {
 
 					if err != nil {
 						t.Fatalf("Expected a select, got error: %v", err)
@@ -488,7 +488,7 @@ func TestUpdate(t *testing.T) {
 				}](&db.JobTitle.Name, &db.Person.Name).
 					Join(&db.Person.Id, &db.PersonJobTitle.PersonId).
 					Join(&db.JobTitle.Id, &db.PersonJobTitle.JobTitleId).
-					Where(where.Equals(&db.JobTitle.Id, jobs[0].Id)).Rows() {
+					Where(where.Equals(&db.JobTitle.Id, jobs[0].Id)).IterRows() {
 
 					if err != nil {
 						t.Fatalf("Expected a select, got error: %v", err)
@@ -638,7 +638,7 @@ func TestUpdate(t *testing.T) {
 				}](&db.JobTitle.Name, &db.Person.Name).
 					Join(&db.Person.Id, &db.PersonJobTitle.PersonId).
 					Join(&db.JobTitle.Id, &db.PersonJobTitle.JobTitleId).
-					Where(where.Equals(&db.JobTitle.Id, jobs[0].Id)).Rows() {
+					Where(where.Equals(&db.JobTitle.Id, jobs[0].Id)).IterRows() {
 
 					if err != nil {
 						t.Fatalf("Expected a select, got error: %v", err)
@@ -663,7 +663,7 @@ func TestUpdate(t *testing.T) {
 				}](&db.JobTitle.Name, &db.Person.Name).
 					Join(&db.Person.Id, &db.PersonJobTitle.PersonId).
 					Join(&db.JobTitle.Id, &db.PersonJobTitle.JobTitleId).
-					Where(where.Equals(&db.JobTitle.Id, jobs[0].Id)).Rows() {
+					Where(where.Equals(&db.JobTitle.Id, jobs[0].Id)).IterRows() {
 
 					if err != nil {
 						t.Fatalf("Expected a select, got error: %v", err)

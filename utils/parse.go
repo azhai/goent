@@ -4,7 +4,21 @@ import (
 	"reflect"
 	"strings"
 	"unicode"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
+
+func TitleCase(word string) string {
+	caser := cases.Title(language.Und)
+	return caser.String(word)
+	// if word == "" {
+	// 	return ""
+	// }
+	// runes := []rune(word)
+	// runes[0] = unicode.ToTitle(runes[0])
+	// return string(runes)
+}
 
 // ParseTableNameByValue parse table name by value
 func ParseTableNameByValue(valueOf reflect.Value) string {

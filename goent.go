@@ -2,8 +2,6 @@ package goent
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -35,11 +33,11 @@ func Open[T any](drv model.Driver, logFile string) (*T, error) {
 	ent := new(T)
 	valueOf := reflect.ValueOf(ent).Elem()
 	if valueOf.Kind() != reflect.Struct {
-		return nil, errors.New("goent: invalid database, the target needs to be a struct")
+		return nil, ErrInvalidDatabase
 	}
 	dbId := valueOf.NumField() - 1
 	if valueOf.Field(dbId).Type().Elem().Name() != "DB" {
-		return nil, errors.New("goent: invalid database, last struct field needs to be goent.DB")
+		return nil, ErrInvalidDBField
 	}
 
 	db, schemas := new(DB), make([]string, 0)
@@ -91,14 +89,47 @@ func travelSchemas(db *DB, dbId int, valueOf reflect.Value) ([]string, error) {
 		}
 	}
 
-	// init fields
-	// for i := range tableId {
-	// 	schema := schemaMap[i]
-	// 	err := InitField(db, &schema, i, valueOf, models[i])
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-	// }
+	for _, info := range tableRegistry {
+		for fkName, foreign := range info.Foreigns {
+			if foreign.Reference != nil {
+				continue
+			}
+			var refTableName string
+			switch foreign.Type {
+			case M2O, O2O:
+				if _, ok := info.Columns[fkName]; !ok {
+					continue
+				}
+				refTableName = strings.TrimSuffix(fkName, "_id")
+			case O2M:
+				refTableName = strings.TrimSuffix(foreign.ForeignKey, "_id")
+			case M2M:
+				if foreign.Middle == nil {
+					continue
+				}
+				refTableName = strings.TrimSuffix(foreign.Middle.Right, "_id")
+			}
+			for otherAddr, otherInfo := range tableRegistry {
+				if otherAddr == info.TableAddr {
+					continue
+				}
+				if strings.EqualFold(otherInfo.TableName, refTableName) ||
+					strings.EqualFold(otherInfo.FieldName, refTableName) {
+					foreign.Reference = &Field{
+						TableAddr:  otherAddr,
+						ColumnName: "id",
+					}
+					for _, pk := range otherInfo.PrimaryKeys {
+						if pk.IsAutoIncr {
+							foreign.Reference.FieldId = pk.FieldId
+							break
+						}
+					}
+					break
+				}
+			}
+		}
+	}
 
 	return schemas, nil
 }
@@ -270,7 +301,7 @@ func getPk(db *DB, schema *string, valueOf reflect.Value, tableId int, driver mo
 		}
 	}
 	if len(fields) == 0 {
-		return nil, nil, fmt.Errorf("goent: getPk() struct %q don't have a primary key setted", typeOf.Name())
+		return nil, nil, NewNoPrimaryKeyError(typeOf.Name())
 	}
 
 	table := utils.ParseTableNameByValue(valueOf)
@@ -293,8 +324,7 @@ func createPk(db *DB, schema *string, table string, attributeName string, autoIn
 
 func fieldsByTags(tag string, typeOf reflect.Type) []reflect.StructField {
 	var fields []reflect.StructField
-	for i := 0; i < typeOf.NumField(); i++ {
-		field := typeOf.Field(i)
+	for field := range typeOf.Fields() {
 		if utils.HasTagValue(field.Tag.Get("goe"), tag) {
 			fields = append(fields, field)
 		}
@@ -417,9 +447,6 @@ func helperAttribute(b body) error {
 	}
 	switch v := rel.(type) {
 	case ManyToSomeRelation:
-		// if addrMap.get(b.mapp.addr) == nil {
-		// 	addrMap.set(b.mapp.addr, v)
-		// }
 		for i := range b.mapp.pks {
 			if !b.nullable && b.mapp.pks[i].fieldId == v.fieldId {
 				b.mapp.pks[i].autoIncrement = false
@@ -428,9 +455,6 @@ func helperAttribute(b body) error {
 	case OneToSomeRelation:
 		goeTag := fieldAtt.Tag.Get("goe")
 		v.IsOneToMany = utils.HasTagValue(goeTag, "o2m")
-		// if addrMap.get(b.mapp.addr) == nil {
-		// 	addrMap.set(b.mapp.addr, v)
-		// }
 	}
 	return nil
 }

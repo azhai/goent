@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/azhai/goent/enum"
 	"github.com/azhai/goent/model"
 )
 
@@ -23,7 +22,7 @@ type Dict = map[string]any
 
 // JoinTable represents a JOIN clause with the join type, target table, and ON condition.
 type JoinTable struct {
-	JoinType enum.JoinType
+	JoinType model.JoinType
 	Table    *model.Table
 	On       Condition
 }
@@ -50,7 +49,7 @@ type Group struct {
 type Builder struct {
 	argNo     int
 	holders   []string
-	Type      enum.QueryType
+	Type      model.QueryType
 	Table     *model.Table
 	Joins     []*JoinTable
 	Changes   map[*Field]any
@@ -114,7 +113,7 @@ func (b *Builder) BuildHead() []any {
 		b.WriteString("SELECT ")
 		if len(b.Selects) == 0 {
 			b.WriteString("*")
-		} else if b.Type == enum.SelectJoinQuery {
+		} else if b.Type == model.SelectJoinQuery {
 			b.WriteString(b.Selects[0].String())
 			for _, f := range b.Selects[1:] {
 				b.WriteByte(',')
@@ -131,7 +130,7 @@ func (b *Builder) BuildHead() []any {
 		if b.Table != nil {
 			b.WriteString(b.Table.String())
 		}
-	case enum.InsertQuery:
+	case model.InsertQuery:
 		b.WriteString("INSERT INTO ")
 		if b.Table != nil {
 			b.WriteString(b.Table.String())
@@ -145,7 +144,7 @@ func (b *Builder) BuildHead() []any {
 			columns = append(columns, f.Simple())
 		}
 		b.WriteString(strings.Join(columns, ", "))
-	case enum.InsertAllQuery:
+	case model.InsertAllQuery:
 		b.WriteString("INSERT INTO ")
 		if b.Table != nil {
 			b.WriteString(b.Table.String())
@@ -157,12 +156,12 @@ func (b *Builder) BuildHead() []any {
 			columns[v.(int)] = f.ColumnName
 		}
 		b.WriteString(strings.Join(columns, ", "))
-	case enum.UpdateQuery, enum.UpdateJoinQuery:
+	case model.UpdateQuery, model.UpdateJoinQuery:
 		b.WriteString("UPDATE ")
 		if b.Table != nil {
 			b.WriteString(b.Table.String())
 		}
-	case enum.DeleteQuery:
+	case model.DeleteQuery:
 		b.WriteString("DELETE FROM ")
 		if b.Table != nil {
 			b.WriteString(b.Table.String())
@@ -177,11 +176,11 @@ func (b *Builder) BuildDoing() []any {
 	switch b.Type {
 	default:
 		return args
-	case enum.InsertQuery:
+	case model.InsertQuery:
 		b.WriteString(") VALUES (")
 		b.WriteString(strings.Join(b.holders, ", "))
 		b.WriteByte(')')
-	case enum.InsertAllQuery:
+	case model.InsertAllQuery:
 		size, last := len(b.Changes), len(b.MoreRows)-1
 		b.WriteString(") VALUES (")
 		for i, row := range b.MoreRows {
@@ -197,7 +196,7 @@ func (b *Builder) BuildDoing() []any {
 			}
 		}
 		b.WriteByte(')')
-	case enum.UpdateQuery:
+	case model.UpdateQuery:
 		b.WriteString(" SET ")
 		for f, v := range b.Changes {
 			b.argNo += 1
@@ -207,7 +206,7 @@ func (b *Builder) BuildDoing() []any {
 			b.WriteString(f.Simple() + "=$" + strconv.Itoa(b.argNo))
 			args = append(args, v)
 		}
-	case enum.UpdateJoinQuery:
+	case model.UpdateJoinQuery:
 		b.WriteString(" SET ")
 		isFirst := true
 		for f, v := range b.Changes {
@@ -231,7 +230,7 @@ func (b *Builder) BuildDoing() []any {
 func (b *Builder) BuildTail() []any {
 	var args []any
 
-	if b.Type == enum.SelectQuery {
+	if b.Type == model.SelectQuery {
 		if len(b.Groups) != 0 {
 			b.WriteString(" ")
 			gp := b.Groups[0]
@@ -266,7 +265,7 @@ func (b *Builder) BuildTail() []any {
 		}
 	}
 
-	if b.Returning != "" && b.Type == enum.InsertQuery {
+	if b.Returning != "" && b.Type == model.InsertQuery {
 		b.WriteString(" RETURNING ")
 		b.WriteString(b.Returning)
 	}
@@ -289,7 +288,7 @@ func (b *Builder) BuildWhere() []any {
 		if idx+1 < len(template) && template[idx:idx+2] == "%s" {
 			if fi < len(b.Where.Fields) {
 				fld := b.Where.Fields[fi]
-				if b.Type == enum.SelectJoinQuery || b.Type == enum.UpdateJoinQuery {
+				if b.Type == model.SelectJoinQuery || b.Type == model.UpdateJoinQuery {
 					b.WriteString(fld.String())
 				} else {
 					b.WriteString(fld.Simple())
@@ -333,7 +332,7 @@ func (b *Builder) BuildJoins() []any {
 	if len(b.Joins) == 0 {
 		return nil
 	}
-	if b.Type == enum.UpdateJoinQuery {
+	if b.Type == model.UpdateJoinQuery {
 		b.WriteString(" FROM ")
 		b.WriteString(b.Joins[0].Table.String())
 		return nil

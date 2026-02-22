@@ -4,7 +4,6 @@ import (
 	"context"
 	"reflect"
 
-	"github.com/azhai/goent/enum"
 	"github.com/azhai/goent/model"
 )
 
@@ -53,14 +52,12 @@ func (s *StateWhere) Filter(conds ...Condition) *StateWhere {
 }
 
 func (s *StateWhere) Where(where string, args ...any) *StateWhere {
-	cond := Condition{Template: where, Values: make([]*Value, len(args))}
-	for i, arg := range args {
-		cond.Values[i] = NewValue(arg)
-	}
+	cond := Expr(where, args...)
 	if !s.builder.Where.IsEmpty() {
 		cond = And(s.builder.Where, cond)
+	} else {
+		s.builder.Where = cond
 	}
-	s.builder.Where = cond
 	return s
 }
 
@@ -89,7 +86,7 @@ func (s *StateDelete[T]) Match(obj T) *StateDelete[T] {
 }
 
 func (s *StateDelete[T]) Exec() error {
-	s.builder.Type = enum.DeleteQuery
+	s.builder.Type = model.DeleteQuery
 	s.builder.SetTable(s.table.TableInfo)
 	qr := model.CreateQuery(s.builder.Build(true))
 	hd := s.Prepare(s.table.db.driver)
@@ -103,5 +100,10 @@ func (s *StateDelete[T]) OnTransaction(tx model.Transaction) *StateDelete[T] {
 
 func (s *StateDelete[T]) Filter(args ...Condition) *StateDelete[T] {
 	s.StateWhere = s.StateWhere.Filter(args...)
+	return s
+}
+
+func (s *StateDelete[T]) Where(where string, args ...any) *StateDelete[T] {
+	s.StateWhere = s.StateWhere.Where(where, args...)
 	return s
 }

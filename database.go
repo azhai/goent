@@ -11,9 +11,9 @@ import (
 )
 
 var (
-	// addrMap       = &goeMap{mapField: make(map[uintptr]field)}
 	schemaRegistry = make(map[string]*string)
 	tableRegistry  = make(map[uintptr]*TableInfo)
+	tableRegLock   sync.RWMutex
 )
 
 // GetTableInfo returns the table info for a given table address.
@@ -21,6 +21,8 @@ func GetTableInfo(addr uintptr) *TableInfo {
 	if addr == 0 {
 		return nil
 	}
+	tableRegLock.RLock()
+	defer tableRegLock.RUnlock()
 	if info, ok := tableRegistry[addr]; ok {
 		return info
 	}
@@ -30,9 +32,7 @@ func GetTableInfo(addr uintptr) *TableInfo {
 // GetTableColumn returns the column info for a given table address and column name.
 func GetTableColumn(addr uintptr, name string) *Column {
 	if info := GetTableInfo(addr); info != nil {
-		if col, ok := info.Columns[name]; ok {
-			return col
-		}
+		return info.ColumnInfo(name)
 	}
 	return nil
 }
@@ -48,30 +48,7 @@ func GetFieldName(addr uintptr, name string) (string, error) {
 			return fmt.Sprintf("%s.%s", info.String(), name), nil
 		}
 	}
-	return "", fmt.Errorf("field %s or table not found", name)
-}
-
-type goeMap struct {
-	mu       sync.Mutex
-	mapField map[uintptr]field
-}
-
-func (am *goeMap) get(key uintptr) field {
-	am.mu.Lock()
-	defer am.mu.Unlock()
-	return am.mapField[key]
-}
-
-func (am *goeMap) set(key uintptr, value field) {
-	am.mu.Lock()
-	defer am.mu.Unlock()
-	am.mapField[key] = value
-}
-
-func (am *goeMap) delete(key uintptr) {
-	am.mu.Lock()
-	defer am.mu.Unlock()
-	delete(am.mapField, key)
+	return "", NewFieldNotFoundError(name)
 }
 
 // DB represents a database connection with its driver.
@@ -79,21 +56,33 @@ type DB struct {
 	driver model.Driver
 }
 
-// SetDriver Sets the database driver.
+// SetDriver sets the database driver.
 func (db *DB) SetDriver(driver model.Driver) {
 	db.driver = driver
 }
 
-// Name Get the database name; SQLite, PostgreSQL...
+// Name returns the database name (SQLite, PostgreSQL, etc.).
 func (db *DB) Name() string {
 	return db.driver.Name()
 }
 
-// Stats Return the database stats as [sql.DBStats].
+// Stats returns the database stats as [sql.DBStats].
 func (db *DB) Stats() sql.DBStats {
 	return db.driver.Stats()
 }
 
+// RawQueryContext executes a raw SQL query and returns rows.
+//
+// Example:
+//
+//	rows, err := db.RawQueryContext(ctx, "SELECT * FROM users WHERE id = ?", 1)
+//	if err != nil {
+//		return err
+//	}
+//	defer rows.Close()
+//	for rows.Next() {
+//		// scan rows
+//	}
 func (db *DB) RawQueryContext(ctx context.Context, rawSql string, args ...any) (model.Rows, error) {
 	conn := db.driver.NewConnection()
 	cfg := db.driver.GetDatabaseConfig()
@@ -102,6 +91,11 @@ func (db *DB) RawQueryContext(ctx context.Context, rawSql string, args ...any) (
 	return hd.QueryResult(qr)
 }
 
+// RawExecContext executes a raw SQL statement without returning rows.
+//
+// Example:
+//
+//	err := db.RawExecContext(ctx, "UPDATE users SET name = ? WHERE id = ?", "John", 1)
 func (db *DB) RawExecContext(ctx context.Context, rawSql string, args ...any) error {
 	conn := db.driver.NewConnection()
 	cfg := db.driver.GetDatabaseConfig()
@@ -113,11 +107,12 @@ func (db *DB) RawExecContext(ctx context.Context, rawSql string, args ...any) er
 // NewTransaction creates a new Transaction on the database using the default level.
 //
 // NewTransaction uses [context.Background] internally;
-// to specify the context and the isolation level, use [NewTransactionContext]
+// to specify the context and the isolation level, use [NewTransactionContext].
 func (db *DB) NewTransaction() (model.Transaction, error) {
 	return db.NewTransactionContext(context.Background(), sql.LevelDefault)
 }
 
+// NewTransactionContext creates a new Transaction with the specified context and isolation level.
 func (db *DB) NewTransactionContext(ctx context.Context, isolation sql.IsolationLevel) (model.Transaction, error) {
 	t, err := db.driver.NewTransaction(ctx, &sql.TxOptions{Isolation: isolation})
 	if err != nil {
@@ -127,61 +122,47 @@ func (db *DB) NewTransactionContext(ctx context.Context, isolation sql.Isolation
 	return t, nil
 }
 
-// BeginTransaction Begin a Transaction with the database default level, any panic or error will trigger a rollback.
+// BeginTransaction begins a Transaction with the database default level.
+// Any panic or error will trigger a rollback.
 //
 // BeginTransaction uses [context.Background] internally;
-// to specify the context and the isolation level, use [BeginTransactionContext]
+// to specify the context and the isolation level, use [BeginTransactionContext].
 //
-// # Example
+// Example:
 //
 //	err = db.BeginTransaction(func(tx goent.Transaction) error {
-//		cat := Animal{
-//			Name: "Cat",
-//		}
-//		if err = goent.Insert(db.Animal).OnTransaction(tx).One(&cat); err != nil {
-//			return err // try a rollback
+//		cat := &Animal{Name: "Cat"}
+//		if err = goent.Insert(db.Animal).OnTransaction(tx).One(cat); err != nil {
+//			return err // triggers rollback
 //		}
 //
-//		dog := Animal{
-//			Name: "Dog",
+//		dog := &Animal{Name: "Dog"}
+//		if err = goent.Insert(db.Animal).OnTransaction(tx).One(dog); err != nil {
+//			return err // triggers rollback
 //		}
-//		if err = goent.Insert(db.Animal).OnTransaction(tx).One(&dog); err != nil {
-//			return err // try a rollback
-//		}
-//		return nil // try a commit
+//		return nil // commits transaction
 //	})
-//
-//	if err != nil {
-//		//begin transaction error...
-//	}
 func (db *DB) BeginTransaction(txFunc func(Transaction) error) error {
 	return db.BeginTransactionContext(context.Background(), sql.LevelDefault, txFunc)
 }
 
-// BeginTransactionContext Begin a Transaction, any panic or error will trigger a rollback.
+// BeginTransactionContext begins a Transaction with the specified context and isolation level.
+// Any panic or error will trigger a rollback.
 //
-// # Example
+// Example:
 //
 //	err = db.BeginTransactionContext(context.Background(), sql.LevelSerializable, func(tx goent.Transaction) error {
-//		cat := Animal{
-//			Name: "Cat",
-//		}
-//		if err = goent.Insert(db.Animal).OnTransaction(tx).One(&cat); err != nil {
-//			return err // try a rollback
+//		cat := &Animal{Name: "Cat"}
+//		if err = goent.Insert(db.Animal).OnTransaction(tx).One(cat); err != nil {
+//			return err // triggers rollback
 //		}
 //
-//		dog := Animal{
-//			Name: "Dog",
+//		dog := &Animal{Name: "Dog"}
+//		if err = goent.Insert(db.Animal).OnTransaction(tx).One(dog); err != nil {
+//			return err // triggers rollback
 //		}
-//		if err = goent.Insert(db.Animal).OnTransaction(tx).One(&dog); err != nil {
-//			return err // try a rollback
-//		}
-//		return nil // try a commit
+//		return nil // commits transaction
 //	})
-//
-//	if err != nil {
-//		//begin transaction error...
-//	}
 func (db *DB) BeginTransactionContext(ctx context.Context, isolation sql.IsolationLevel, txFunc func(Transaction) error) (err error) {
 	var t model.Transaction
 	if t, err = db.NewTransactionContext(ctx, isolation); err != nil {
@@ -211,21 +192,6 @@ func Close(ent any) error {
 	for _, table := range tableRegistry {
 		delete(tableRegistry, table.TableAddr)
 	}
-
-	// valueOf := reflect.ValueOf(ent).Elem()
-
-	// for i := range valueOf.NumField() - 1 {
-	// 	fieldOf := valueOf.Field(i)
-	// 	if fieldOf.Kind() == reflect.Ptr {
-	// 		if fieldOf.IsNil() {
-	// 			continue
-	// 		}
-	// 		fieldOf = fieldOf.Elem()
-	// 	}
-	// 	for fieldId := range fieldOf.NumField() {
-	// 		addrMap.delete(uintptr(fieldOf.Field(fieldId).Addr().UnsafePointer()))
-	// 	}
-	// }
 
 	return nil
 }

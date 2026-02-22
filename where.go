@@ -3,6 +3,7 @@ package goent
 import (
 	"fmt"
 	"reflect"
+	"strings"
 )
 
 // Field represents a database field with its table reference and column name.
@@ -85,6 +86,21 @@ func (c Condition) IsEmpty() bool {
 	return c.Template == ""
 }
 
+// Expr creates a condition with a custom template and associated values.
+func Expr(where string, args ...any) Condition {
+	var values []*Value
+	for _, arg := range args {
+		switch val := arg.(type) {
+		default:
+			values = append(values, NewValue(arg))
+		case *Value:
+			values = append(values, val)
+		}
+	}
+	where = strings.ReplaceAll(where, "?", "%s")
+	return Condition{Template: where, Values: values}
+}
+
 // And Example
 //
 //	goent.And(
@@ -99,7 +115,7 @@ func And(branches ...Condition) Condition {
 	} else if size == 1 {
 		return branches[0]
 	}
-	idx, res := 0, Condition{Template: "("}
+	idx, res := 0, Condition{Template: ""}
 	for _, cond := range branches {
 		if cond.IsEmpty() {
 			continue
@@ -112,7 +128,9 @@ func And(branches ...Condition) Condition {
 		res.Values = append(res.Values, cond.Values...)
 		idx += 1
 	}
-	res.Template += ")"
+	if idx >= 2 {
+		res.Template = fmt.Sprintf("(%s)", res.Template)
+	}
 	return res
 }
 
