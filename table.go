@@ -33,18 +33,34 @@ type TableInfo struct {
 	simpleTable bool
 }
 
+func getColumnTypeName(t reflect.Type) string {
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t.Kind() == reflect.Slice {
+		return "[]" + t.Elem().Kind().String()
+	}
+	if t.PkgPath() != "" {
+		return t.PkgPath() + "." + t.Name()
+	}
+	if t.Kind() == reflect.Array {
+		return fmt.Sprintf("[%d]%s", t.Len(), t.Elem().Kind().String())
+	}
+	return t.Kind().String()
+}
+
 func (t TableInfo) String() string {
 	return t.TableName
 	// return fmt.Sprintf("%s.%s", t.SchemaName, t.TableName)
 }
 
 func (t TableInfo) Table() *model.Table {
-	schemaName := t.SchemaName
-	if schemaName == "" {
-		schemaName = "public"
+	var schemaName *string
+	if t.SchemaName != "" {
+		schemaName = &t.SchemaName
 	}
 	return &model.Table{
-		Schema: &schemaName,
+		Schema: schemaName,
 		Name:   t.TableName,
 	}
 }
@@ -86,10 +102,10 @@ func (t TableInfo) GetPrimaryInfo() (int, string, []string) {
 	pkeys := make([]string, 0, len(t.PrimaryKeys))
 	for _, pkey := range t.PrimaryKeys {
 		pkeys = append(pkeys, pkey.ColumnName)
-		if pkey.Column.isAutoIncr {
-			pkFid = pkey.Column.FieldId
-			pkName = pkey.ColumnName
-		}
+	}
+	if len(t.PrimaryKeys) == 1 {
+		pkFid = t.PrimaryKeys[0].Column.FieldId
+		pkName = t.PrimaryKeys[0].ColumnName
 	}
 	sort.Strings(pkeys)
 	return pkFid, pkName, pkeys
@@ -103,6 +119,26 @@ type Table[T any] struct {
 	State *StateWhere
 	db    *DB
 	TableInfo
+}
+
+// GetSortedFields returns the table's columns sorted by FieldId for SELECT queries.
+func (t *Table[T]) GetSortedFields() []*Field {
+	columns := make([]*Column, 0, len(t.Columns))
+	for _, col := range t.Columns {
+		columns = append(columns, col)
+	}
+	sort.Slice(columns, func(i, j int) bool {
+		return columns[i].FieldId < columns[j].FieldId
+	})
+	fields := make([]*Field, len(columns))
+	for i, col := range columns {
+		fields[i] = &Field{
+			TableAddr:  t.TableAddr,
+			ColumnName: col.ColumnName,
+			FieldId:    col.FieldId,
+		}
+	}
+	return fields
 }
 
 // SimpleTable creates a new Table instance for a simple table without foreign keys.
@@ -154,7 +190,7 @@ func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schem
 		}
 
 		columnName := utils.ToSnakeCase(fieldOf.Name)
-		_, exists := utils.GetTagValue(geoTag, "default")
+		defaultValue, hasDefault := utils.GetTagValue(geoTag, "default")
 
 		if fieldKind == reflect.Slice {
 			if utils.HasTagValue(geoTag, "o2m") {
@@ -165,6 +201,7 @@ func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schem
 					ForeignKey: fkCol,
 					Reference:  nil,
 				}
+				continue
 			} else if utils.HasTagValue(geoTag, "m2m") {
 				middle, _ := utils.GetTagValue(geoTag, "middle")
 				leftCol, _ := utils.GetTagValue(geoTag, "left")
@@ -184,24 +221,28 @@ func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schem
 					Reference:  nil,
 					Middle:     middleInfo,
 				}
+				continue
 			}
-			continue
+			if fieldOf.Type.Elem().Kind() != reflect.Uint8 {
+				continue
+			}
 		}
 
 		column := &Column{
-			FieldName:  fieldOf.Name,
-			ColumnName: columnName,
-			ColumnType: fieldOf.Type.Kind().String(),
-			AllowNull:  fieldKind == reflect.Pointer,
-			HasDefault: exists,
-			FieldId:    i,
-			tableName:  tableName,
-			schemaName: &schema,
+			FieldName:    fieldOf.Name,
+			ColumnName:   columnName,
+			ColumnType:   getColumnTypeName(fieldOf.Type),
+			AllowNull:    fieldKind == reflect.Pointer,
+			HasDefault:   hasDefault,
+			DefaultValue: defaultValue,
+			FieldId:      i,
+			tableName:    tableName,
+			schemaName:   &schema,
 		}
 		info.Columns[columnName] = column
 
 		if strings.EqualFold(fieldOf.Name, "id") || utils.HasTagValue(geoTag, "pk") {
-			isAutoIncr := !utils.HasTagValue(geoTag, "not_incr")
+			isAutoIncr := !utils.HasTagValue(geoTag, "not_incr") && strings.Contains(fieldOf.Type.Kind().String(), "int")
 			column.isAutoIncr = isAutoIncr
 			info.PrimaryKeys = append(info.PrimaryKeys, &Index{
 				IsUnique:   true,

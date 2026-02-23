@@ -3,6 +3,7 @@ package goent
 import (
 	"reflect"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,9 +23,10 @@ type Dict = map[string]any
 
 // JoinTable represents a JOIN clause with the join type, target table, and ON condition.
 type JoinTable struct {
-	JoinType model.JoinType
-	Table    *model.Table
-	On       Condition
+	JoinType  model.JoinType
+	Table     *model.Table
+	tableName string
+	On        Condition
 }
 
 // Pair represents a key-value pair.
@@ -47,22 +49,24 @@ type Group struct {
 
 // Builder constructs SQL queries with support for SELECT, INSERT, UPDATE, and DELETE operations.
 type Builder struct {
-	argNo     int
-	holders   []string
-	Type      model.QueryType
-	Table     *model.Table
-	Joins     []*JoinTable
-	Changes   map[*Field]any
-	MoreRows  [][]any
-	Where     Condition
-	Selects   []*Field
-	Orders    []*Order
-	Groups    []*Group
-	Limit     int
-	Offset    int
-	Returning string
-	RollUp    string
-	ForUpdate bool
+	argNo         int
+	holders       []string
+	Type          model.QueryType
+	Table         *model.Table
+	tableName     string
+	Joins         []*JoinTable
+	Changes       map[*Field]any
+	MoreRows      [][]any
+	Where         Condition
+	Selects       []*Field
+	Orders        []*Order
+	Groups        []*Group
+	Limit         int
+	Offset        int
+	Returning     string
+	RollUp        string
+	ForUpdate     bool
+	sortedColumns []*Field
 	// Clause    *Builder
 	strings.Builder
 }
@@ -83,6 +87,7 @@ func (b *Builder) Reset() {
 	b.ResetForSave()
 	b.Type = 0
 	b.Table = nil
+	b.tableName = ""
 	b.Joins = nil
 	b.Where = Condition{}
 	b.Selects = nil
@@ -101,8 +106,13 @@ func (b *Builder) ResetForSave() {
 	b.Returning = ""
 }
 
-func (b *Builder) SetTable(table TableInfo) *Builder {
+func (b *Builder) SetTable(table TableInfo, driver model.Driver) *Builder {
 	b.Table = table.Table()
+	var schema string
+	if b.Table.Schema != nil {
+		schema = *b.Table.Schema
+	}
+	b.tableName = driver.FormatTableName(schema, b.Table.Name)
 	return b
 }
 
@@ -127,13 +137,13 @@ func (b *Builder) BuildHead() []any {
 			}
 		}
 		b.WriteString(" FROM ")
-		if b.Table != nil {
-			b.WriteString(b.Table.String())
+		if b.tableName != "" {
+			b.WriteString(b.tableName)
 		}
 	case model.InsertQuery:
 		b.WriteString("INSERT INTO ")
-		if b.Table != nil {
-			b.WriteString(b.Table.String())
+		if b.tableName != "" {
+			b.WriteString(b.tableName)
 		}
 		b.WriteByte('(')
 		var columns []string
@@ -146,25 +156,31 @@ func (b *Builder) BuildHead() []any {
 		b.WriteString(strings.Join(columns, ", "))
 	case model.InsertAllQuery:
 		b.WriteString("INSERT INTO ")
-		if b.Table != nil {
-			b.WriteString(b.Table.String())
+		if b.tableName != "" {
+			b.WriteString(b.tableName)
 		}
 		b.WriteByte('(')
-		size := len(b.Changes)
-		columns := make([]string, size)
-		for f, v := range b.Changes {
-			columns[v.(int)] = f.ColumnName
+		b.sortedColumns = make([]*Field, 0, len(b.Changes))
+		for f := range b.Changes {
+			b.sortedColumns = append(b.sortedColumns, f)
+		}
+		sort.Slice(b.sortedColumns, func(i, j int) bool {
+			return b.sortedColumns[i].GetFid() < b.sortedColumns[j].GetFid()
+		})
+		columns := make([]string, len(b.sortedColumns))
+		for i, f := range b.sortedColumns {
+			columns[i] = f.ColumnName
 		}
 		b.WriteString(strings.Join(columns, ", "))
 	case model.UpdateQuery, model.UpdateJoinQuery:
 		b.WriteString("UPDATE ")
-		if b.Table != nil {
-			b.WriteString(b.Table.String())
+		if b.tableName != "" {
+			b.WriteString(b.tableName)
 		}
 	case model.DeleteQuery:
 		b.WriteString("DELETE FROM ")
-		if b.Table != nil {
-			b.WriteString(b.Table.String())
+		if b.tableName != "" {
+			b.WriteString(b.tableName)
 		}
 	}
 
@@ -181,7 +197,7 @@ func (b *Builder) BuildDoing() []any {
 		b.WriteString(strings.Join(b.holders, ", "))
 		b.WriteByte(')')
 	case model.InsertAllQuery:
-		size, last := len(b.Changes), len(b.MoreRows)-1
+		size, last := len(b.sortedColumns), len(b.MoreRows)-1
 		b.WriteString(") VALUES (")
 		for i, row := range b.MoreRows {
 			b.holders = make([]string, size)
@@ -341,7 +357,9 @@ func (b *Builder) BuildJoins() []any {
 	for _, j := range b.Joins {
 		b.WriteString(" ")
 		b.WriteString(string(j.JoinType) + " ")
-		if j.Table != nil {
+		if j.tableName != "" {
+			b.WriteString(j.tableName)
+		} else if j.Table != nil {
 			b.WriteString(j.Table.String())
 		}
 		b.WriteString(" ON ")
@@ -413,17 +431,38 @@ func CollectFields[T any](builder *Builder, table *Table[T], valueOf reflect.Val
 		if slices.Contains(pkeys, name) {
 			if !fieldOf.IsZero() {
 				primary[name] = fieldOf.Interface()
+			} else if col.HasDefault && col.DefaultValue != "" {
+				setDefaultValue(fieldOf, col.DefaultValue)
+				primary[name] = fieldOf.Interface()
 			}
 			continue
 		}
 		if fieldOf.Kind() == reflect.Pointer && fieldOf.IsNil() {
 			continue
 		}
+		if col.HasDefault && fieldOf.IsZero() {
+			continue
+		}
 		fld := table.Field(name)
 		builder.Changes[fld] = fieldOf.Interface()
 	}
 	if pkName != "" && len(primary) == 0 {
-		builder.Returning = pkName
+		for _, pk := range table.PrimaryKeys {
+			if pk.Column.HasDefault {
+				builder.Returning = pkName
+				break
+			}
+		}
 	}
 	return primary, pkFid
+}
+
+func setDefaultValue(fieldOf reflect.Value, defaultValue string) {
+	if fieldOf.Kind() == reflect.String {
+		if len(defaultValue) >= 2 && defaultValue[0] == '\'' && defaultValue[len(defaultValue)-1] == '\'' {
+			fieldOf.SetString(defaultValue[1 : len(defaultValue)-1])
+		} else {
+			fieldOf.SetString(defaultValue)
+		}
+	}
 }

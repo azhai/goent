@@ -30,7 +30,8 @@ func NewStateSelectFrom[T, R any](state *StateWhere, table *Table[T]) *StateSele
 		state = NewStateWhere(ctx)
 	}
 	state.builder.Type = model.SelectQuery
-	state.builder.SetTable(table.TableInfo)
+	state.builder.SetTable(table.TableInfo, table.db.driver)
+	state.builder.Selects = table.GetSortedFields()
 	return &StateSelect[T, R]{table: table, StateWhere: state}
 }
 
@@ -240,16 +241,48 @@ func (s *StateSelect[T, R]) GetJoinForeign() *Foreign {
 // Join joins another table with a condition
 func (s *StateSelect[T, R]) Join(joinType model.JoinType, info TableInfo, on Condition) *StateSelect[T, R] {
 	s.builder.Type = model.SelectJoinQuery
-	s.builder.Joins = append(s.builder.Joins, &JoinTable{
-		JoinType: joinType, Table: info.Table(), On: on,
-	})
+	jt := &JoinTable{
+		JoinType: joinType,
+		Table:    info.Table(),
+		On:       on,
+	}
+	if s.table.db != nil && s.table.db.driver != nil {
+		var schema string
+		if jt.Table.Schema != nil {
+			schema = *jt.Table.Schema
+		}
+		jt.tableName = s.table.db.driver.FormatTableName(schema, jt.Table.Name)
+	}
+	s.builder.Joins = append(s.builder.Joins, jt)
 	return s
 }
 
 // LeftJoin joins another table with a condition on left table
 func (s *StateSelect[T, R]) LeftJoin(fkey string, refer *Field) *StateSelect[T, R] {
 	info := GetTableInfo(refer.TableAddr)
-	return s.Join(model.LeftJoin, *info, EqualsField(s.table.Field(fkey), refer))
+	var leftField *Field
+	if len(s.builder.Joins) > 0 {
+		lastJoin := s.builder.Joins[len(s.builder.Joins)-1]
+		leftTableInfo := findTableInfoByName(lastJoin.Table.Name)
+		if leftTableInfo == nil {
+			panic("table info not found for join table: " + lastJoin.Table.Name)
+		}
+		leftField = leftTableInfo.Field(fkey)
+	} else {
+		leftField = s.table.Field(fkey)
+	}
+	return s.Join(model.LeftJoin, *info, EqualsField(leftField, refer))
+}
+
+func findTableInfoByName(name string) *TableInfo {
+	tableRegLock.RLock()
+	defer tableRegLock.RUnlock()
+	for _, info := range tableRegistry {
+		if info.TableName == name {
+			return info
+		}
+	}
+	return nil
 }
 
 // Pagination holds paginated query results with metadata.
@@ -283,7 +316,9 @@ func (s *StateSelect[T, R]) Pagination(page, size int) (*Pagination[T, R], error
 	}
 
 	fld := &Field{TableAddr: s.table.TableAddr, ColumnName: "*", Function: "COUNT(%s)"}
-	counter := NewStateSelect[T, ResultLong](s.ctx, s.table).Select(fld)
+	counter := NewStateSelect[T, ResultLong](s.ctx, s.table)
+	counter.builder.Selects = nil
+	counter.Select(fld)
 	counter.CopyFrom(s.builder, s.conn)
 	count, err := FetchSingleResult(counter)
 	if err != nil {

@@ -2,13 +2,12 @@ package tests_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/azhai/goent"
-	"github.com/azhai/goent/query/where"
 )
 
 func TestDelete(t *testing.T) {
@@ -17,246 +16,214 @@ func TestDelete(t *testing.T) {
 		t.Fatalf("Expected database, got error: %v", err)
 	}
 
-	if err != nil {
-		t.Fatalf("Expected goe database, got error: %v", err)
-	}
-
-	if db.DB.Stats().InUse != 0 {
-		t.Errorf("Expected closed connection, got: %v", db.DB.Stats().InUse)
-	}
-	err = db.AnimalFood.Delete().Exec()
-	if err != nil {
-		t.Fatalf("Expected delete AnimalFood, got error: %v", err)
-	}
-	err = db.Flag.Delete().Exec()
-	if err != nil {
-		t.Fatalf("Expected delete flags, got error: %v", err)
-	}
-	err = db.Animal.Delete().Exec()
-	if err != nil {
-		t.Fatalf("Expected delete animals, got error: %v", err)
-	}
-	err = db.Food.Delete().Exec()
-	if err != nil {
-		t.Fatalf("Expected delete foods, got error: %v", err)
-	}
-	err = db.Habitat.Delete().Exec()
-	if err != nil {
-		t.Fatalf("Expected delete habitats, got error: %v", err)
-	}
-	err = db.Info.Delete().Exec()
-	if err != nil {
-		t.Fatalf("Expected delete infos, got error: %v", err)
-	}
-	err = db.Status.Delete().Exec()
-	if err != nil {
-		t.Fatalf("Expected delete status, got error: %v", err)
-	}
-	err = db.UserRole.Delete().Exec()
-	if err != nil {
-		t.Fatalf("Expected delete user roles, got error: %v", err)
-	}
-	err = db.User.Delete().Exec()
-	if err != nil {
-		t.Fatalf("Expected delete users, got error: %v", err)
-	}
-	err = db.Role.Delete().Exec()
-	if err != nil {
-		t.Fatalf("Expected delete roles, got error: %v", err)
-	}
-
 	testCases := []struct {
 		desc     string
 		testCase func(t *testing.T)
 	}{
 		{
-			desc: "Delete_One_Record",
+			desc: "Delete_Animal",
 			testCase: func(t *testing.T) {
-				if db.DB.Stats().InUse != 0 {
-					t.Errorf("Expected closed connection, got: %v", db.DB.Stats().InUse)
+				a := Animal{
+					Name: "Cat",
 				}
-
-				a := Animal{Name: "Dog"}
 				err = db.Animal.Insert().One(&a)
 				if err != nil {
 					t.Fatalf("Expected a insert animal, got error: %v", err)
 				}
 
-				if db.DB.Stats().InUse != 0 {
-					t.Errorf("Expected closed connection, got: %v", db.DB.Stats().InUse)
-				}
-
-				var as *Animal
-				as, err = db.Animal.Select().Match(Animal{Id: a.Id}).One()
+				err = db.Animal.Delete().Match(a).Exec()
 				if err != nil {
-					t.Fatalf("Expected a select, got error: %v", err)
+					t.Fatalf("Expected a delete, got error: %v", err)
 				}
 
-				if db.DB.Stats().InUse != 0 {
-					t.Errorf("Expected closed connection, got: %v", db.DB.Stats().InUse)
-				}
-
-				err = db.Animal.Delete().Filter(where.Equals(&db.Animal.Model.Id, as.Id)).Exec()
-				if err != nil {
-					t.Errorf("Expected a delete animal, got error: %v", err)
-				}
-
-				if db.DB.Stats().InUse != 0 {
-					t.Errorf("Expected closed connection, got: %v", db.DB.Stats().InUse)
-				}
-
-				_, err = db.Animal.Select().Match(Animal{Id: as.Id}).One()
+				_, err = db.Animal.Select().Match(a).One()
 				if !errors.Is(err, goent.ErrNotFound) {
-					t.Errorf("Expected a select, got error: %v", err)
+					t.Fatalf("Expected a goent.ErrNotFound, got error: %v", err)
 				}
 			},
 		},
 		{
-			desc: "Delete_One_Record_Tx_Rollback",
+			desc: "Delete_Animal_Tx_Commit",
 			testCase: func(t *testing.T) {
-				a := Animal{Name: "Dog"}
+				a := Animal{
+					Name: "Cat",
+				}
 				err = db.Animal.Insert().One(&a)
 				if err != nil {
 					t.Fatalf("Expected a insert animal, got error: %v", err)
 				}
 
-				var as *Animal
-				as, err = db.Animal.Select().Match(Animal{Id: a.Id}).One()
-				if err != nil {
-					t.Fatalf("Expected a select, got error: %v", err)
-				}
-
 				tx, err := db.NewTransaction()
 				if err != nil {
-					t.Fatalf("Expected tx, got error: %v", err)
+					t.Fatalf("Expected a tx, got error: %v", err)
 				}
 				defer tx.Rollback()
 
-				err = db.Animal.Delete().OnTransaction(tx).Filter(where.Equals(&db.Animal.Model.Id, as.Id)).Exec()
+				err = db.Animal.Delete().OnTransaction(tx).Match(a).Exec()
 				if err != nil {
-					t.Errorf("Expected a delete animal, got error: %v", err)
+					t.Fatalf("Expected a delete, got error: %v", err)
 				}
 
-				_, err = db.Animal.Select().OnTransaction(tx).Match(Animal{Id: as.Id}).One()
+				_, err = db.Animal.Select().OnTransaction(tx).Match(a).One()
 				if !errors.Is(err, goent.ErrNotFound) {
-					tx.Rollback()
-					t.Fatalf("Expected a select, got error: %v", err)
-				}
-
-				err = tx.Rollback()
-				if err != nil {
-					t.Fatalf("Expected Rollback, got error: %v", err)
-				}
-
-				_, err = db.Animal.Select().Match(Animal{Id: a.Id}).One()
-				if err != nil {
-					t.Fatalf("Expected a select, got error: %v", err)
-				}
-			},
-		},
-		{
-			desc: "Delete_All_Records",
-			testCase: func(t *testing.T) {
-				animals := []Animal{
-					{Name: "Cat"},
-					{Name: "Forest Cat"},
-					{Name: "Catt"},
-				}
-				err = db.Animal.Insert().All(true, animals)
-				if err != nil {
-					t.Fatalf("Expected a insert, got error: %v", err)
-				}
-
-				animals = nil
-				animals, err = db.Animal.Select().Where(where.Like(&db.Animal.Model.Name, "%Cat%")).AsSlice()
-				if err != nil {
-					t.Fatalf("Expected a select, got error: %v", err)
-				}
-
-				if len(animals) != 3 {
-					t.Errorf("Expected 3, got %v", len(animals))
-				}
-
-				err = goent.DeleteTable(db.Animal).Where(where.Like(&db.Animal.Model.Name, "%Cat%"))
-				if err != nil {
-					t.Fatalf("Expected a delete, got error: %v", err)
-				}
-
-				animals = nil
-				animals, err = db.Animal.Select().Where(where.Like(&db.Animal.Model.Name, "%Cat%")).AsSlice()
-				if err != nil {
-					t.Fatalf("Expected a select, got error: %v", err)
-				}
-
-				if len(animals) != 0 {
-					t.Errorf(`Expected to delete all "Cat" animals, got: %v`, len(animals))
-				}
-			},
-		},
-		{
-			desc: "Delete_All_Records_Tx_Commit",
-			testCase: func(t *testing.T) {
-				animals := []*Animal{
-					{Name: "Cat"},
-					{Name: "Forest Cat"},
-					{Name: "Catt"},
-				}
-				err = db.Animal.Insert().All(true, animals)
-				if err != nil {
-					t.Fatalf("Expected a insert, got error: %v", err)
-				}
-
-				tx, err := db.NewTransaction()
-				if err != nil {
-					t.Fatalf("Expected tx, got error: %v", err)
-				}
-				defer tx.Rollback()
-
-				err = goent.DeleteTable(db.Animal).OnTransaction(tx).Where(where.Like(&db.Animal.Model.Name, "%Cat%"))
-				if err != nil {
-					tx.Rollback()
-					t.Fatalf("Expected a delete, got error: %v", err)
-				}
-
-				animals = nil
-				animals, err = db.Animal.Select().Where(where.Like(&db.Animal.Model.Name, "%Cat%")).AsSlice()
-				if err != nil {
-					tx.Rollback()
-					t.Fatalf("Expected a select, got error: %v", err)
-				}
-
-				if len(animals) != 3 {
-					t.Fatalf(`Expected 3 "Cat" animals, got: %v`, len(animals))
+					t.Fatalf("Expected a goent.ErrNotFound, got error: %v", err)
 				}
 
 				err = tx.Commit()
 				if err != nil {
-					t.Fatalf("Expected a Commit, got error: %v", err)
+					t.Fatalf("Expected a tx commit, got error: %v", err)
 				}
 
-				animals = nil
-				animals, err = db.Animal.Select().Where(where.Like(&db.Animal.Model.Name, "%Cat%")).AsSlice()
-				if err != nil {
-					t.Fatalf("Expected a select, got error: %v", err)
-				}
-
-				if len(animals) != 0 {
-					t.Fatalf(`Expected delete all "Cat" animals, got: %v`, len(animals))
+				_, err = db.Animal.Select().Match(a).One()
+				if !errors.Is(err, goent.ErrNotFound) {
+					t.Fatalf("Expected a goent.ErrNotFound, got error: %v", err)
 				}
 			},
 		},
 		{
-			desc: "Delete_Race",
+			desc: "Delete_Animal_Tx_Rollback",
 			testCase: func(t *testing.T) {
-				var wg sync.WaitGroup
-				for range 10 {
-					wg.Add(1)
-					go func() {
-						defer wg.Done()
-						db.PersonJobTitle.Delete().Exec()
-					}()
+				a := Animal{
+					Name: "Cat",
 				}
-				wg.Wait()
+				err = db.Animal.Insert().One(&a)
+				if err != nil {
+					t.Fatalf("Expected a insert animal, got error: %v", err)
+				}
+
+				tx, err := db.NewTransaction()
+				if err != nil {
+					t.Fatalf("Expected a tx, got error: %v", err)
+				}
+				defer tx.Rollback()
+
+				err = db.Animal.Delete().OnTransaction(tx).Match(a).Exec()
+				if err != nil {
+					t.Fatalf("Expected a delete, got error: %v", err)
+				}
+
+				err = tx.Rollback()
+				if err != nil {
+					t.Fatalf("Expected a tx rollback, got error: %v", err)
+				}
+
+				_, err = db.Animal.Select().Match(a).One()
+				if err != nil {
+					t.Fatalf("Expected a find, got error: %v", err)
+				}
+			},
+		},
+		{
+			desc: "Delete_Animal_Filter",
+			testCase: func(t *testing.T) {
+				animals := []*Animal{
+					{Name: "Cat"},
+					{Name: "Dog"},
+					{Name: "Forest Cat"},
+					{Name: "Bear"},
+					{Name: "Lion"},
+					{Name: "Puma"},
+					{Name: "Snake"},
+					{Name: "Whale"},
+				}
+				err = db.Animal.Insert().All(true, animals)
+				if err != nil {
+					t.Fatalf("Expected insert animals, got error: %v", err)
+				}
+
+				err = db.Animal.Delete().Filter(goent.Like(db.Animal.Field("name"), "%Cat%")).Exec()
+				if err != nil {
+					t.Fatalf("Expected a delete, got error: %v", err)
+				}
+
+				count, err := db.Animal.Count("id")
+				if err != nil {
+					t.Fatalf("Expected a count, got error: %v", err)
+				}
+
+				if int(count) != 6 {
+					t.Errorf("Expected %v, got : %v", 6, count)
+				}
+			},
+		},
+		{
+			desc: "Delete_PersonJobs_Tx_Commit",
+			testCase: func(t *testing.T) {
+				tx, err := db.NewTransaction()
+				if err != nil {
+					t.Fatalf("Expected tx, got error: %v", err)
+				}
+				defer tx.Rollback()
+
+				persons := []*Person{
+					{Name: "Jhon"},
+					{Name: "Laura"},
+					{Name: "Luana"},
+				}
+				err = db.Person.Insert().OnTransaction(tx).All(true, persons)
+				if err != nil {
+					tx.Rollback()
+					t.Fatalf("Expected insert persons, got error: %v", err)
+				}
+
+				jobs := []*JobTitle{
+					{Name: "Developer"},
+					{Name: "Designer"},
+				}
+				err = db.JobTitle.Insert().OnTransaction(tx).All(true, jobs)
+				if err != nil {
+					tx.Rollback()
+					t.Fatalf("Expected insert jobs, got error: %v", err)
+				}
+
+				personJobs := []*PersonJobTitle{
+					{PersonId: persons[0].Id, JobTitleId: jobs[0].Id, CreatedAt: time.Now()},
+					{PersonId: persons[1].Id, JobTitleId: jobs[0].Id, CreatedAt: time.Now()},
+					{PersonId: persons[2].Id, JobTitleId: jobs[1].Id, CreatedAt: time.Now()},
+				}
+				err = db.PersonJobTitle.Insert().OnTransaction(tx).All(true, personJobs)
+				if err != nil {
+					tx.Rollback()
+					t.Fatalf("Expected insert personJobs, got error: %v", err)
+				}
+
+				err = db.PersonJobTitle.Delete().OnTransaction(tx).Filter(
+					goent.And(
+						goent.Equals(db.PersonJobTitle.Field("person_id"), persons[2].Id),
+						goent.Equals(db.PersonJobTitle.Field("job_title_id"), jobs[1].Id),
+					),
+				).Exec()
+				if err != nil {
+					tx.Rollback()
+					t.Fatalf("Expected a delete, got error: %v", err)
+				}
+
+				pj := []struct {
+					JobTitle string
+					Person   string
+				}{}
+				for row, err := range db.Person.Select().OnTransaction(tx).
+					LeftJoin("id", db.PersonJobTitle.Field("person_id")).
+					LeftJoin("job_title_id", db.JobTitle.Field("id")).
+					Filter(goent.Equals(db.JobTitle.Field("id"), jobs[0].Id)).IterRows() {
+
+					if err != nil {
+						t.Fatalf("Expected a select, got error: %v", err)
+					}
+					pj = append(pj, struct {
+						JobTitle string
+						Person   string
+					}{Person: row.Name})
+				}
+
+				if len(pj) != 2 {
+					t.Errorf("Expected %v, got : %v", 2, len(pj))
+				}
+
+				err = tx.Commit()
+				if err != nil {
+					t.Fatalf("Expected a tx commit, got error: %v", err)
+				}
 			},
 		},
 		{
@@ -264,7 +231,7 @@ func TestDelete(t *testing.T) {
 			testCase: func(t *testing.T) {
 				ctx, cancel := context.WithCancel(context.Background())
 				cancel()
-				err = goent.DeleteTableContext(ctx, db.Animal).All()
+				_, err = db.NewTransactionContext(ctx, sql.LevelDefault)
 				if !errors.Is(err, context.Canceled) {
 					t.Errorf("Expected a context.Canceled, got error: %v", err)
 				}
@@ -275,7 +242,8 @@ func TestDelete(t *testing.T) {
 			testCase: func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond*1)
 				defer cancel()
-				err = goent.DeleteTableContext(ctx, db.Animal).All()
+				time.Sleep(time.Millisecond)
+				_, err = db.NewTransactionContext(ctx, sql.LevelDefault)
 				if !errors.Is(err, context.DeadlineExceeded) {
 					t.Errorf("Expected a context.DeadlineExceeded, got error: %v", err)
 				}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"iter"
 	"reflect"
+	"slices"
 	"time"
 
 	"github.com/azhai/goent/model"
@@ -199,10 +200,17 @@ func AppendDestFields(valueOf reflect.Value, fields []*Field, foreign *Foreign) 
 
 // AppendDestTable returns a slice of pointers to the fields of a struct
 func AppendDestTable(info TableInfo, valueOf reflect.Value) []any {
-	size := min(len(info.Columns), valueOf.NumField())
-	dest := make([]any, size)
-	for i := range size {
-		dest[i] = valueOf.Field(i).Addr().Interface()
+	columns := make([]*Column, 0, len(info.Columns))
+	for _, col := range info.Columns {
+		columns = append(columns, col)
+	}
+	slices.SortFunc(columns, func(a, b *Column) int {
+		return a.FieldId - b.FieldId
+	})
+	dest := make([]any, len(columns))
+	for i, col := range columns {
+		fieldOf := valueOf.Field(col.FieldId)
+		dest[i] = fieldOf.Addr().Interface()
 	}
 	return dest
 }

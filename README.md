@@ -148,8 +148,12 @@ type Animal struct {
 	Emoji string
 }
 
-type Database struct {
+type PublicSchema struct {
 	Animal *goent.Table[Animal]
+}
+
+type Database struct {
+	PublicSchema `goe:"public"`
 	*goent.DB
 }
 

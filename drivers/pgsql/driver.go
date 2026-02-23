@@ -102,6 +102,17 @@ func keywordHandler(s string) string {
 	return fmt.Sprintf(`"%s"`, s)
 }
 
+func (dr *Driver) FormatTableName(schema, table string) string {
+	if schema != "" {
+		return keywordHandler(schema) + "." + keywordHandler(table)
+	}
+	return keywordHandler(table)
+}
+
+func (dr *Driver) SupportsReturning() bool {
+	return true
+}
+
 func (dr *Driver) Name() string {
 	return "PostgreSQL"
 }

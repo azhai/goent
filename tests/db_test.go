@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -71,8 +72,8 @@ type User struct {
 
 type UserRole struct {
 	Id      int `goe:"pk"`
-	UserId  int
-	RoleId  int
+	UserId  int `goe:"m2o"`
+	RoleId  int `goe:"m2o"`
 	EndDate *time.Time
 }
 
@@ -170,15 +171,15 @@ type Default struct {
 	Name string
 }
 
-type Database struct {
+type AnimalSchema struct {
 	Animal     *goent.Table[Animal]
 	AnimalFood *goent.Table[AnimalFood]
-	*FoodHabitatSchema
-	Info            *goent.Table[Info]
-	Status          *goent.Table[Status]
-	Weather         *goent.Table[Weather]
-	*Authentication `goe:"schema"`
-	*FlagSchema
+}
+
+type OtherSchema struct {
+	Info           *goent.Table[Info]
+	Status         *goent.Table[Status]
+	Weather        *goent.Table[Weather]
 	Person         *goent.Table[Person]
 	PersonJobTitle *goent.Table[PersonJobTitle]
 	JobTitle       *goent.Table[JobTitle]
@@ -186,26 +187,33 @@ type Database struct {
 	Select         *goent.Table[Select]
 	Page           *goent.Table[Page]
 	Default        *goent.Table[Default]
-	*DropSchema
+}
+
+type Database struct {
+	AnimalSchema      `goe:"public"`
+	OtherSchema       `goe:"public"`
+	FoodHabitatSchema `goe:"food"`
+	Authentication    `goe:"auth"`
+	FlagSchema        `goe:"flag"`
+	DropSchema        `goe:"drop"`
 	*goent.DB
 }
 
 var db *Database
 
 var mapDriver = map[string]func() (*Database, error){
-	"PostgreSQL": SetupPostgres,
-	"SQLite":     SetupSqlite,
+	"pgsql":      SetupPostgres,
+	"postgresql": SetupPostgres,
+	"sqlite":     SetupSqlite,
 }
 
 func Setup() (*Database, error) {
-	if db != nil {
-		return db, nil
-	}
 	var err error
 	driver := os.Getenv("GOE_DRIVER")
 	if driver == "" {
-		driver = "SQLite"
+		driver = "sqlite"
 	}
+	driver = strings.ToLower(driver)
 	db, err = mapDriver[driver]()
 	if err != nil {
 		return nil, err
@@ -235,7 +243,11 @@ func SetupPostgres() (*Database, error) {
 
 func SetupSqlite() (*Database, error) {
 	filename := filepath.Join(os.TempDir(), "goent.db")
-	db, err := goent.Open[Database](sqlite.Open(filename, sqlite.NewConfig(
+	os.Remove(filename)
+	db = nil
+	goent.ResetRegistry()
+	var err error
+	db, err = goent.Open[Database](sqlite.Open(filename, sqlite.NewConfig(
 		sqlite.Config{
 			// Logger: slog.New(slog.NewJSONHandler(os.Stdout, nil)),
 			ConnectionHook: func(conn sqlite.ExecQuerierContext, dsn string) error {
@@ -309,10 +321,23 @@ func TestRace(t *testing.T) {
 			defer wg.Done()
 			driver := os.Getenv("GOE_DRIVER")
 			if driver == "" {
-				driver = "SQLite"
+				driver = "sqlite"
 			}
-			raceDb, _ := mapDriver[driver]()
-			if raceDb != nil {
+			driver = strings.ToLower(driver)
+			var raceDb *Database
+			var err error
+			if driver == "sqlite" {
+				filename := filepath.Join(os.TempDir(), "goent_race.db")
+				raceDb, err = goent.Open[Database](sqlite.Open(filename, sqlite.NewConfig(
+					sqlite.Config{})), "")
+			} else {
+				dsn := os.Getenv("GOE_DATABASE_DSN")
+				if dsn == "" {
+					dsn = "user=postgres password=postgres host=localhost port=5432 database=postgres"
+				}
+				raceDb, err = goent.Open[Database](pgsql.Open(dsn, pgsql.NewConfig(pgsql.Config{})), "")
+			}
+			if err == nil && raceDb != nil {
 				goent.Close(raceDb)
 			}
 		}()
@@ -321,7 +346,6 @@ func TestRace(t *testing.T) {
 }
 
 func TestMigrate(t *testing.T) {
-	t.Skip("Skipping TestMigrate - API mismatch between *Database and *goent.DB")
 	db, err := Setup()
 	if err != nil {
 		t.Fatalf("Expected a connection, got error %v", err)

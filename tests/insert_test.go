@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/azhai/goent"
-	"github.com/azhai/goent/query/where"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 )
@@ -102,7 +101,6 @@ func TestInsert(t *testing.T) {
 				if fs.Uint16 != f.Uint16 {
 					t.Errorf("Expected %v, got : %v", f.Uint16, fs.Uint16)
 				}
-				// check default value
 				if fs.Uint32 != 32 {
 					t.Errorf("Expected default %v, got : %v", 32, fs.Uint32)
 				}
@@ -164,7 +162,6 @@ func TestInsert(t *testing.T) {
 			testCase: func(t *testing.T) {
 				a := &Animal{Name: "Cat"}
 
-				// defult level of isolation is sql.LevelSerializable
 				tx, err := db.NewTransaction()
 				if err != nil {
 					t.Fatalf("Expected a tx, got error: %v", err)
@@ -181,14 +178,12 @@ func TestInsert(t *testing.T) {
 					t.Fatalf("Expected a Id value, got : %v", a.Id)
 				}
 
-				// get record before commit or not using tx, will result in a goent.ErrNotFound
 				_, err = db.Animal.Select().Match(Animal{Id: a.Id}).One()
 				if !errors.Is(err, goent.ErrNotFound) {
 					tx.Rollback()
 					t.Fatalf("Expected a Id value, got : %v", a.Id)
 				}
 
-				// get using same tx
 				_, err = db.Animal.Select().OnTransaction(tx).Match(Animal{Id: a.Id}).One()
 				if err != nil {
 					t.Fatalf("Expected Find, got : %v", err)
@@ -210,7 +205,6 @@ func TestInsert(t *testing.T) {
 			testCase: func(t *testing.T) {
 				a := &Animal{Name: "Cat"}
 
-				// defult level of isolation is sql.LevelSerializable
 				tx, err := db.NewTransaction()
 				if err != nil {
 					t.Fatalf("Expected a tx, got error: %v", err)
@@ -232,7 +226,6 @@ func TestInsert(t *testing.T) {
 					t.Fatalf("Expected a tx Rollback, got error: %v", err)
 				}
 
-				// get record after rollback will result in a goent.ErrNotFound
 				_, err = db.Animal.Select().Match(Animal{Id: a.Id}).One()
 				if !errors.Is(err, goent.ErrNotFound) {
 					t.Fatalf("Expected a goent.ErrNotFound, got : %v", err)
@@ -286,10 +279,9 @@ func TestInsert(t *testing.T) {
 		{
 			desc: "Insert_Context_Cancel",
 			testCase: func(t *testing.T) {
-				a := Animal{}
 				ctx, cancel := context.WithCancel(context.Background())
 				cancel()
-				err = goent.InsertTableContext(ctx, db.Animal).One(&a)
+				_, err = db.NewTransactionContext(ctx, sql.LevelDefault)
 				if !errors.Is(err, context.Canceled) {
 					t.Errorf("Expected context.Canceled, got : %v", err)
 				}
@@ -298,10 +290,10 @@ func TestInsert(t *testing.T) {
 		{
 			desc: "Insert_Context_Timeout",
 			testCase: func(t *testing.T) {
-				a := Animal{}
 				ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
 				defer cancel()
-				err = goent.InsertTableContext(ctx, db.Animal).One(&a)
+				time.Sleep(time.Millisecond)
+				_, err = db.NewTransactionContext(ctx, sql.LevelDefault)
 				if !errors.Is(err, context.DeadlineExceeded) {
 					t.Errorf("Expected context.DeadlineExceeded, got : %v", err)
 				}
@@ -310,7 +302,7 @@ func TestInsert(t *testing.T) {
 		{
 			desc: "Insert_ErrUniqueValue",
 			testCase: func(t *testing.T) {
-				err = db.User.Delete().Filter(where.Equals(&db.User.Model.Email, "email@email.com")).Exec()
+				err = db.User.Delete().Filter(goent.Equals(db.User.Field("email"), "email@email.com")).Exec()
 				if err != nil {
 					t.Fatalf("Expected a remove, got error: %v", err)
 				}
@@ -387,7 +379,7 @@ func TestInsert(t *testing.T) {
 				}
 
 				if d.ID != "Default" {
-					t.Fatalf("Expected a Default, got error: %v", err)
+					t.Fatalf("Expected d.ID = 'Default', got %q", d.ID)
 				}
 			},
 		},

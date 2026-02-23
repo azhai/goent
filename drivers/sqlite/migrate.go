@@ -32,7 +32,7 @@ func (dr *Driver) MigrateContext(ctx context.Context, migrator *model.Migrator) 
 		"int64":     {"integer", "0"},
 		"float32":   {"real", "0"},
 		"float64":   {"real", "0"},
-		"[]uint8":   {"bytea", "X''"},
+		"[]uint8":   {"blob", "X''"},
 		"time.Time": {"datetime", "'0000-01-01'"},
 		"bool":      {"boolean", "false"},
 		"uuid.UUID": {"uuid", "'00000000-0000-0000-0000-000000000000'"},
@@ -166,24 +166,13 @@ type dbTable struct {
 }
 
 func checkTableChanges(b body) error {
-	var sqlTableInfos string
-	if b.table.Schema != nil {
-		sqlTableInfos = fmt.Sprintf(`SELECT
-		name AS column_name,
-		lower(type) AS data_type,
-		dflt_value AS column_default,
-		NOT "notnull" AS is_nullable
-		FROM %v.pragma_table_info($1);
-		`, *b.table.Schema)
-	} else {
-		sqlTableInfos = `SELECT
-		name AS column_name,
-		lower(type) AS data_type,
-		dflt_value AS column_default,
-		NOT "notnull" AS is_nullable
-		FROM pragma_table_info($1);
-		`
-	}
+	sqlTableInfos := `SELECT
+	name AS column_name,
+	lower(type) AS data_type,
+	dflt_value AS column_default,
+	NOT "notnull" AS is_nullable
+	FROM pragma_table_info($1);
+	`
 
 	rows, err := b.conn.QueryContext(context.Background(), sqlTableInfos, b.table.Name)
 	if err != nil {
@@ -339,19 +328,15 @@ type databaseIndex struct {
 
 func checkIndex(indexes []model.IndexMigrate, table *model.TableMigrate, sql *strings.Builder, conn *sql.DB) error {
 
-	var schema string
-	if table.Schema != nil {
-		schema = *table.Schema + "."
-	}
-	sqlQuery := fmt.Sprintf(`
+	sqlQuery := `
 		WITH index_list AS (
 			SELECT
 				name AS index_name,
 				[unique] AS is_unique,
 				origin,
 				partial
-			FROM %vpragma_index_list($1)
-			WHERE origin != 'pk'  -- exclude primary key
+			FROM pragma_index_list($1)
+			WHERE origin = 'c'  -- only regular indexes, exclude pk and unique constraints
 		),
 		index_columns AS (
 			SELECT
@@ -359,13 +344,13 @@ func checkIndex(indexes []model.IndexMigrate, table *model.TableMigrate, sql *st
 				COALESCE(ii.name, '') AS column_name,
 				ii.seqno
 			FROM index_list il
-			JOIN %vpragma_index_info(il.index_name) ii
+			JOIN pragma_index_info(il.index_name) ii
 		),
 		index_sql AS (
 			SELECT
 				name AS index_name,
 				sql  AS index_sql
-			FROM %vsqlite_master
+			FROM sqlite_master
 			WHERE type = 'index'
 		)
 		SELECT DISTINCT
@@ -379,7 +364,7 @@ func checkIndex(indexes []model.IndexMigrate, table *model.TableMigrate, sql *st
 			ON il.index_name = ic.index_name
 		LEFT JOIN index_sql isql
 			ON il.index_name = isql.index_name;
-	`, schema, schema, schema)
+	`
 
 	rows, err := conn.QueryContext(context.Background(), sqlQuery, table.Name)
 	if err != nil {
@@ -439,12 +424,7 @@ func createIndex(index model.IndexMigrate, table *model.TableMigrate) string {
 			}
 			return "INDEX"
 		}(),
-		func() string {
-			if table.Schema != nil {
-				return *table.Schema + "." + index.EscapingName
-			}
-			return index.EscapingName
-		}(),
+		index.EscapingName,
 		table.EscapingName,
 		func() string {
 			var s strings.Builder
@@ -599,7 +579,7 @@ func alterSqlite(b body) {
 			insertColumns,
 			selectColumns,
 			b.table.EscapingTableName()))
-	sqlBuilder.WriteString("DROP TABLE" + b.table.EscapingTableName() + ";\n")
+	sqlBuilder.WriteString("DROP TABLE " + b.table.EscapingTableName() + ";\n")
 	sqlBuilder.WriteString(fmt.Sprintf("ALTER TABLE %v RENAME TO %v;\n", newTable.EscapingTableName(), b.table.EscapingName))
 	sqlBuilder.WriteString("PRAGMA foreign_keys=ON; COMMIT;")
 
@@ -678,16 +658,26 @@ func checkDataType(structDataType string, dataMap map[string]*dataType) dataType
 		dt = dataType{"int32", "0"}
 	case "uint64":
 		dt = dataType{"int64", "0"}
+	case "[16]uint8":
+		dt = dataType{"uuid", "'00000000-0000-0000-0000-000000000000'"}
 	}
 
 	if dataMap[dt.typeName] != nil {
 		return *dataMap[dt.typeName]
 	}
 
+	if strings.Contains(structDataType, "uuid.UUID") {
+		return dataType{"uuid", "'00000000-0000-0000-0000-000000000000'"}
+	}
+
 	for _, s := range []string{"number", "numeric", "decimal"} {
 		if strings.Contains(strings.ToLower(structDataType), s) {
 			return dataType{structDataType, "0"}
 		}
+	}
+
+	if strings.Contains(structDataType, "Decimal") {
+		return dataType{"decimal", "0"}
 	}
 
 	for _, s := range []string{"date", "time"} {
@@ -705,9 +695,6 @@ func checkDataType(structDataType string, dataMap map[string]*dataType) dataType
 	return dt
 }
 
-func dropIndex(table *model.TableMigrate, idxName string) string {
-	if table.Schema != nil {
-		return fmt.Sprintf("DROP INDEX IF EXISTS %v;", *table.Schema+"."+idxName) + "\n"
-	}
+func dropIndex(_ *model.TableMigrate, idxName string) string {
 	return fmt.Sprintf("DROP INDEX IF EXISTS %v;", idxName) + "\n"
 }

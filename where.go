@@ -164,6 +164,21 @@ func Or(branches ...Condition) Condition {
 	return res
 }
 
+// Not creates a condition that negates another condition.
+func Not(cond Condition) Condition {
+	return Condition{Template: fmt.Sprintf("NOT (%s)", cond.Template), Fields: cond.Fields, Values: cond.Values}
+}
+
+// IsNull creates a condition that checks if a field is NULL.
+func IsNull(left *Field) Condition {
+	return Condition{Template: "%s IS NULL", Fields: []*Field{left}, Values: []*Value{}}
+}
+
+// IsNotNull creates a condition that checks if a field is NOT NULL.
+func IsNotNull(left *Field) Condition {
+	return Condition{Template: "%s IS NOT NULL", Fields: []*Field{left}, Values: []*Value{}}
+}
+
 // Equals creates a condition that checks if a field is equal to a value.
 //
 //	Example: using Table with field name
@@ -199,7 +214,11 @@ func EqualsMap(left *Field, data map[string]any) Condition {
 	var branches []Condition
 	for key, value := range data {
 		field := &Field{TableAddr: left.TableAddr, ColumnName: key}
-		branches = append(branches, Equals(field, value))
+		if _, ok := value.(NilMarker); ok {
+			branches = append(branches, IsNull(field))
+		} else {
+			branches = append(branches, Equals(field, value))
+		}
 	}
 	return And(branches...)
 }
@@ -287,4 +306,14 @@ func Like(left *Field, value string) Condition {
 // NotLike creates a condition that checks if a field does not match a LIKE pattern.
 func NotLike(left *Field, value string) Condition {
 	return Condition{Template: "%s NOT LIKE ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
+}
+
+// ILike creates a case-insensitive LIKE condition.
+func ILike(left *Field, value string) Condition {
+	return Condition{Template: "%s ILIKE ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
+}
+
+// NotILike creates a case-insensitive NOT LIKE condition.
+func NotILike(left *Field, value string) Condition {
+	return Condition{Template: "%s NOT ILIKE ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }

@@ -5,9 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
-	"regexp"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -124,35 +122,6 @@ func (dr *Driver) setHooks() {
 			return dr.ConnectionHook(conn, dsn)
 		})
 	}
-	schemas := dr.Schemas()
-	dsn, params, _ := strings.Cut(dr.dsn, "?")
-	if len(schemas) != 0 {
-		rx := regexp.MustCompile(`([^/]+?)(?:\.[a-zA-Z0-9]+)?$`)
-		currentDb := rx.FindString(dsn)
-		currentDb = strings.TrimPrefix(currentDb, "file:")
-		var ex string
-		ix := strings.Index(currentDb, ".")
-		if ix != -1 {
-			ex = currentDb[ix:]
-		}
-		schemaBuilder := strings.Builder{}
-
-		for _, schema := range schemas {
-			schemaBuilder.WriteString(
-				fmt.Sprintf("ATTACH DATABASE '%v' AS %v;\n",
-					strings.Replace(dsn, currentDb, schema[1:len(schema)-1]+ex, 1)+func() string {
-						if params != "" {
-							return "?" + params
-						}
-						return ""
-					}(),
-					schema))
-		}
-		sqlite.RegisterConnectionHook(func(conn sqlite.ExecQuerierContext, dsn string) error {
-			conn.ExecContext(context.Background(), schemaBuilder.String(), nil)
-			return nil
-		})
-	}
 }
 
 func (dr *Driver) KeywordHandler(s string) string {
@@ -161,6 +130,14 @@ func (dr *Driver) KeywordHandler(s string) string {
 
 func keywordHandler(s string) string {
 	return fmt.Sprintf(`"%s"`, s)
+}
+
+func (dr *Driver) FormatTableName(schema, table string) string {
+	return keywordHandler(table)
+}
+
+func (dr *Driver) SupportsReturning() bool {
+	return false
 }
 
 func (dr *Driver) Name() string {

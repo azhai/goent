@@ -16,6 +16,15 @@ var (
 	tableRegLock   sync.RWMutex
 )
 
+// ResetRegistry clears all registered schemas and tables.
+// This is useful for testing purposes.
+func ResetRegistry() {
+	tableRegLock.Lock()
+	defer tableRegLock.Unlock()
+	schemaRegistry = make(map[string]*string)
+	tableRegistry = make(map[uintptr]*TableInfo)
+}
+
 // GetTableInfo returns the table info for a given table address.
 func GetTableInfo(addr uintptr) *TableInfo {
 	if addr == 0 {
@@ -189,9 +198,11 @@ func Close(ent any) error {
 		return dc.ErrorHandler(context.TODO(), err)
 	}
 
+	tableRegLock.Lock()
 	for _, table := range tableRegistry {
 		delete(tableRegistry, table.TableAddr)
 	}
+	tableRegLock.Unlock()
 
 	return nil
 }

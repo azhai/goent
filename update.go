@@ -12,7 +12,7 @@ type StateUpdate[T any] struct {
 }
 
 func (s *StateUpdate[T]) Exec() error {
-	s.builder.SetTable(s.table.TableInfo)
+	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
 	qr := model.CreateQuery(s.builder.Build(true))
 	hd := s.Prepare(s.table.db.driver)
 	return hd.ExecuteNoReturn(qr)

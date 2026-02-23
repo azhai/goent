@@ -4,7 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/azhai/goent/query/where"
+	"github.com/azhai/goent"
+	"github.com/azhai/goent/model"
 	"github.com/google/uuid"
 )
 
@@ -41,7 +42,8 @@ func BenchmarkSelectRaw(b *testing.B) {
 	db.Animal.Insert().All(true, animals)
 
 	for b.Loop() {
-		rows, _ := db.DB.RawQueryContext(context.Background(), "select a.id, a.name, a.info_id, a.habitat_id from animals a;")
+		sql := "select a.id, a.name, a.info_id, a.habitat_id from animals a;"
+		rows, _ := db.DB.RawQueryContext(context.Background(), sql)
 		defer rows.Close()
 
 		var a Animal
@@ -80,13 +82,13 @@ func BenchmarkJoin(b *testing.B) {
 
 	for b.Loop() {
 		result, _ := db.Food.Select().
-			Join(&db.Food.Model.Id, &db.AnimalFood.Model.FoodId).
-			Join(&db.AnimalFood.Model.AnimalId, &db.Animal.Model.Id).
-			Join(&db.Animal.Model.HabitatId, &db.Habitat.Model.Id).
-			Join(&db.Habitat.Model.WeatherId, &db.Weather.Model.Id).
-			Filter(where.And(
-				where.Equals(&db.Food.Model.Id, f.Id),
-				where.Equals(&db.Food.Model.Name, f.Name),
+			Join(model.InnerJoin, db.AnimalFood.TableInfo, goent.Equals(db.Food.Field("id"), db.AnimalFood.Field("food_id"))).
+			Join(model.InnerJoin, db.Animal.TableInfo, goent.Equals(db.AnimalFood.Field("animal_id"), db.Animal.Field("id"))).
+			Join(model.InnerJoin, db.Habitat.TableInfo, goent.Equals(db.Animal.Field("habitat_id"), db.Habitat.Field("id"))).
+			Join(model.InnerJoin, db.Weather.TableInfo, goent.Equals(db.Habitat.Field("weather_id"), db.Weather.Field("id"))).
+			Filter(goent.And(
+				goent.Equals(db.Food.Field("id"), f.Id),
+				goent.Equals(db.Food.Field("name"), f.Name),
 			)).All()
 		foods = result
 	}
@@ -117,12 +119,13 @@ func BenchmarkJoinSql(b *testing.B) {
 	db.AnimalFood.Insert().One(&af)
 
 	for b.Loop() {
-		rows, _ := db.DB.RawQueryContext(context.Background(), `select f.id, f.name from foods f
+		sql := `select f.id, f.name from foods f
 						join animal_foods af on f.id = af.food_id
 						join animals a on af.animal_id = a.id
 						join habitats h on a.habitat_id = h.id
 						join weathers w on h.weather_id = w.id
-						where f.id = $1 and f.name = $2;`, f.Id, f.Name)
+						where f.id = $1 and f.name = $2;`
+		rows, _ := db.DB.RawQueryContext(context.Background(), sql, f.Id, f.Name)
 		defer rows.Close()
 
 		foods = make([]*Food, 0)

@@ -1,6 +1,7 @@
 package goent
 
 import (
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -35,9 +36,22 @@ func migrateFrom(ent any, db *DB) *dbMigrator {
 	}
 
 	for _, info := range tableRegistry {
-		elem := valueOf.Field(info.SchemaId).FieldByName(info.FieldName)
+		// Get the schema field
+		schemaField := valueOf.Field(info.SchemaId)
+		if schemaField.Kind() == reflect.Pointer {
+			schemaField = schemaField.Elem()
+		}
+		// Get the table field from the schema
+		elem := schemaField.FieldByName(info.FieldName)
 		elem = reflect.Indirect(elem)
-		tm := &model.TableMigrate{Schema: &info.SchemaName, Name: info.TableName}
+		if !elem.IsValid() {
+			continue
+		}
+		tm := &model.TableMigrate{Name: info.TableName}
+		// Only set Schema for drivers that support it (not SQLite)
+		if info.SchemaName != "" && db.driver.Name() != "SQLite" {
+			tm.Schema = &info.SchemaName
+		}
 		tm, dm.Error = dm.typeField(tm, valueOf, elem, db.driver)
 		if dm.Error != nil {
 			return dm
@@ -358,11 +372,17 @@ func getTagType(field reflect.StructField) string {
 	if value != "" {
 		return strings.ReplaceAll(value, " ", "")
 	}
-	dataType := field.Type.String()
-	if dataType[0] == '*' {
-		return dataType[1:]
+	t := field.Type
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
 	}
-	return dataType
+	if t.PkgPath() != "" {
+		return t.PkgPath() + "." + t.Name()
+	}
+	if t.Kind() == reflect.Array {
+		return fmt.Sprintf("[%d]%s", t.Len(), t.Elem().Kind().String())
+	}
+	return t.Kind().String()
 }
 
 func isNullable(field reflect.StructField) bool {
@@ -414,6 +434,54 @@ func createMigrateAtt(attributeName string, dataType string, nullable bool, defa
 
 func helperAttributeMigrate(b body) error {
 	migField := b.migrate.field
+	goeTag := migField.Tag.Get("goe")
+
+	if utils.HasTagValue(goeTag, "m2o") || utils.HasTagValue(goeTag, "o2o") {
+		table, _ := foreignKeyNamePattern(b.tables, migField.Name)
+		if table == "" {
+			tableName := strings.TrimSuffix(migField.Name, "Id")
+			tableName = strings.TrimSuffix(tableName, "ID")
+			tableNamePlural := utils.TableNamePattern(tableName)
+			for _, info := range tableRegistry {
+				if info.TableName == tableName || info.TableName == strings.ToLower(tableName) ||
+					info.TableName == tableNamePlural || info.TableName == strings.ToLower(tableNamePlural) {
+					table = info.TableName
+					break
+				}
+			}
+		}
+		if table != "" {
+			var targetInfo *TableInfo
+			for _, info := range tableRegistry {
+				if info.TableName == table {
+					targetInfo = info
+					break
+				}
+			}
+			if targetInfo != nil && len(targetInfo.PrimaryKeys) > 0 {
+				pkName := targetInfo.PrimaryKeys[0].ColumnName
+				rel := model.ManyToSomeMigrate{
+					TargetTable:          targetInfo.TableName,
+					TargetColumn:         pkName,
+					EscapingTargetTable:  b.driver.KeywordHandler(targetInfo.TableName),
+					EscapingTargetColumn: b.driver.KeywordHandler(pkName),
+					TargetSchema:         &targetInfo.SchemaName,
+					AttributeMigrate: model.AttributeMigrate{
+						FieldName:    migField.Name,
+						Name:         utils.ToSnakeCase(migField.Name),
+						EscapingName: b.driver.KeywordHandler(utils.ToSnakeCase(migField.Name)),
+						DataType:     getTagType(migField),
+						Nullable:     b.nullable,
+					},
+				}
+				migTable := b.migrate.table
+				migTable.ManyToSomes = append(migTable.ManyToSomes, rel)
+				return nil
+			}
+		}
+		return migrateAtt(b)
+	}
+
 	table, prefix := foreignKeyNamePattern(b.tables, migField.Name)
 	if table == "" {
 		return migrateAtt(b)
@@ -428,19 +496,9 @@ func helperAttributeMigrate(b body) error {
 	migTable := b.migrate.table
 	switch v := rel.(type) {
 	case *model.ManyToSomeMigrate:
-		// if v == nil {
-		// 	return migrateAtt(b)
-		// }
 		v.DataType = getTagType(migField)
 		migTable.ManyToSomes = append(migTable.ManyToSomes, *v)
 	case *model.OneToSomeMigrate:
-		// if v == nil {
-		// 	if slices.Contains(b.migrate.fieldNames, b.migrate.field.Name) {
-		// 		return nil
-		// 	}
-		// 	return migrateAtt(b)
-		// }
-		goeTag := migField.Tag.Get("goe")
 		v.IsOneToMany = utils.HasTagValue(goeTag, "o2m")
 		v.DataType = getTagType(migField)
 		migTable.OneToSomes = append(migTable.OneToSomes, *v)

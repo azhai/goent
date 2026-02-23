@@ -14,6 +14,8 @@ type Driver interface {
 	Init() error
 	AddLogger(Logger, error) error
 	KeywordHandler(string) string
+	FormatTableName(schema, table string) string
+	SupportsReturning() bool
 	NewConnection() Connection
 	NewTransaction(ctx context.Context, opts *sql.TxOptions) (Transaction, error)
 	Stats() sql.DBStats

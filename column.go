@@ -4,17 +4,17 @@ import (
 	"reflect"
 )
 
-// Column represents a database column with its metadata and field information.
 type Column struct {
-	FieldName  string
-	FieldId    int
-	ColumnName string
-	ColumnType string
-	AllowNull  bool
-	HasDefault bool
-	tableName  string
-	schemaName *string
-	isAutoIncr bool
+	FieldName    string
+	FieldId      int
+	ColumnName   string
+	ColumnType   string
+	AllowNull    bool
+	HasDefault   bool
+	DefaultValue string
+	tableName    string
+	schemaName   *string
+	isAutoIncr   bool
 }
 
 func (c *Column) GetInt64(obj any) (int64, bool) {

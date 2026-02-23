@@ -7,6 +7,9 @@ import (
 	"github.com/azhai/goent/model"
 )
 
+// NilMarker is a special type to indicate a nil pointer field for IS NULL conditions.
+type NilMarker struct{}
+
 // StateWhere represents a query state with WHERE clause building capabilities.
 type StateWhere struct {
 	builder *Builder
@@ -20,12 +23,16 @@ func NewStateWhere(ctx context.Context) *StateWhere {
 }
 
 // MatchData matches the non-zero fields of the given object to a dictionary of column names and values.
+// Nil pointer fields are skipped (not included in the result).
 func MatchData[T any](table *Table[T], obj T) Dict {
 	data := make(Dict)
 	valueOf := reflect.Indirect(reflect.ValueOf(obj))
 	for _, col := range table.Columns {
 		fieldOf := valueOf.FieldByName(col.FieldName)
-		if fieldOf.IsZero() || fieldOf.Kind() == reflect.Pointer && fieldOf.IsNil() {
+		if fieldOf.Kind() == reflect.Pointer && fieldOf.IsNil() {
+			continue
+		}
+		if fieldOf.IsZero() {
 			continue
 		}
 		data[col.ColumnName] = fieldOf.Interface()
@@ -87,7 +94,7 @@ func (s *StateDelete[T]) Match(obj T) *StateDelete[T] {
 
 func (s *StateDelete[T]) Exec() error {
 	s.builder.Type = model.DeleteQuery
-	s.builder.SetTable(s.table.TableInfo)
+	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
 	qr := model.CreateQuery(s.builder.Build(true))
 	hd := s.Prepare(s.table.db.driver)
 	return hd.ExecuteNoReturn(qr)

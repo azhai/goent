@@ -59,14 +59,34 @@ func travelSchemas(db *DB, dbId int, valueOf reflect.Value) ([]string, error) {
 	var schemas []string
 	valueOf.Field(dbId).Set(reflect.ValueOf(db))
 
+	tableRegLock.Lock()
+	defer tableRegLock.Unlock()
+
 	// set value for fields
 	for i := range dbId { // Schema
-		schemaOf := reflect.Indirect(valueOf.Field(i))
+		field := valueOf.Field(i)
+		fieldType := valueOf.Type().Field(i)
 
-		schema := valueOf.Type().Field(i).Tag.Get("goe")
+		// Handle embedded pointer structs - initialize if nil
+		if field.Kind() == reflect.Pointer && field.IsNil() {
+			field.Set(reflect.New(fieldType.Type.Elem()))
+		}
+
+		schemaOf := reflect.Indirect(field)
+		if !schemaOf.IsValid() {
+			continue
+		}
+
+		schema := fieldType.Tag.Get("goe")
 		if schema == "-" {
 			continue
 		}
+
+		// Skip non-struct fields (like embedded DB)
+		if schemaOf.Kind() != reflect.Struct {
+			continue
+		}
+
 		SchemaName := schemaOf.Type().Name()
 		if schema == "" {
 			schema = utils.ToSnakeCase(SchemaName)
@@ -76,7 +96,14 @@ func travelSchemas(db *DB, dbId int, valueOf reflect.Value) ([]string, error) {
 
 		for j := range schemaOf.NumField() { // Table
 			tableField := schemaOf.Field(j)
+			if !tableField.CanSet() {
+				continue
+			}
 			tableType := utils.GetElemType(tableField)
+			// Skip fields that are not Table types
+			if tableType.Kind() != reflect.Struct || !strings.HasPrefix(tableType.Name(), "Table[") {
+				continue
+			}
 			tableAddr := uintptr(tableField.Addr().UnsafePointer())
 			fieldName := schemaOf.Type().Field(j).Name
 			tableOf, info := NewTableReflect(db, tableType, tableAddr, fieldName, schema, i, j)
