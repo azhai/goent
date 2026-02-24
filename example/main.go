@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -21,13 +22,10 @@ var (
 	dbDSN  = "postgres://dba:pass@127.0.0.1:5432/test?sslmode=disable"
 )
 
+// Category is a category of products.
 type Category struct {
 	ID   int64
 	Name string
-}
-
-func (*Category) TableName() string {
-	return "t_category"
 }
 
 func (m *Category) GetID() int64 {
@@ -38,17 +36,16 @@ func (m *Category) SetID(id int64) {
 	m.ID = id
 }
 
+// Product is a product in the store.
+// CategoryID with `m2o` tag creates a foreign key to Category table.
+// The Category field is a pointer to the related Category entity.
 type Product struct {
 	ID         int64
-	CategoryID int64
+	CategoryID int64 `goe:"m2o"`
 	Name       string
 	Color      string
 	Price      float64
-	Category   *Category `goe:"m2o"`
-}
-
-func (*Product) TableName() string {
-	return "t_product"
+	Category   *Category
 }
 
 func (m *Product) GetID() int64 {
@@ -59,6 +56,7 @@ func (m *Product) SetID(id int64) {
 	m.ID = id
 }
 
+// Order is an order in the store.
 type Order struct {
 	ID       int64
 	OrderNo  string `goe:"unique"`
@@ -66,12 +64,8 @@ type Order struct {
 	Total    float64
 	Status   string
 	Created  time.Time
-	Details  []*OrderDetail `goe:"o2m"`
-	Products []*Product     `goe:"m2m"`
-}
-
-func (*Order) TableName() string {
-	return "t_order"
+	Details  []*OrderDetail
+	Products []*Product `goe:"-"`
 }
 
 func (m *Order) GetID() int64 {
@@ -89,18 +83,23 @@ func (m *Order) GetProductIds() (ids []int64) {
 	return
 }
 
+// OrderDetail is a detail of an order.
+// OrderID and ProductID form a composite primary key with `pk;not_incr` tags.
+// `m2o` tag on OrderID creates a foreign key to Order table.
+// `o2o` tag on ProductID creates a one-to-one relationship with Product table.
 type OrderDetail struct {
-	OrderID   int64 `goe:"pk;not_incr"`
-	ProductID int64 `goe:"pk;not_incr"`
+	OrderID   int64 `goe:"pk;not_incr;m2o"`
+	ProductID int64 `goe:"pk;not_incr;o2o"`
 	Quantity  int
 	Price     float64
-	Product   *Product `goe:"o2o"`
+	Product   *Product
 }
 
 func (*OrderDetail) TableName() string {
-	return "t_order_detail"
+	return "t_order_product"
 }
 
+// PublicSchema is the public schema of the database.
 type PublicSchema struct {
 	Category    *goent.Table[Category]
 	Product     *goent.Table[Product]
@@ -108,8 +107,9 @@ type PublicSchema struct {
 	OrderDetail *goent.Table[OrderDetail]
 }
 
+// Database is the database connection with its driver.
 type Database struct {
-	PublicSchema `goe:"public"`
+	PublicSchema `goe:"public;prefix:t_"`
 	*goent.DB
 }
 
@@ -118,7 +118,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer goent.Close(db)
+	defer clearDatabase(db, false)
 
 	if err = goent.AutoMigrate(db); err != nil {
 		panic(err)
@@ -171,18 +171,6 @@ func addForeignKeys(db *Database) {
 			Reference:  db.OrderDetail.Field("order_id"),
 			Middle:     nil,
 		},
-		"t_product": {
-			Type:       goent.M2M,
-			MountField: "Products",
-			ForeignKey: "id",
-			Reference:  db.Product.Field("id"),
-			Middle: &goent.ThirdParty{
-				Table: new(OrderDetail).TableName(),
-				Left:  "order_id",
-				Right: "product_id",
-				Where: goent.Condition{},
-			},
-		},
 	}
 	db.OrderDetail.Foreigns = map[string]*goent.Foreign{
 		"t_product": {
@@ -206,6 +194,18 @@ func connect(dbType, dbDSN, logFile string) (*Database, error) {
 		drv = sqlite.OpenDSN(dbDSN)
 	}
 	return goent.Open[Database](drv, logFile)
+}
+
+func clearDatabase(db *Database, isDrop bool) {
+	var err error
+	if isDrop {
+		sql := "DROP TABLE IF EXISTS public.t_order_product, public.t_order, public.t_product, public.t_category CASCADE"
+		err = db.RawExecContext(context.Background(), sql)
+	}
+	_ = goent.Close(db)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func dataCategories() []*Category {

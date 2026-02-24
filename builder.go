@@ -82,6 +82,7 @@ func PutBuilder(b *Builder) {
 	builderPool.Put(b)
 }
 
+// Reset resets the Builder to its initial state.
 func (b *Builder) Reset() {
 	b.Builder.Reset()
 	b.ResetForSave()
@@ -98,6 +99,7 @@ func (b *Builder) Reset() {
 	b.RollUp = ""
 }
 
+// ResetForSave resets the Builder for INSERT/UPDATE operations.
 func (b *Builder) ResetForSave() {
 	b.Changes = make(map[*Field]any)
 	b.MoreRows = make([][]any, 0)
@@ -106,6 +108,7 @@ func (b *Builder) ResetForSave() {
 	b.Returning = ""
 }
 
+// SetTable sets the table for the query builder.
 func (b *Builder) SetTable(table TableInfo, driver model.Driver) *Builder {
 	b.Table = table.Table()
 	var schema string
@@ -116,6 +119,7 @@ func (b *Builder) SetTable(table TableInfo, driver model.Driver) *Builder {
 	return b
 }
 
+// BuildHead builds the SELECT, INSERT, UPDATE, or DELETE statement head (e.g., "SELECT * FROM table").
 func (b *Builder) BuildHead() []any {
 	var args []any
 	switch b.Type {
@@ -187,6 +191,7 @@ func (b *Builder) BuildHead() []any {
 	return args
 }
 
+// BuildDoing builds the SET clause for UPDATE or VALUES clause for INSERT.
 func (b *Builder) BuildDoing() []any {
 	var args []any
 	switch b.Type {
@@ -243,6 +248,7 @@ func (b *Builder) BuildDoing() []any {
 	return args
 }
 
+// BuildTail builds the tail part of the query (GROUP BY, ORDER BY, LIMIT, OFFSET, RETURNING).
 func (b *Builder) BuildTail() []any {
 	var args []any
 
@@ -281,7 +287,7 @@ func (b *Builder) BuildTail() []any {
 		}
 	}
 
-	if b.Returning != "" && b.Type == model.InsertQuery {
+	if b.Returning != "" && (b.Type == model.InsertQuery || b.Type == model.InsertAllQuery) {
 		b.WriteString(" RETURNING ")
 		b.WriteString(b.Returning)
 	}
@@ -289,6 +295,7 @@ func (b *Builder) BuildTail() []any {
 	return args
 }
 
+// BuildWhere builds the WHERE clause for the query.
 func (b *Builder) BuildWhere() []any {
 	var args []any
 
@@ -343,6 +350,7 @@ func (b *Builder) BuildWhere() []any {
 	return args
 }
 
+// BuildJoins builds the JOIN clauses for the query.
 func (b *Builder) BuildJoins() []any {
 	var args []any
 	if len(b.Joins) == 0 {
@@ -406,6 +414,7 @@ func (b *Builder) BuildJoins() []any {
 	return args
 }
 
+// Build assembles the complete SQL query and returns it along with query arguments.
 func (b *Builder) Build(destroy bool) (sql string, args []any) {
 	args = append(args, b.BuildHead()...)
 	args = append(args, b.BuildDoing()...)
@@ -422,10 +431,13 @@ func (b *Builder) Build(destroy bool) (sql string, args []any) {
 // CollectFields collects primary key and non-primary key fields from a struct value.
 // It sets the builder's returning information for auto-increment primary keys
 // and returns a map of primary key column names to their values.
-func CollectFields[T any](builder *Builder, table *Table[T], valueOf reflect.Value) (Dict, int) {
+func CollectFields[T any](builder *Builder, table *Table[T], valueOf reflect.Value, ignores []string) (Dict, int) {
 	pkFid, pkName, pkeys := table.TableInfo.GetPrimaryInfo()
 	primary := make(Dict)
 	for _, col := range table.Columns {
+		if len(ignores) > 0 && slices.Contains(ignores, col.FieldName) {
+			continue
+		}
 		name := col.ColumnName
 		fieldOf := valueOf.FieldByName(col.FieldName)
 		if slices.Contains(pkeys, name) {
@@ -448,7 +460,7 @@ func CollectFields[T any](builder *Builder, table *Table[T], valueOf reflect.Val
 	}
 	if pkName != "" && len(primary) == 0 {
 		for _, pk := range table.PrimaryKeys {
-			if pk.Column.HasDefault {
+			if pk.Column.HasDefault || pk.IsAutoIncr {
 				builder.Returning = pkName
 				break
 			}

@@ -222,16 +222,16 @@ func foreignKeyIsPrimarykey(table *model.TableMigrate, attName string) bool {
 func createTable(tbl *model.TableMigrate, dataMap map[string]*dataType, sql *strings.Builder, tables map[string]*model.TableMigrate, skipDependency bool) {
 	t := table{}
 	t.name = fmt.Sprintf("CREATE TABLE %v (", tbl.EscapingTableName())
+	processedAttrs := make(map[string]bool)
+
 	for _, att := range tbl.PrimaryKeys {
-		if primaryKeyIsForeignKey(tbl, att.Name) {
-			continue
-		}
 		att.DataType = checkDataType(att.DataType, dataMap).typeName
 		if att.AutoIncrement {
 			t.createAttrs = append(t.createAttrs, fmt.Sprintf("%v %v NOT NULL,", att.EscapingName, att.DataType))
 		} else {
 			t.createAttrs = append(t.createAttrs, fmt.Sprintf("%v %v NOT NULL %v,", att.EscapingName, att.DataType, setDefault(att.Default)))
 		}
+		processedAttrs[att.Name] = true
 	}
 
 	for _, att := range tbl.Attributes {
@@ -243,9 +243,13 @@ func createTable(tbl *model.TableMigrate, dataMap map[string]*dataType, sql *str
 				return "NOT NULL"
 			}
 		}(), setDefault(att.Default)))
+		processedAttrs[att.Name] = true
 	}
 
 	for _, att := range tbl.OneToSomes {
+		if processedAttrs[att.Name] {
+			continue
+		}
 		tb := tables[att.TargetTable]
 		if tb.Migrated {
 			t.createAttrs = append(t.createAttrs, foreignOneToSome(att, dataMap))
@@ -258,6 +262,9 @@ func createTable(tbl *model.TableMigrate, dataMap map[string]*dataType, sql *str
 	}
 
 	for _, att := range tbl.ManyToSomes {
+		if processedAttrs[att.Name] {
+			continue
+		}
 		tb := tables[att.TargetTable]
 		if tb.Migrated {
 			t.createAttrs = append(t.createAttrs, foreignManyToSome(att, dataMap))

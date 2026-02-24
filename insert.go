@@ -14,27 +14,29 @@ type StateInsert[T any] struct {
 	*StateWhere
 }
 
+// One inserts a single record into the table.
 func (s *StateInsert[T]) One(obj *T) error {
 	s.builder.Type = model.InsertQuery
 	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
 	s.builder.ResetForSave()
 
 	valueOf := reflect.ValueOf(obj).Elem()
-	primary, retFid := CollectFields(s.builder, s.table, valueOf)
+	primary, retFid := CollectFields(s.builder, s.table, valueOf, nil)
 	for name, val := range primary {
 		s.builder.Changes[s.table.Field(name)] = val
 	}
 
+	returning := s.builder.Returning
 	qr := model.CreateQuery(s.builder.Build(true))
 	hd := s.Prepare(s.table.db.driver)
-	if retFid >= 0 && s.table.db.driver.SupportsReturning() {
+	if retFid >= 0 && returning != "" && s.table.db.driver.SupportsReturning() {
 		return hd.ExecuteReturning(qr, valueOf, retFid)
 	}
 	err := hd.ExecuteNoReturn(qr)
 	if err != nil {
 		return err
 	}
-	if retFid >= 0 && s.table.PrimaryKeys[0].IsAutoIncr {
+	if retFid >= 0 && returning != "" && s.table.PrimaryKeys[0].IsAutoIncr && !s.table.db.driver.SupportsReturning() {
 		return s.getLastInsertId(valueOf, retFid)
 	}
 	return nil
@@ -55,6 +57,7 @@ func (s *StateInsert[T]) getLastInsertId(valueOf reflect.Value, retFid int) erro
 	return nil
 }
 
+// All inserts multiple records into the table.
 func (s *StateInsert[T]) All(retPK bool, data []*T) error {
 	if len(data) == 0 {
 		return nil
@@ -103,17 +106,18 @@ func (s *StateInsert[T]) All(retPK bool, data []*T) error {
 		s.builder.MoreRows = append(s.builder.MoreRows, newbie)
 	}
 
+	returning := s.builder.Returning
 	qr := model.CreateQuery(s.builder.Build(true))
 	hd := s.Prepare(s.table.db.driver)
-	if pkFid >= 0 && pkName != "" && isAutoIncr && s.table.db.driver.SupportsReturning() {
-		valueOf := reflect.ValueOf(data[0]).Elem()
+	if pkFid >= 0 && returning != "" && isAutoIncr && s.table.db.driver.SupportsReturning() {
+		valueOf := reflect.ValueOf(data)
 		return hd.BatchReturning(qr, valueOf, pkFid)
 	}
 	err := hd.ExecuteNoReturn(qr)
 	if err != nil {
 		return err
 	}
-	if pkFid >= 0 && pkName != "" && isAutoIncr {
+	if pkFid >= 0 && returning != "" && isAutoIncr && !s.table.db.driver.SupportsReturning() {
 		return s.getLastInsertIds(data, pkFid)
 	}
 	return nil
@@ -153,6 +157,7 @@ func (s *StateInsert[T]) queryLastInsertId() (int64, error) {
 	return id, nil
 }
 
+// OnTransaction sets the transaction for the insert operation.
 func (s *StateInsert[T]) OnTransaction(tx model.Transaction) *StateInsert[T] {
 	s.StateWhere.conn = tx
 	return s
@@ -175,12 +180,13 @@ func (s *StateSave[T]) getQuery(primary Dict) model.Query {
 	return model.CreateQuery(s.builder.Build(true))
 }
 
+// One saves a record to the table, inserting if no primary key exists or updating if it does.
 func (s *StateSave[T]) One(obj *T) error {
 	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
 	s.builder.ResetForSave()
 
 	valueOf := reflect.ValueOf(obj).Elem()
-	primary, retFid := CollectFields(s.builder, s.table, valueOf)
+	primary, retFid := CollectFields(s.builder, s.table, valueOf, s.table.Ignores)
 	qr := s.Take(1).getQuery(primary)
 	hd := s.Prepare(s.table.db.driver)
 	if s.builder.Returning != "" {
@@ -189,6 +195,7 @@ func (s *StateSave[T]) One(obj *T) error {
 	return hd.ExecuteNoReturn(qr)
 }
 
+// Map saves records from a map, inserting or updating based on primary key presence.
 func (s *StateSave[T]) Map(value Dict) error {
 	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
 	s.builder.ResetForSave()
@@ -211,11 +218,13 @@ func (s *StateSave[T]) Map(value Dict) error {
 	return hd.ExecuteNoReturn(qr)
 }
 
+// OnTransaction sets the transaction for the save operation.
 func (s *StateSave[T]) OnTransaction(tx model.Transaction) *StateSave[T] {
 	s.StateWhere.conn = tx
 	return s
 }
 
+// Match sets the WHERE conditions based on the non-zero fields of the given object.
 func (s *StateSave[T]) Match(obj T) *StateSave[T] {
 	s.StateWhere = MatchWhere(s.StateWhere, s.table, obj)
 	return s

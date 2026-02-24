@@ -198,12 +198,7 @@ func Close(ent any) error {
 		return dc.ErrorHandler(context.TODO(), err)
 	}
 
-	tableRegLock.Lock()
-	for _, table := range tableRegistry {
-		delete(tableRegistry, table.TableAddr)
-	}
-	tableRegLock.Unlock()
-
+	ResetRegistry()
 	return nil
 }
 

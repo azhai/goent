@@ -1,13 +1,12 @@
 # GoEnt
-GO Entity or just "GoEnt" is a type safe ORM for Go
+GO Entity or just "GoEnt" is an easy-to-use ORM for Go
 
 [![test status](https://github.com/azhai/goent/actions/workflows/tests.yml/badge.svg "test status")](https://github.com/azhai/goent/actions)
 [![Go Report Card](https://goreportcard.com/badge/github.com/azhai/goent)](https://goreportcard.com/report/github.com/azhai/goent)
 [![Go.Dev reference](https://img.shields.io/badge/go.dev-reference-blue?logo=go&logoColor=white)](https://pkg.go.dev/github.com/azhai/goent)
 [![MIT license](https://img.shields.io/badge/license-MIT-brightgreen.svg)](https://opensource.org/licenses/MIT)
 
-![](goe.png)
-*Goe logo by [Luanexs](https://www.instagram.com/luanexs/)*
+![GoEnt Logo](goent-logo.svg)
 
 ## Requirements
 - go v1.26 or above
@@ -23,8 +22,6 @@ Common examples are:
 ## Features
 Check out the [Benchmarks](#benchmarks) section for a overview on GoEnt performance compared to other packages like, ent, GORM, sqlc, and others.
 
-- 🚫 Non-String Usage;
-	- write queries with only Go code
 - 🔖 Type Safety;
 	- get errors on compile time
 - 📦 Auto Migrations;
@@ -184,7 +181,9 @@ func main() {
 		{Name: "Bird", Emoji: "🐦"},
 	}
 
-	err = db.Animal.Insert().All(true, animals)
+	// Insert all animals in a single transaction
+	// retPK = false is 5 times faster than retPK = true
+	err = db.Animal.Insert().All(false, animals)
 	if err != nil {
 		panic(err)
 	}
@@ -260,6 +259,48 @@ type User struct {
 > By default the field "ID" is primary key and all ids of integers are auto increment.
 
 [Back to Contents](#content)
+### Table Name Resolution
+
+Table names are resolved in the following order:
+1. **`TableName()` method** - If the struct implements `TableName() string`, that value is used directly
+2. **Struct name in snake_case with prefix** - If no `TableName()` method, the struct name is converted to snake_case, with optional `prefix:` from schema tag prepended
+
+The schema tag format is: `goe:"schema_name;prefix:table_prefix"`
+
+```go
+// Method 1: TableName() method (returns exact table name, no prefix added)
+type OrderDetail struct {
+    OrderID   int64 `goe:"pk;not_incr"`
+    ProductID int64 `goe:"pk;not_incr"`
+}
+
+func (*OrderDetail) TableName() string {
+    return "t_order_detail"  // Exact table name, prefix is ignored
+}
+
+// Method 2: Auto-generated from struct name with prefix
+type PublicSchema struct {
+    User     *goent.Table[User]     // Table: t_user (with prefix t_)
+    Category *goent.Table[Category] // Table: t_category
+}
+
+type Database struct {
+    PublicSchema `goe:"public;prefix:t_"`  // schema=public, prefix=t_
+    *goent.DB
+}
+
+// Without prefix
+type AuthSchema struct {
+    Role *goent.Table[Role]  // Table: role (no prefix)
+}
+
+type Database struct {
+    AuthSchema `goe:"auth"`  // schema=auth, no prefix
+    *goent.DB
+}
+```
+
+[Back to Contents](#content)
 ### Setting primary key
 ```go
 type User struct {
@@ -270,6 +311,25 @@ type User struct {
 ```
 In case you want to specify 
 a primary key use the tag value "pk".
+
+#### Composite Primary Key
+```go
+type OrderDetail struct {
+	OrderID   int `goe:"pk;not_incr"`
+	ProductID int `goe:"pk;not_incr"`
+	Quantity  int
+}
+```
+Use multiple `pk` tags to create a composite primary key. Add `not_incr` to prevent auto-increment on primary key columns.
+
+#### Non-Auto-Increment Primary Key
+```go
+type User struct {
+	ID   string `goe:"pk;not_incr;default:uuid_generate_v4()"`
+	Name string
+}
+```
+Use `not_incr` tag to prevent auto-increment behavior on primary key columns. This is useful for UUID or string primary keys.
 
 [Back to Contents](#content)
 ### Setting type
@@ -336,8 +396,13 @@ type Default struct {
 When inserting, the default value is automatically set on the struct:
 
 ```go
-d := Default{Name: "Test"}
-err = db.Default.Insert().One(&d)
+// d := Default{Name: "Test"}
+// err = db.Default.Insert().One(&d)
+
+// recommend:
+d := &Default{Name: "Test"}
+err = db.Default.Insert().One(d)
+
 // d.ID == "Default" (set from default value)
 
 if err != nil {
@@ -953,6 +1018,42 @@ if err != nil {
 ```
 
 Same as where, you can use a if to only make a join if the condition match.
+
+#### LeftJoin Helper Method
+
+The `LeftJoin` method is a convenient helper for LEFT JOIN operations with automatic column selection:
+
+```go
+// LeftJoin automatically selects columns from the joined table
+orderDetails, err := db.OrderDetail.Select().
+    LeftJoin("product_id", db.Product.Field("id")).
+    Filter(goent.Equals(db.OrderDetail.Field("order_id"), orderID)).
+    All()
+
+// The Product field will be populated for each OrderDetail
+for _, detail := range orderDetails {
+    if detail.Product != nil {
+        fmt.Printf("Product: %s, Price: %.2f\n", detail.Product.Name, detail.Product.Price)
+    }
+}
+```
+
+The `LeftJoin` method:
+- Automatically adds the joined table's columns to the SELECT list
+- Creates the JOIN condition using the local foreign key field and the referenced field
+- Supports chaining multiple joins
+
+```go
+// Multiple joins example
+results, err := db.Person.Select().
+    LeftJoin("id", db.PersonJobTitle.Field("person_id")).
+    LeftJoin("job_title_id", db.JobTitle.Field("id")).
+    Filter(goent.Equals(db.JobTitle.Field("name"), "Developer")).
+    All()
+```
+
+> [!NOTE]
+> `LeftJoin` only populates non-slice foreign fields. For slice relationships (e.g., `Jobs []JobTitle`), use the standard `Join` method with manual column selection.
 
 [Back to Contents](#content)
 ### Order By

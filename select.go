@@ -4,6 +4,7 @@ import (
 	"context"
 	"iter"
 	"math"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -35,6 +36,7 @@ func NewStateSelectFrom[T, R any](state *StateWhere, table *Table[T]) *StateSele
 	return &StateSelect[T, R]{table: table, StateWhere: state}
 }
 
+// CopyFrom copies the query builder state from another builder and connection.
 func (s *StateSelect[T, R]) CopyFrom(ob *Builder, conn model.Connection) *StateSelect[T, R] {
 	// copy joins
 	// s.builder.Selects = ob.Selects
@@ -51,6 +53,7 @@ func (s *StateSelect[T, R]) CopyFrom(ob *Builder, conn model.Connection) *StateS
 	return s
 }
 
+// Select specifies the fields to select from the table.
 func (s *StateSelect[T, R]) Select(fields ...any) *StateSelect[T, R] {
 	var fld *Field
 	for _, one := range fields {
@@ -71,7 +74,7 @@ func (s *StateSelect[T, R]) Query(creator FetchCreator) (*Fetcher[R], model.Quer
 	info, fields := s.table.TableInfo, slices.Clone(s.builder.Selects)
 	fet := &Fetcher[R]{
 		NewTarget: func() *R { return new(R) },
-		FetchTo:   creator(info, fields, s.GetJoinForeign()),
+		FetchTo:   creator(info, fields, s.GetJoinForeigns()),
 		Handler:   s.Prepare(s.table.db.driver),
 	}
 	return fet, qr
@@ -83,6 +86,7 @@ func (s *StateSelect[T, R]) IterRows() iter.Seq2[*R, error] {
 	return fet.FetchResult(qr)
 }
 
+// Rows executes the query and returns all rows as a slice.
 func (s *StateSelect[T, R]) Rows() (data []*R, err error) {
 	var rows model.Rows
 	limit := s.builder.Limit
@@ -97,6 +101,7 @@ func (s *StateSelect[T, R]) Rows() (data []*R, err error) {
 	return
 }
 
+// One executes the query and returns the first row as a single result.
 func (s *StateSelect[T, R]) One() (*R, error) {
 	limit := -1
 	if s.sameModel {
@@ -111,6 +116,7 @@ func (s *StateSelect[T, R]) One() (*R, error) {
 	return nil, ErrNotFound
 }
 
+// All executes the query and returns all rows as a slice.
 func (s *StateSelect[T, R]) All() ([]*R, error) {
 	rows := make([]*R, 0, s.builder.Limit)
 	for row, err := range s.IterRows() {
@@ -125,6 +131,7 @@ func (s *StateSelect[T, R]) All() ([]*R, error) {
 	return rows, nil
 }
 
+// Map executes the query and returns results as a map keyed by the specified column.
 func (s *StateSelect[T, R]) Map(key string) (map[int64]*R, error) {
 	var col *Column
 	if col = s.table.ColumnInfo(key); col == nil {
@@ -145,6 +152,7 @@ func (s *StateSelect[T, R]) Map(key string) (map[int64]*R, error) {
 	return res, nil
 }
 
+// Rank executes the query and returns results as a map keyed by the specified column, with each key mapping to a slice of results.
 func (s *StateSelect[T, R]) Rank(key string) (map[int64][]*R, error) {
 	var col *Column
 	if col = s.table.ColumnInfo(key); col == nil {
@@ -165,26 +173,35 @@ func (s *StateSelect[T, R]) Rank(key string) (map[int64][]*R, error) {
 	return res, nil
 }
 
+// RollUP enables rollup for aggregation queries.
+//
+// Example:
+//
+//	results, _ := db.Order.Select("status", "total").GroupBy("status").RollUP().All()
 func (s *StateSelect[T, R]) RollUP() *StateSelect[T, R] {
 	return s
 }
 
+// OnTransaction sets a transaction for the select query and enables FOR UPDATE lock.
 func (s *StateSelect[T, R]) OnTransaction(tx model.Transaction) *StateSelect[T, R] {
 	s.builder.ForUpdate = true
 	s.StateWhere.conn = tx
 	return s
 }
 
+// Filter adds filter conditions to the select query.
 func (s *StateSelect[T, R]) Filter(args ...Condition) *StateSelect[T, R] {
 	s.StateWhere = s.StateWhere.Filter(args...)
 	return s
 }
 
+// Where adds a WHERE clause to the select query.
 func (s *StateSelect[T, R]) Where(where string, args ...any) *StateSelect[T, R] {
 	s.StateWhere = s.StateWhere.Where(where, args...)
 	return s
 }
 
+// Match sets the WHERE conditions based on the non-zero fields of the given object.
 func (s *StateSelect[T, R]) Match(obj T) *StateSelect[T, R] {
 	s.StateWhere = MatchWhere(s.StateWhere, s.table, obj)
 	return s
@@ -227,6 +244,7 @@ func (s *StateSelect[T, R]) Skip(i int) *StateSelect[T, R] {
 	return s
 }
 
+// GetJoinForeign returns the foreign key relationship for the joined table.
 func (s *StateSelect[T, R]) GetJoinForeign() *Foreign {
 	if len(s.builder.Joins) == 0 {
 		return nil
@@ -236,6 +254,35 @@ func (s *StateSelect[T, R]) GetJoinForeign() *Foreign {
 		return foreign
 	}
 	return nil
+}
+
+// GetJoinForeigns returns all foreign key relationships for the joined tables.
+func (s *StateSelect[T, R]) GetJoinForeigns() []*Foreign {
+	if len(s.builder.Joins) == 0 {
+		return nil
+	}
+	foreigns := make([]*Foreign, 0, len(s.builder.Joins))
+	valueType := reflect.TypeFor[R]()
+	for _, join := range s.builder.Joins {
+		if foreign, ok := s.table.Foreigns[join.Table.Name]; ok {
+			foreigns = append(foreigns, foreign)
+		} else {
+			info := findTableInfoByName(join.Table.Name)
+			if info != nil {
+				if field, ok := valueType.FieldByName(info.FieldName); ok {
+					if field.Type.Kind() == reflect.Slice {
+						continue
+					}
+					foreigns = append(foreigns, &Foreign{
+						Type:       O2O,
+						MountField: info.FieldName,
+						Reference:  &Field{TableAddr: info.TableAddr},
+					})
+				}
+			}
+		}
+	}
+	return foreigns
 }
 
 // Join joins another table with a condition
@@ -271,7 +318,9 @@ func (s *StateSelect[T, R]) LeftJoin(fkey string, refer *Field) *StateSelect[T, 
 	} else {
 		leftField = s.table.Field(fkey)
 	}
-	return s.Join(model.LeftJoin, *info, EqualsField(leftField, refer))
+	s.Join(model.LeftJoin, *info, EqualsField(leftField, refer))
+	s.builder.Selects = append(s.builder.Selects, info.GetSortedFields()...)
+	return s
 }
 
 func findTableInfoByName(name string) *TableInfo {
@@ -287,21 +336,21 @@ func findTableInfoByName(name string) *TableInfo {
 
 // Pagination holds paginated query results with metadata.
 type Pagination[T, R any] struct {
-	TotalValues int64 `json:"totalValues"`
-	TotalPages  int   `json:"totalPages"`
+	TotalValues int64 `json:"totalValues"` // TotalValues is the total number of values in the query result.
+	TotalPages  int   `json:"totalPages"`  // TotalPages is the total number of pages in the pagination.
 
-	PageValues int `json:"pageValues"`
-	PageSize   int `json:"pageSize"`
+	PageValues int `json:"pageValues"` // PageValues is the number of values on the current page.
+	PageSize   int `json:"pageSize"`   // PageSize is the maximum number of values per page.
 
-	CurrentPage     int  `json:"currentPage"`
-	HasPreviousPage bool `json:"hasPreviousPage"`
-	PreviousPage    int  `json:"previousPage"`
-	HasNextPage     bool `json:"hasNextPage"`
-	NextPage        int  `json:"nextPage"`
+	CurrentPage     int  `json:"currentPage"`     // CurrentPage is the current page number.
+	HasPreviousPage bool `json:"hasPreviousPage"` // HasPreviousPage is true if there is a previous page.
+	PreviousPage    int  `json:"previousPage"`    // PreviousPage is the number of the previous page.
+	HasNextPage     bool `json:"hasNextPage"`     // HasNextPage is true if there is a next page.
+	NextPage        int  `json:"nextPage"`        // NextPage is the number of the next page.
 
-	StartIndex int  `json:"startIndex"`
-	EndIndex   int  `json:"endIndex"`
-	Values     []*R `json:"values"`
+	StartIndex int  `json:"startIndex"` // StartIndex is the index of the first value on the current page.
+	EndIndex   int  `json:"endIndex"`   // EndIndex is the index of the last value on the current page.
+	Values     []*R `json:"values"`     // Values is the slice of values on the current page.
 }
 
 // Pagination return a paginated query as [Pagination].

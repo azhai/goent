@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <style>
+      .top-color { fill: #FF8C42; }
+      .bottom-color { fill: #00ADD8; }
+      .bottom-color-light { fill: #33BDD9; }
+    </style>
+  </defs>
+  
+  <!-- 顶部：Go实体（菱形）- 代表Go代码对象 - 橙色 -->
+  <path class="top-color" d="M128 32 L216 82 L128 132 L40 82 Z" stroke="#FF8C42" stroke-width="8" stroke-linejoin="round"/>
+  
+  <!-- 底部层：数据库表（第一层）- Go蓝色 -->
+  <path class="bottom-color" d="M40 98 L128 148 L216 98 L216 118 L128 168 L40 118 Z" stroke="#00ADD8" stroke-width="8" stroke-linejoin="round"/>
+  
+  <!-- 底部层：数据库表（第二层）- 浅Go蓝色 -->
+  <path class="bottom-color-light" d="M40 134 L128 184 L216 134 L216 154 L128 204 L40 154 Z" stroke="#33BDD9" stroke-width="8" stroke-linejoin="round"/>
+  
+  <!-- 负空间间隙 - 代表ORM映射层 -->
+  <rect x="0" y="0" width="256" height="256" fill="none"/>
+</svg>

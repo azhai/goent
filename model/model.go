@@ -5,11 +5,13 @@ import (
 	"time"
 )
 
+// Attribute represents a column in a table.
 type Attribute struct {
 	Table string
 	Name  string
 }
 
+// Query represents a SQL query with its arguments and duration.
 type Query struct {
 	RawSql        string
 	Arguments     []any
@@ -17,15 +19,18 @@ type Query struct {
 	Err           error
 }
 
+// CreateQuery creates a new Query with the given raw SQL and arguments.
 func CreateQuery(rawSql string, args []any) Query {
 	return Query{RawSql: rawSql, Arguments: args}
 }
 
+// Table represents a database table with its schema and name.
 type Table struct {
 	Schema *string
 	Name   string
 }
 
+// String returns the table name with schema if available.
 func (t Table) String() string {
 	if t.Schema != nil {
 		return *t.Schema + "." + t.Name
@@ -33,6 +38,7 @@ func (t Table) String() string {
 	return t.Name
 }
 
+// Migrator represents a database migrator with its tables and schemas.
 type Migrator struct {
 	Tables  map[string]*TableMigrate
 	Schemas []string
@@ -98,7 +104,7 @@ type OneToSomeMigrate struct {
 
 // EscapingTargetTableName returns the target table and the schema.
 func (o OneToSomeMigrate) EscapingTargetTableName() string {
-	if o.TargetSchema != nil {
+	if o.TargetSchema != nil && *o.TargetSchema != "" {
 		return *o.TargetSchema + "." + o.EscapingTargetTable
 	}
 	return o.EscapingTargetTable
@@ -116,7 +122,7 @@ type ManyToSomeMigrate struct {
 
 // EscapingTargetTableName returns the target table and the schema.
 func (m ManyToSomeMigrate) EscapingTargetTableName() string {
-	if m.TargetSchema != nil {
+	if m.TargetSchema != nil && *m.TargetSchema != "" {
 		return *m.TargetSchema + "." + m.EscapingTargetTable
 	}
 	return m.EscapingTargetTable
@@ -133,6 +139,7 @@ type DatabaseConfig struct {
 	initCallback     func() error
 }
 
+// ErrorHandler logs the database error using the configured logger.
 func (c *DatabaseConfig) ErrorHandler(ctx context.Context, err error) error {
 	if c.Logger != nil {
 		c.Logger.ErrorContext(ctx, "error", "database", c.databaseName, "err", err)
@@ -140,6 +147,7 @@ func (c *DatabaseConfig) ErrorHandler(ctx context.Context, err error) error {
 	return err
 }
 
+// ErrorQueryHandler logs the query error using the configured logger.
 func (c *DatabaseConfig) ErrorQueryHandler(ctx context.Context, query Query) error {
 	query.Err = c.errorTranslator(query.Err)
 	if c.Logger == nil {
@@ -157,6 +165,7 @@ func (c *DatabaseConfig) ErrorQueryHandler(ctx context.Context, query Query) err
 	return query.Err
 }
 
+// InfoHandler logs the query information using the configured logger.
 func (c *DatabaseConfig) InfoHandler(ctx context.Context, query Query) {
 	if c.Logger == nil {
 		return
@@ -179,26 +188,32 @@ func (c *DatabaseConfig) InfoHandler(ctx context.Context, query Query) {
 	c.Logger.InfoContext(ctx, "query_runned", logs...)
 }
 
+// Schemas returns the list of schemas configured for the database.
 func (c *DatabaseConfig) Schemas() []string {
 	return c.schemas
 }
 
+// SetSchemas sets the list of schemas for the database.
 func (c *DatabaseConfig) SetSchemas(s []string) {
 	c.schemas = s
 }
 
+// AddSchema adds a schema to the list of schemas for the database.
 func (c *DatabaseConfig) AddSchema(s string) {
 	c.schemas = append(c.schemas, s)
 }
 
+// SetInitCallback sets the initialization callback function for the database.
 func (c *DatabaseConfig) SetInitCallback(f func() error) {
 	c.initCallback = f
 }
 
+// InitCallback returns the initialization callback function for the database.
 func (c *DatabaseConfig) InitCallback() func() error {
 	return c.initCallback
 }
 
+// Init initializes the database configuration with the given driver name and error translator.
 func (c *DatabaseConfig) Init(driverName string, errorTranslator func(err error) error) {
 	c.schemas = nil
 	c.initCallback = nil

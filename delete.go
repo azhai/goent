@@ -87,11 +87,13 @@ type StateDelete[T any] struct {
 	*StateWhere
 }
 
+// Match sets the WHERE conditions based on the non-zero fields of the given object.
 func (s *StateDelete[T]) Match(obj T) *StateDelete[T] {
 	s.StateWhere = MatchWhere(s.StateWhere, s.table, obj)
 	return s
 }
 
+// Exec executes the DELETE query.
 func (s *StateDelete[T]) Exec() error {
 	s.builder.Type = model.DeleteQuery
 	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
@@ -105,11 +107,13 @@ func (s *StateDelete[T]) OnTransaction(tx model.Transaction) *StateDelete[T] {
 	return s
 }
 
+// Filter adds filter conditions to the DELETE query.
 func (s *StateDelete[T]) Filter(args ...Condition) *StateDelete[T] {
 	s.StateWhere = s.StateWhere.Filter(args...)
 	return s
 }
 
+// Where adds a WHERE clause to the DELETE query.
 func (s *StateDelete[T]) Where(where string, args ...any) *StateDelete[T] {
 	s.StateWhere = s.StateWhere.Where(where, args...)
 	return s

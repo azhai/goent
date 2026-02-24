@@ -78,6 +78,47 @@ type Default struct {
 }
 ```
 
+### Table Name Resolution
+
+Table names are resolved in the following order:
+1. **`TableName()` method** - If the struct implements `TableName() string`, that value is used directly
+2. **Struct name in snake_case with prefix** - If no `TableName()` method, the struct name is converted to snake_case, with optional `prefix:` from schema tag prepended
+
+The schema tag format is: `goe:"schema_name;prefix:table_prefix"`
+
+```go
+// Method 1: TableName() method (returns exact table name, no prefix added)
+type OrderDetail struct {
+    OrderID   int64 `goe:"pk;not_incr"`
+    ProductID int64 `goe:"pk;not_incr"`
+}
+
+func (*OrderDetail) TableName() string {
+    return "t_order_detail"  // Exact table name, prefix is ignored
+}
+
+// Method 2: Auto-generated from struct name with prefix
+type PublicSchema struct {
+    User        *goent.Table[User]        // Table: t_user (with prefix t_)
+    Category    *goent.Table[Category]    // Table: t_category
+}
+
+type Database struct {
+    PublicSchema `goe:"public;prefix:t_"`  // schema=public, prefix=t_
+    *goent.DB
+}
+
+// Without prefix
+type AuthSchema struct {
+    Role *goent.Table[Role]  // Table: role (no prefix)
+}
+
+type Database struct {
+    AuthSchema `goe:"auth"`  // schema=auth, no prefix
+    *goent.DB
+}
+```
+
 ### Column Metadata
 
 The `Column` struct in `column.go` stores column metadata:
@@ -120,6 +161,24 @@ err := db.Animal.Delete().
     Filter(goent.Like(db.Animal.Field("name"), "%Cat%")).
     Exec()
 ```
+
+### LeftJoin Helper Method
+
+The `LeftJoin` method provides a convenient way to perform LEFT JOIN operations:
+
+```go
+// LeftJoin automatically selects columns from the joined table
+orderDetails, err := db.OrderDetail.Select().
+    LeftJoin("product_id", db.Product.Field("id")).
+    Filter(goent.Equals(db.OrderDetail.Field("order_id"), orderID)).
+    All()
+```
+
+Key behaviors:
+- Automatically adds joined table's columns to SELECT list
+- Supports chaining multiple joins
+- Only populates non-slice foreign fields (skips slice relationships like `Jobs []JobTitle`)
+- For columns that cannot be mapped to struct fields, uses dummy variables to receive values
 
 ## Code Conventions
 
@@ -171,6 +230,16 @@ This approach:
 - Preserves original field order in table definitions
 - Handles complex dependency graphs between tables
 
+### Foreign Key Auto-Generation
+
+Foreign keys are automatically generated for relationship fields:
+- `o2o` tag: Creates a one-to-one relationship with unique constraint
+- `m2o` tag: Creates a foreign key column pointing to the parent table
+- `o2m` tag: Creates a foreign key column in the child table
+- `m2m` tag: Creates a junction table with foreign keys to both sides
+- Field naming convention: `CategoryID` automatically links to `Category` table
+- The foreign key column is added in the correct position to preserve field order
+
 ### Schema Organization
 
 The database structure follows a strict hierarchy:
@@ -200,8 +269,36 @@ type InventorySchema struct {
 
 For tables with auto-increment primary keys:
 - The primary key column is excluded from INSERT
-- `last_insert_rowid()` is called to retrieve the generated ID
+- `last_insert_rowid()` (SQLite) or `RETURNING` clause (PostgreSQL) is used to retrieve the generated ID
 - The ID is set back on the struct
+
+### Non-Auto-Increment Primary Keys (`not_incr` tag)
+
+Use the `not_incr` tag to prevent auto-increment behavior:
+- The primary key column is included in the INSERT statement
+- No `last_insert_rowid()` or `RETURNING` clause is used
+- Useful for UUID, string, or composite primary keys
+
+```go
+type User struct {
+    ID   string `goe:"pk;not_incr;default:uuid_generate_v4()"`
+    Name string
+}
+```
+
+### Composite Primary Keys
+
+Multiple fields with `pk` tag form a composite primary key:
+- All `pk` fields must have `not_incr` tag to prevent auto-increment
+- Batch inserts with `All(true, ...)` will not return generated IDs (composite keys are known)
+
+```go
+type OrderDetail struct {
+    OrderID   int `goe:"pk;not_incr"`
+    ProductID int `goe:"pk;not_incr"`
+    Quantity  int
+}
+```
 
 ### Primary Keys with Default Values
 
@@ -229,6 +326,11 @@ db.Default.Insert().One(&d)
 3. **Always use pointers for Insert/Update/Save** - `One(obj *T)` not `One(obj T)`
 4. **Foreign key columns must maintain original order** - Don't remove from Attributes
 5. **`last_insert_rowid()` only works for auto-increment columns** - Not for default values
+6. **Use `not_incr` tag for non-auto-increment primary keys** - UUID, string, or composite keys
+7. **`[]byte` is recognized as a valid slice type** - Not treated as a relationship field
+8. **PostgreSQL uses `RETURNING` clause** - SQLite uses `last_insert_rowid()` for auto-increment
+9. **LeftJoin auto-selects joined table columns** - No need to manually specify columns
+10. **Slice foreign fields are skipped in LeftJoin** - Use standard `Join` for slice relationships
 
 ## Common Tasks
 

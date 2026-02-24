@@ -15,15 +15,23 @@ type Field struct {
 	Function   string
 }
 
+// SameTable checks if two fields belong to the same table.
 func SameTable(field, another *Field) bool {
 	return field.TableAddr == another.TableAddr
 }
 
+// Func applies a SQL function to the field (e.g., "UPPER", "LOWER", "COUNT").
+//
+// Example:
+//
+//	field := goent.Expr("UPPER(name)").(*goent.Field)
+//	users, _ := db.User.Filter(goent.Equals(field, "JOHN")).Select().All()
 func (f *Field) Func(name string) *Field {
 	f.Function = name
 	return f
 }
 
+// GetFid returns the field ID, resolving it from the table metadata if needed.
 func (f *Field) GetFid() int {
 	if f.FieldId < 0 && f.ColumnName != "*" {
 		if col := GetTableColumn(f.TableAddr, f.ColumnName); col != nil {
@@ -33,6 +41,8 @@ func (f *Field) GetFid() int {
 	return f.FieldId
 }
 
+// Simple returns the column name with any SQL function applied.
+// It does not include the table name.
 func (f *Field) Simple() string {
 	if f.Function != "" {
 		return fmt.Sprintf(f.Function, f.ColumnName)
@@ -40,6 +50,7 @@ func (f *Field) Simple() string {
 	return f.ColumnName
 }
 
+// String returns the qualified field name (table.column) with any SQL function applied.
 func (f *Field) String() string {
 	res, err := GetFieldName(f.TableAddr, f.ColumnName)
 	if err != nil {
@@ -58,6 +69,13 @@ type Value struct {
 	Length int
 }
 
+// NewValue creates a new Value from a Go value.
+// It handles both single values and slices.
+//
+// Example:
+//
+//	value := NewValue([]int{1, 2, 3}) // creates IN (1, 2, 3)
+//	value := NewValue(42)              // creates single value
 func NewValue(value any) *Value {
 	valueOf := reflect.ValueOf(value)
 	kind := valueOf.Kind()
@@ -82,11 +100,17 @@ type Condition struct {
 	Values   []*Value
 }
 
+// IsEmpty returns true if the condition has no template (is empty).
 func (c Condition) IsEmpty() bool {
 	return c.Template == ""
 }
 
 // Expr creates a condition with a custom template and associated values.
+//
+// Example:
+//
+//	cond := goent.Expr("age > ? AND status = ?", 18, "active")
+//	users, _ := db.User.Filter(cond).Select().All()
 func Expr(where string, args ...any) Condition {
 	var values []*Value
 	for _, arg := range args {
@@ -97,7 +121,7 @@ func Expr(where string, args ...any) Condition {
 			values = append(values, val)
 		}
 	}
-	where = strings.ReplaceAll(where, "?", "%s")
+	where = strings.ReplaceAll(where, "?", "%v")
 	return Condition{Template: where, Values: values}
 }
 
@@ -165,16 +189,28 @@ func Or(branches ...Condition) Condition {
 }
 
 // Not creates a condition that negates another condition.
+//
+// Example:
+//
+//	cond := goent.Not(goent.Equals(field, "active"))
 func Not(cond Condition) Condition {
 	return Condition{Template: fmt.Sprintf("NOT (%s)", cond.Template), Fields: cond.Fields, Values: cond.Values}
 }
 
 // IsNull creates a condition that checks if a field is NULL.
+//
+// Example:
+//
+//	cond := goent.IsNull(db.User.Field("deleted_at"))
 func IsNull(left *Field) Condition {
 	return Condition{Template: "%s IS NULL", Fields: []*Field{left}, Values: []*Value{}}
 }
 
 // IsNotNull creates a condition that checks if a field is NOT NULL.
+//
+// Example:
+//
+//	cond := goent.IsNotNull(db.User.Field("email"))
 func IsNotNull(left *Field) Condition {
 	return Condition{Template: "%s IS NOT NULL", Fields: []*Field{left}, Values: []*Value{}}
 }
@@ -196,6 +232,11 @@ func EqualsField(left, right *Field) Condition {
 	return Condition{Template: "%s = %s", Fields: []*Field{left, right}}
 }
 
+// NotEquals creates a condition that checks if a field is not equal to a value.
+//
+// Example:
+//
+//	cond := goent.NotEquals(db.User.Field("status"), "deleted")
 func NotEquals(left *Field, value any) Condition {
 	cond := Equals(left, value)
 	if len(cond.Values) == 0 {
@@ -210,6 +251,11 @@ func NotEqualsField(left, right *Field) Condition {
 	return Condition{Template: "%s != %s", Fields: []*Field{left, right}}
 }
 
+// EqualsMap creates a condition that checks if a field equals multiple values (from a map).
+//
+// Example:
+//
+//	cond := goent.EqualsMap(db.User.Field("status"), map[string]any{"active": true, "pending": nil})
 func EqualsMap(left *Field, data map[string]any) Condition {
 	var branches []Condition
 	for key, value := range data {
@@ -225,8 +271,9 @@ func EqualsMap(left *Field, data map[string]any) Condition {
 
 // Greater Example
 //
-//	// get all animals that was created after 09 of october 2024 at 11:50AM
-//	Filter(goent.Greater(db.Animal.Field("create_at"), time.Date(2024, time.October, 9, 11, 50, 00, 00, time.Local)))
+//	// get all animals that was created after this year
+//	thisYear, _ := time.Parse(time.RFC3339, "2026-01-01T00:00:00Z08:00")
+//	Filter(goent.Greater(db.Animal.Field("create_at"), thisYear))
 func Greater(left *Field, value any) Condition {
 	return Condition{Template: "%s > ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }
@@ -237,8 +284,8 @@ func GreaterField(left, right *Field) Condition {
 
 // GreaterEquals Example
 //
-//	// get all animals that was created in or after 09 of october 2024 at 11:50AM
-//	Filter(goent.GreaterEquals(db.Animal.Field("create_at"), time.Date(2024, time.October, 9, 11, 50, 00, 00, time.Local)))
+//	// get all animals that was created in or after this year
+//	Filter(goent.GreaterEquals(db.Animal.Field("create_at"), time.Parse(time.DateOnly, "2026-01-01")))
 func GreaterEquals(left *Field, value any) Condition {
 	return Condition{Template: "%s >= ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }
@@ -250,9 +297,9 @@ func GreaterEqualsField(left, right *Field) Condition {
 
 // Less creates a condition that checks if a field is less than a value.
 //
-// Example: get all animals that was updated before 09 of october 2024 at 11:50AM
+// Example: get all animals that was updated before this year
 //
-//	Filter(goent.Less(db.Animal.Field("update_at"), time.Date(2024, time.October, 9, 11, 50, 00, 00, time.Local)))
+//	Filter(goent.Less(db.Animal.Field("update_at"), time.Parse(time.DateOnly, "2026-01-01")))
 func Less(left *Field, value any) Condition {
 	return Condition{Template: "%s < ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }
@@ -264,9 +311,9 @@ func LessField(left, right *Field) Condition {
 
 // LessEquals creates a condition that checks if a field is less than or equal to a value.
 //
-// Example: get all animals that was updated in or before 09 of october 2024 at 11:50AM
+// Example: get all animals that was updated in or before this year
 //
-//	Filter(goent.LessEquals(db.Animal.Field("update_at"), time.Date(2024, time.October, 9, 11, 50, 00, 00, time.Local)))
+//	Filter(goent.LessEquals(db.Animal.Field("update_at"), time.Parse(time.DateOnly, "2026-01-01")))
 func LessEquals(left *Field, value any) Condition {
 	return Condition{Template: "%s <= ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }

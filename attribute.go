@@ -7,6 +7,7 @@ import (
 	"github.com/azhai/goent/utils"
 )
 
+// attributeStrings holds common attribute information for database columns and relations.
 type attributeStrings struct {
 	db            *DB
 	schemaName    *string
@@ -16,11 +17,13 @@ type attributeStrings struct {
 	fieldId       int
 }
 
+// pk represents a primary key attribute.
 type pk struct {
 	autoIncrement bool
 	attributeStrings
 }
 
+// att represents a regular column attribute.
 type att struct {
 	isDefault bool
 	attributeStrings
@@ -38,6 +41,7 @@ type OneToSomeRelation struct {
 	attributeStrings
 }
 
+// createAttributeStrings creates an attributeStrings struct with the given parameters.
 func createAttributeStrings(db *DB, schema *string, table string, attributeName string, tableId, fieldId int, Driver model.Driver) attributeStrings {
 	name := Driver.KeywordHandler(utils.ToSnakeCase(attributeName))
 	return attributeStrings{
@@ -55,11 +59,14 @@ func createAttributeStrings(db *DB, schema *string, table string, attributeName 
 // 	return pk{attributeStrings: attStr, autoIncrement: isAutoIncr}
 // }
 
+// createAttFromColumn creates an att struct from a Column.
 func createAttFromColumn(db *DB, col *Column, tableId int) att {
 	attStr := createAttributeStrings(db, col.schemaName, col.tableName, col.FieldName, tableId, col.FieldId, db.driver)
 	return att{attributeStrings: attStr, isDefault: col.HasDefault}
 }
 
+// createManyToSome creates a ManyToSomeRelation from the given body and type.
+// It returns nil if no matching primary key is found.
 func createManyToSome(b body, typeOf reflect.Type) any {
 	rel := ManyToSomeRelation{}
 	targetPks := getPksFromType(typeOf)
@@ -86,6 +93,8 @@ func createManyToSome(b body, typeOf reflect.Type) any {
 	return rel
 }
 
+// createOneToSome creates a OneToSomeRelation from the given body and type.
+// It returns nil if no matching primary key is found.
 func createOneToSome(b body, typeOf reflect.Type) any {
 	rel := OneToSomeRelation{}
 	targetPks := getPksFromType(typeOf)
@@ -112,6 +121,7 @@ func createOneToSome(b body, typeOf reflect.Type) any {
 	return rel
 }
 
+// newAttr creates a new attribute from the body.
 func newAttr(b body) error {
 	createAttFromColumn(b.mapp.db, &Column{
 		ColumnName: utils.ToSnakeCase(b.fieldName),
@@ -121,6 +131,7 @@ func newAttr(b body) error {
 	return nil
 }
 
+// getPksFromType returns the primary key fields from the given type.
 func getPksFromType(typeOf reflect.Type) []reflect.StructField {
 	field, exists := utils.GetTableID(typeOf)
 	if exists {

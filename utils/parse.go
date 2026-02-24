@@ -85,20 +85,6 @@ func ParseTableNameByType(typeOf reflect.Type) string {
 // TableNameMethod try to get table name from method TableNames
 // If method TableNames is not found, return empty string
 func TableNameMethod(valueOf reflect.Value) string {
-	// var method reflect.Value
-	// if method = valueOf.MethodByName("TableName"); method.IsValid() {
-	// 	if method.Type().NumIn() == 0 && method.Type().NumOut() == 1 {
-	// 		return method.Call(nil)[0].String()
-	// 	}
-	// }
-	// if valueOf.Type().Kind() == reflect.Struct && valueOf.CanAddr() && valueOf.Addr().IsValid() {
-	// 	if method = valueOf.Addr().MethodByName("TableName"); method.IsValid() {
-	// 		if method.Type().NumIn() == 0 && method.Type().NumOut() == 1 {
-	// 			return method.Call(nil)[0].String()
-	// 		}
-	// 	}
-	// }
-
 	method := valueOf.MethodByName("TableName")
 	if method.IsValid() && method.Type().NumIn() == 0 && method.Type().NumOut() == 1 {
 		return method.Call(nil)[0].String()
@@ -112,9 +98,6 @@ func TableNamePattern(name string) string {
 		return name
 	}
 	name = ToSnakeCase(name)
-	if name[len(name)-1] != 's' {
-		name += "s"
-	}
 	return name
 }
 
@@ -162,6 +145,21 @@ func GetTagValue(tag string, key string) (string, bool) {
 	}
 	pieces = strings.SplitN(pieces[1], ";", 2)
 	return strings.TrimSpace(pieces[0]), true
+}
+
+// ParseSchemaTag parses the schema tag and returns the schema name and table prefix.
+// Example: "public;prefix:t_" returns ("public", "t_")
+// Example: "auth" returns ("auth", "")
+func ParseSchemaTag(tag string) (schema, prefix string) {
+	parts := strings.SplitSeq(tag, ";")
+	for part := range parts {
+		if after, ok := strings.CutPrefix(part, "prefix:"); ok {
+			prefix = after
+		} else if part != "" {
+			schema = part
+		}
+	}
+	return schema, prefix
 }
 
 // IsFieldHasSchema check if field has schema tag or schema suffix

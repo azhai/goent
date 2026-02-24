@@ -8,21 +8,28 @@ import (
 )
 
 const (
-	_ ForeignType = iota
-	O2O
-	O2M
-	M2O
-	M2M
+	_   ForeignType = iota
+	O2O             // one-to-one
+	O2M             // one-to-many
+	M2O             // many-to-one
+	M2M             // many-to-many
 )
 
+// ForeignType represents the type of foreign key relationship.
+// Values: O2O (one-to-one), O2M (one-to-many), M2O (many-to-one), M2M (many-to-many).
 type ForeignType uint
 
+// ThirdParty represents an intermediate junction table for many-to-many relationships.
+// It contains the table name and the left/right column mappings.
 type ThirdParty struct {
 	Table       string
 	Left, Right string
 	Where       Condition
 }
 
+// Foreign represents a foreign key relationship between two tables.
+// It contains the relationship type, mounting field, foreign key column,
+// reference field, and optional middle table for many-to-many relationships.
 type Foreign struct {
 	Type       ForeignType
 	MountField string
@@ -32,6 +39,16 @@ type Foreign struct {
 	Where      Condition
 }
 
+// GetForeign retrieves the foreign key relationship between two tables.
+// It searches by table name first, then by table address.
+// Returns nil if no foreign key relationship is found.
+//
+// Example:
+//
+//	foreign := GetForeign(userTable, addressTable)
+//	if foreign != nil {
+//		fmt.Println(foreign.Type) // prints O2O, O2M, M2O, or M2M
+//	}
 func GetForeign[T, R any](table *Table[T], refer *Table[R]) *Foreign {
 	name := refer.TableInfo.TableName
 	if foreign, ok := table.Foreigns[name]; ok {
@@ -46,6 +63,19 @@ func GetForeign[T, R any](table *Table[T], refer *Table[R]) *Foreign {
 	return nil
 }
 
+// QueryForeign queries and populates related records for a foreign key relationship.
+// It automatically determines the relationship type and calls the appropriate query method.
+// Returns nil if no foreign key relationship is found.
+//
+// Example:
+//
+//	err := QueryForeign(orderTable, customerTable)
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//	for _, order := range orderTable.Cache.Each() {
+//		fmt.Println(order.Customer) // populated Customer struct
+//	}
 func QueryForeign[T, R any](table *Table[T], refer *Table[R]) error {
 	var foreign *Foreign
 	if foreign = GetForeign(table, refer); foreign == nil {
@@ -69,6 +99,15 @@ func QueryForeign[T, R any](table *Table[T], refer *Table[R]) error {
 	}
 }
 
+// QuerySome2One queries and populates many-to-one or one-to-one relationships.
+// It returns a map of foreign key IDs to referenced records.
+//
+// Example:
+//
+//	results, err := QuerySome2One(foreign, orderTable, customerTable)
+//	for id, customer := range results {
+//		fmt.Printf("Order %d: %s\n", id, customer.Name)
+//	}
 func QuerySome2One[T, R any](foreign *Foreign, table *Table[T], refer *Table[R]) (map[int64]*R, error) {
 	col := table.ColumnInfo(foreign.ForeignKey)
 	if col == nil {
@@ -106,6 +145,15 @@ func QuerySome2One[T, R any](foreign *Foreign, table *Table[T], refer *Table[R])
 	return data, err
 }
 
+// QueryOne2Many queries and populates one-to-many relationships.
+// It returns a map of parent IDs to slices of child records.
+//
+// Example:
+//
+//	results, err := QueryOne2Many(foreign, categoryTable, productTable)
+//	for catId, products := range results {
+//		fmt.Printf("Category %d has %d products\n", catId, len(products))
+//	}
 func QueryOne2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R]) (map[int64][]*R, error) {
 	if table.Cache == nil || table.Cache.Size() == 0 {
 		return nil, nil
@@ -140,6 +188,16 @@ func QueryOne2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R])
 	return data, err
 }
 
+// QueryMany2Many queries and populates many-to-many relationships.
+// It uses the middle table to establish the relationship between two tables.
+// Returns a map of left-side IDs to right-side records.
+//
+// Example:
+//
+//	results, err := QueryMany2Many(foreign, studentTable, courseTable)
+//	for studentId, courses := range results {
+//		fmt.Printf("Student %d is enrolled in %d courses\n", studentId, len(courses))
+//	}
 func QueryMany2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R]) (map[int64]*R, error) {
 	if foreign.Middle == nil {
 		return nil, ErrMiddleTableNotSet
@@ -196,6 +254,15 @@ func QueryMany2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R]
 	return data, err
 }
 
+// QueryMiddleTable queries the middle junction table for many-to-many relationships.
+// It returns a map of left-side IDs to slices of right-side IDs.
+//
+// Example:
+//
+//	mapping, err := QueryMiddleTable(foreign, studentTable, "student_id", "course_id")
+//	for studentId, courseIds := range mapping {
+//		fmt.Printf("Student %d is in courses: %v\n", studentId, courseIds)
+//	}
 func QueryMiddleTable[T any](foreign *Foreign, table *Table[T], leftCol, rightCol string) (map[int64][]int64, error) {
 	if foreign.Middle == nil {
 		return nil, ErrMiddleTableNotSet

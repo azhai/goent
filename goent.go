@@ -88,11 +88,13 @@ func travelSchemas(db *DB, dbId int, valueOf reflect.Value) ([]string, error) {
 		}
 
 		SchemaName := schemaOf.Type().Name()
-		if schema == "" {
-			schema = utils.ToSnakeCase(SchemaName)
+		schemaName, _ := utils.ParseSchemaTag(schema)
+		if schemaName == "" {
+			schemaName = utils.ToSnakeCase(SchemaName)
 		}
-		schemas = append(schemas, schema)
-		schemaRegistry[SchemaName] = &schema
+		schemas = append(schemas, schemaName)
+		schemaCopy := schemaName
+		schemaRegistry[SchemaName] = &schemaCopy
 
 		for j := range schemaOf.NumField() { // Table
 			tableField := schemaOf.Field(j)
@@ -141,7 +143,8 @@ func travelSchemas(db *DB, dbId int, valueOf reflect.Value) ([]string, error) {
 					continue
 				}
 				if strings.EqualFold(otherInfo.TableName, refTableName) ||
-					strings.EqualFold(otherInfo.FieldName, refTableName) {
+					strings.EqualFold(otherInfo.FieldName, refTableName) ||
+					strings.HasSuffix(strings.ToLower(otherInfo.TableName), "_"+strings.ToLower(refTableName)) {
 					foreign.Reference = &Field{
 						TableAddr:  otherAddr,
 						ColumnName: "id",
@@ -161,6 +164,9 @@ func travelSchemas(db *DB, dbId int, valueOf reflect.Value) ([]string, error) {
 	return schemas, nil
 }
 
+// RelationFunc is a function type that defines how to handle a relation field.
+// It takes a body struct and the type of the relation field as parameters.
+// The function returns the value of the relation field.
 type RelationFunc func(b body, typeOf reflect.Type) any
 
 // data used for map
@@ -200,6 +206,10 @@ type body struct {
 
 func skipPrimaryKey[T comparable](slice []T, value T, tables reflect.Value, field reflect.StructField) bool {
 	if slices.Contains(slice, value) {
+		goeTag := field.Tag.Get("goe")
+		if utils.HasTagValue(goeTag, "m2o") || utils.HasTagValue(goeTag, "o2o") {
+			return false
+		}
 		table, prefix := foreignKeyNamePattern(tables, field.Name)
 		if table == "" && prefix == "" {
 			return true

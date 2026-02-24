@@ -41,7 +41,7 @@ func (dr *Driver) MigrateContext(ctx context.Context, migrator *model.Migrator) 
 		return err
 	}
 	for _, s := range migrator.Schemas {
-		if !slices.Contains(dbSchemas, s[1:len(s)-1]) {
+		if !slices.Contains(dbSchemas, s) {
 			schemas.WriteString(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %v;\n", s))
 		}
 	}
@@ -252,16 +252,23 @@ func foreignKeyIsPrimarykey(table *model.TableMigrate, attName string) bool {
 func createTable(tbl *model.TableMigrate, dataMap map[string]dataType, sql *strings.Builder, tables map[string]*model.TableMigrate, sqlForeignKeys *strings.Builder) {
 	t := table{}
 	t.name = fmt.Sprintf("CREATE TABLE %v (", tbl.EscapingTableName())
+	processedAttrs := make(map[string]bool)
+
 	for _, att := range tbl.PrimaryKeys {
-		if primaryKeyIsForeignKey(tbl, att.Name) {
-			continue
-		}
 		att.DataType = checkDataType(att.DataType, dataMap).typeName
+		isFK := primaryKeyIsForeignKey(tbl, att.Name)
 		if att.AutoIncrement {
 			t.createAttrs = append(t.createAttrs, fmt.Sprintf("%v %v NOT NULL,", att.EscapingName, checkTypeAutoIncrement(att.DataType)))
 		} else {
 			t.createAttrs = append(t.createAttrs, fmt.Sprintf("%v %v NOT NULL %v,", att.EscapingName, att.DataType, setDefault(att.Default)))
 		}
+		if isFK {
+			if targetTable, targetCol := findForeignKey(tbl, att.Name); targetTable != "" {
+				sqlForeignKeys.WriteString(fmt.Sprintf("ALTER TABLE %v ADD CONSTRAINT fk_%v_%v FOREIGN KEY (%v) REFERENCES %v(%v);\n",
+					tbl.EscapingTableName(), tbl.Name, att.Name, att.EscapingName, targetTable, targetCol))
+			}
+		}
+		processedAttrs[att.Name] = true
 	}
 
 	for _, att := range tbl.Attributes {
@@ -283,10 +290,11 @@ func createTable(tbl *model.TableMigrate, dataMap map[string]dataType, sql *stri
 				}
 			}(), setDefault(att.Default)))
 		}
+		processedAttrs[att.Name] = true
 	}
 
 	for _, att := range tbl.OneToSomes {
-		if attributeExists(tbl, att.Name) {
+		if processedAttrs[att.Name] {
 			continue
 		}
 		tb := tables[att.TargetTable]
@@ -308,7 +316,7 @@ func createTable(tbl *model.TableMigrate, dataMap map[string]dataType, sql *stri
 	}
 
 	for _, att := range tbl.ManyToSomes {
-		if attributeExists(tbl, att.Name) {
+		if processedAttrs[att.Name] {
 			continue
 		}
 		tb := tables[att.TargetTable]
@@ -735,6 +743,14 @@ func checkDataType(structDataType string, dataMap map[string]dataType) dataType 
 
 	if dt, ok := dataMap[dt.typeName]; ok {
 		return dt
+	}
+
+	// Handle full package path types like "github.com/google/uuid.UUID"
+	if idx := strings.LastIndex(structDataType, "/"); idx != -1 {
+		shortName := structDataType[idx+1:]
+		if dt, ok := dataMap[shortName]; ok {
+			return dt
+		}
 	}
 
 	for _, s := range []string{"number", "numeric", "decimal"} {
