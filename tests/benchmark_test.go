@@ -22,7 +22,7 @@ func BenchmarkSelect(b *testing.B) {
 	for i := 0; i < size; i++ {
 		animals[i] = &Animal{Name: uuid.New().String()}
 	}
-	db.Animal.Insert().All(true, animals)
+	db.Animal.Insert().All(false, animals)
 
 	for b.Loop() {
 		result, _ := db.Animal.Select().All()
@@ -39,7 +39,7 @@ func BenchmarkSelectRaw(b *testing.B) {
 	for i := 0; i < size; i++ {
 		animals[i] = &Animal{Name: uuid.New().String()}
 	}
-	db.Animal.Insert().All(true, animals)
+	db.Animal.Insert().All(false, animals)
 
 	for b.Loop() {
 		sql := "select a.id, a.name, a.info_id, a.habitat_id from animals a;"

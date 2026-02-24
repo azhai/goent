@@ -40,11 +40,11 @@ func (m *Category) SetID(id int64) {
 
 type Product struct {
 	ID         int64
-	CategoryID int64 `goe:"m2o"`
+	CategoryID int64
 	Name       string
 	Color      string
 	Price      float64
-	Category   *Category `goe:"-"`
+	Category   *Category `goe:"m2o"`
 }
 
 func (*Product) TableName() string {
@@ -66,8 +66,8 @@ type Order struct {
 	Total    float64
 	Status   string
 	Created  time.Time
-	Details  []*OrderDetail
-	Products []*Product
+	Details  []*OrderDetail `goe:"o2m"`
+	Products []*Product     `goe:"m2m"`
 }
 
 func (*Order) TableName() string {
@@ -94,7 +94,7 @@ type OrderDetail struct {
 	ProductID int64 `goe:"pk;not_incr"`
 	Quantity  int
 	Price     float64
-	Product   *Product `goe:"-"`
+	Product   *Product `goe:"o2o"`
 }
 
 func (*OrderDetail) TableName() string {

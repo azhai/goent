@@ -55,7 +55,7 @@ func (s *StateInsert[T]) getLastInsertId(valueOf reflect.Value, retFid int) erro
 	return nil
 }
 
-func (s *StateInsert[T]) All(autoIncr bool, data []*T) error {
+func (s *StateInsert[T]) All(retPK bool, data []*T) error {
 	if len(data) == 0 {
 		return nil
 	} else if len(data) == 1 {
@@ -67,7 +67,7 @@ func (s *StateInsert[T]) All(autoIncr bool, data []*T) error {
 
 	pkFid, pkName := -1, ""
 	isAutoIncr := false
-	if autoIncr {
+	if retPK {
 		pkFid, pkName, _ = s.table.TableInfo.GetPrimaryInfo()
 		if pkFid >= 0 && len(s.table.PrimaryKeys) > 0 && s.table.PrimaryKeys[0].IsAutoIncr {
 			isAutoIncr = true
