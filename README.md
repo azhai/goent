@@ -322,6 +322,32 @@ if err != nil {
 }
 ```
 
+#### Primary Key with Default Value
+
+For non-auto-increment primary keys, you can specify a default value:
+
+```go
+type Default struct {
+	ID   string `goe:"default:'Default'"` // Primary key with default value
+	Name string
+}
+```
+
+When inserting, the default value is automatically set on the struct:
+
+```go
+d := Default{Name: "Test"}
+err = db.Default.Insert().One(&d)
+// d.ID == "Default" (set from default value)
+
+if err != nil {
+	// handler error
+}
+```
+
+> [!NOTE]
+> For primary keys with default values, the value is set on the struct before INSERT, and the column is included in the INSERT statement. This is different from auto-increment primary keys, where the column is excluded and the ID is retrieved using `last_insert_rowid()`.
+
 [Back to Contents](#content)
 
 ### Relationship
@@ -525,6 +551,10 @@ Use the `f:` parameter to pass a function in the index tag.
 On GoEnt it's possible to create schemas by the database struct, all schemas should have the suffix `Schema`
 or a tag `goe:"schema"`.
 
+> [!IMPORTANT]
+> Tables must be nested under schema structs. The hierarchy is: **Database -> Schema -> Table**.
+> SQLite ignores schema names (tables are created directly in the main database).
+
 ```go
 type User struct {
 	...
@@ -539,19 +569,18 @@ type Role struct {
 }
 // schema with suffix Schema
 type UserSchema struct {
-	User     *User
-	UserRole *UserRole
-	Role     *Role
+	User     *goent.Table[User]
+	UserRole *goent.Table[UserRole]
+	Role     *goent.Table[Role]
 }
 // schema with any name
 type Authentication struct {
-	User     *User
-	UserRole *UserRole
-	Role     *Role
+	User     *goent.Table[User]
+	UserRole *goent.Table[UserRole]
+	Role     *goent.Table[Role]
 }
 
 type Database struct {
-	Status  *Status // status will be on the default schema
 	*UserSchema // all structs on UserSchema will be created inside user schema
 	*Authentication `goe:"schema"` // will create Authentication schema
 	*goent.DB
@@ -1022,6 +1051,9 @@ if err != nil {
 ## Insert
 On Insert if the primary key value is auto-increment, the new ID will be stored on the object after the insert.
 
+> [!NOTE]
+> For auto-increment primary keys, the column is excluded from INSERT and the ID is retrieved using `last_insert_rowid()`. For primary keys with default values, the value is set before INSERT and the column is included in the statement.
+
 ### Insert One
 ```go
 a := &Animal{Name: "Cat", Emoji: "🐘"}
@@ -1052,6 +1084,9 @@ if err != nil {
 	//handler error
 }
 ```
+
+> [!NOTE]
+> The first parameter of `All()` is `autoIncr`. When `true`, it only applies to tables with auto-increment primary keys. For tables with non-auto-increment primary keys (like UUID or string with default), the primary key column is included in the INSERT statement.
 
 > [!TIP] 
 > Use **goent.InsertContext** for specify a context.

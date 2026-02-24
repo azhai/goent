@@ -150,6 +150,7 @@ func main() {
 	if len(products) > 0 {
 		fmt.Printf("%+v\n", products[0])
 	}
+	fmt.Printf("%+v\n", order)
 }
 
 func addForeignKeys(db *Database) {

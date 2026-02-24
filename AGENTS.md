@@ -71,7 +71,23 @@ type Product struct {
     Price      float64
     Category   *Category `goe:"-"`           // Excluded from mapping
 }
+
+type Default struct {
+    ID   string `goe:"default:'Default'"` // Primary key with default value
+    Name string
+}
 ```
+
+### Column Metadata
+
+The `Column` struct in `column.go` stores column metadata:
+- `FieldName`: Go struct field name
+- `ColumnName`: Database column name (snake_case)
+- `ColumnType`: Database column type
+- `AllowNull`: Whether the column allows NULL
+- `HasDefault`: Whether the column has a default value
+- `DefaultValue`: The default value from struct tag
+- `isAutoIncr`: Whether the column is auto-increment
 
 ### Foreign Key Relationships
 
@@ -140,6 +156,7 @@ Tables are auto-migrated from struct definitions:
 Foreign keys are detected from:
 - `m2o` tag for many-to-one relationships
 - Field naming convention (`CategoryID` -> `Category`)
+- Table registry lookup for tables nested under schemas
 
 ### Two-Phase Migration
 
@@ -154,12 +171,64 @@ This approach:
 - Preserves original field order in table definitions
 - Handles complex dependency graphs between tables
 
+### Schema Organization
+
+The database structure follows a strict hierarchy:
+- **Database** -> **Schema** -> **Table**
+- Tables must be nested under schema structs
+- SQLite ignores schema names (tables are created directly)
+
+```go
+type Database struct {
+    Authentication AuthenticationSchema
+    Inventory     InventorySchema
+}
+
+type AuthenticationSchema struct {
+    User *goent.Table[User]
+    Role *goent.Table[Role]
+}
+
+type InventorySchema struct {
+    Product *goent.Table[Product]
+}
+```
+
+## Insert Operations
+
+### Auto-Increment Primary Keys
+
+For tables with auto-increment primary keys:
+- The primary key column is excluded from INSERT
+- `last_insert_rowid()` is called to retrieve the generated ID
+- The ID is set back on the struct
+
+### Primary Keys with Default Values
+
+For tables with non-auto-increment primary keys that have default values:
+- The default value is extracted from the struct tag
+- The value is set on the struct before INSERT
+- The primary key column is included in the INSERT statement
+- `last_insert_rowid()` is NOT called (only works for auto-increment)
+
+```go
+type Default struct {
+    ID   string `goe:"default:'Default'"` // Default value 'Default'
+    Name string
+}
+
+d := Default{Name: "Test"}
+db.Default.Insert().One(&d)
+// d.ID == "Default" (set from default value)
+```
+
 ## Important Notes
 
 1. **Do not use `Query` struct directly** - Use the `Builder` pattern instead
 2. **Do not use `Attribute` type directly** - Use `Field` and `Condition` instead
 3. **Always use pointers for Insert/Update/Save** - `One(obj *T)` not `One(obj T)`
 4. **Foreign key columns must maintain original order** - Don't remove from Attributes
+5. **`last_insert_rowid()` only works for auto-increment columns** - Not for default values
 
 ## Common Tasks
 
