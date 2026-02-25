@@ -113,11 +113,12 @@ func (t TableInfo) Check(col string) (int, bool) {
 // It only returns valid field ID and column name for single-column primary keys.
 func (t TableInfo) GetPrimaryInfo() (int, string, []string) {
 	pkFid, pkName := -1, ""
-	pkeys := make([]string, 0, len(t.PrimaryKeys))
+	size := len(t.PrimaryKeys)
+	pkeys := make([]string, 0, size)
 	for _, pkey := range t.PrimaryKeys {
 		pkeys = append(pkeys, pkey.ColumnName)
 	}
-	if len(t.PrimaryKeys) == 1 {
+	if size == 1 {
 		pkFid = t.PrimaryKeys[0].Column.FieldId
 		pkName = t.PrimaryKeys[0].ColumnName
 	}

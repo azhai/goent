@@ -1423,89 +1423,27 @@ sv.Commit() // commit save point
 
 ## Benchmarks
 
-Source code of benchmarks can be find on [lauro-santana/go-orm-benchmarks](https://github.com/lauro-santana/go-orm-benchmarks). The benchmarks will be update if any new feature is released for any of these packages. You are welcome to notice me if are anything new or wrong with the benchmarks on the repository.
+Source code of benchmarks can be find on [azhai/go-orm-benchmarks](https://github.com/azhai/go-orm-benchmarks) or [lauro-santana/go-orm-benchmarks](https://github.com/lauro-santana/go-orm-benchmarks). 
 
-## Select
+```bash
+go run main.go -orm goe -operation all
+go run main.go -orm goent -operation all
+```
 
-### Select One
-Package | Avg n/op | Avg ns/op | Avg B/op | Avg allocs/op
-| --- | --- | --- | --- | --- |
-**pgx** | 20655 | 57493 | 995 | 18
-**sqlc** | 21656 | 57810 | 995 | 18
-**database/sql** | 19466 | 61851 | 1720 | 47
-**goe** | 17270 | 70941 | 4552 | 70
-**ent** | 15342 | 76627 | 5152 | 135
-**bun** | 12975 | 92397 | 5657 | 23
-**gorm** | 10000 | 110914 | 5674 | 110
-
-### Select Cursor Pagination
-| Package | Avg n/op | Avg ns/op | Avg B/op | Avg allocs/op |
-| --- | --- | --- | --- | --- |
-| **pgx** | 1900.0 | 638138.0 | 52602.5 | 730.0 |
-| **database/sql** | 1754.0 | 681157.5 | 57922.8 | 1360.0 |
-| **sqlc** | 1666.0 | 706612.8 | 79800.8 | 770.0 |
-| **goe** | 1586.0 | 777239.3 | 73694.5 | 1130.0 |
-| **ent** | 1370.0 | 884408.0 | 111683.0 | 3010.0 |
-| **bun** | 1053.8 | 1177303.5 | 90663.5 | 1170.0 |
-| **gorm** | 957.0 | 1219613.0 | 100829.3 | 2580.0 |
-
-[Back to Contents](#content)
-
-## Insert
-
-### Insert One Record
-| Package | n/op | ns/op | B/op | allocs/op |
-| --- | --- | --- | --- | --- |
-| **sqlc** | 2806.6 | 435619.4 | 288.0 | 8.0 |
-| **pgx** | 2649.4 | 437431.0 | 304.0 | 9.0 |
-| **database/sql** | 2546.6 | 437955.8 | 576.0 | 11.0 |
-| **goe** | 2673.0 | 450239.6 | 2734.2 | 40.0 |
-| **ent** | 2561.2 | 470270.8 | 3943.6 | 90.0 |
-| **bun** | 2400.0 | 484351.0 | 5090.4 | 15.0 |
-| **gorm** | 2464.4 | 487071.6 | 6110.2 | 91.0 |
-
-### Insert 2000 Bulk Records
-| Package | Avg n/op | Avg ns/op | Avg B/op | Avg allocs/op |
-| --- | --- | --- | --- | --- |
-| **pgx** | 127.5 | 9032688.5 | 335594.5 | 2047.0 |
-| **sqlc** | 116.5 | 9784080.0 | 675911.0 | 12048.5 |
-| **goe** | 73.0 | 15777915.5 | 6059695.5 | 39879.0 |
-| **database/sql** | 70.0 | 16383613.5 | 6054050.5 | 39833.5 |
-| **ent** | 56.0 | 18343069.5 | 9805318.5 | 80389.0 |
-| **gorm** | 42.0 | 28939012.0 | 5829835.5 | 95750.0 |
-| **bun** | 39.5 | 28704378.5 | 1755007.5 | 8036.5 |
-
-database/sql has to append the strings and values by a external function, so you could make a optimized database/sql usage for insert bulk to get a result equivalent to pgx or sqlc.
-
-[Back to Contents](#content)
-
-## Update
-
-### Update One
-| Package | Avg n/op | Avg ns/op | Avg B/op | Avg allocs/op |
-| --- | --- | --- | --- | --- |
-| **pgx** | 2666.5 | 453922.5 | 329.25 | 9.0 |
-| **database/sql** | 2533.0 | 455223.0 | 632.0 | 11.0 |
-| **sqlc** | 2707.75 | 466297.0 | 313.5 | 8.0 |
-| **goe** | 2421.25 | 488427.0 | 3108.25 | 37.0 |
-| **bun** | 2263.25 | 506721.75 | 4789.0 | 6.0 |
-| **gorm** | 2491.5 | 541869.25 | 7489.0 | 99.0 |
-| **ent** | 1782.75 | 649685.0 | 7462.0 | 183.0 |
-
-[Back to Contents](#content)
-
-## Delete
-
-### Delete One
-
-| Package | n/op | ns/op | B/op | allocs/op |
-| --- | --- | --- | --- | --- |
-| **sqlc** | 2537.8 | 447178.6 | 112.0 | 3.2 |
-| **pgx** | 2640.0 | 456962.2 | 127.0 | 4.0 |
-| **database/sql** | 2548.2 | 464805.0 | 206.8 | 6.0 |
-| **goe** | 2522.6 | 469782.4 | 1531.0 | 20.0 |
-| **ent** | 2621.6 | 470532.0 | 1808.4 | 40.0 |
-| **bun** | 2488.0 | 486804.6 | 4668.6 | 5.0 |
-| **gorm** | 2359.4 | 494844.2 | 3075.8 | 44.0 |
+### Benchmark on MacMini M4
+| Operation       | Package | Avg op/s | Avg ns/op | Avg B/op | Avg allocs/op |
+|-----------------|---------|---------:|----------:|---------:|--------------:|
+| **insert**      | goe     |    14930 |     81200 |     2644 |            31 |
+|                 | goent   |    14835 |     84908 |     3402 |            67 |
+| **insert-bulk** | goe     |      174 |   9098946 |  5202188 |         28013 |
+|                 | goent   |      133 |   9688873 |  8752617 |         46120 |
+| **update**      | goe     |    14932 |     77634 |     2593 |            27 |
+|                 | goent   |    14541 |     83918 |     3423 |            63 |
+| **delete**      | goe     |    45292 |     26490 |     1051 |            15 |
+|                 | goent   |     1226 |   1543646 |     1398 |            34 |
+| **select-one**  | goe     |    41014 |     29327 |     3508 |            54 |
+|                 | goent   |    34629 |     33767 |     4340 |            85 |
+| **select-page** | goe     |     3415 |    341912 |    55400 |           870 |
+|                 | goent   |     3132 |    388181 |    83605 |          1722 |
 
 [Back to Contents](#content)

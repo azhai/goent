@@ -68,14 +68,15 @@ func (s *StateInsert[T]) All(retPK bool, data []*T) error {
 	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
 	s.builder.ResetForSave()
 
-	pkFid, pkName := -1, ""
 	isAutoIncr := false
-	if retPK {
-		pkFid, pkName, _ = s.table.TableInfo.GetPrimaryInfo()
-		if pkFid >= 0 && len(s.table.PrimaryKeys) > 0 && s.table.PrimaryKeys[0].IsAutoIncr {
-			isAutoIncr = true
-			s.builder.Returning = pkName
-		}
+	pkFid, pkName, _ := s.table.TableInfo.GetPrimaryInfo()
+	if pkFid >= 0 && len(s.table.PrimaryKeys) > 0 && s.table.PrimaryKeys[0].IsAutoIncr {
+		isAutoIncr = true
+	}
+	if retPK && isAutoIncr {
+		s.builder.Returning = pkName
+	} else {
+		pkFid = -1
 	}
 
 	var columns []*Column
