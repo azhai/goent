@@ -11,15 +11,13 @@ import (
 )
 
 type fieldDesc struct {
-	// Field      reflect.Value
-	// FieldName  string
-	// HasSchema  bool
-	// SchemaName string
+	info         *TableInfo
+	colName      string
+	targetInfo   *TableInfo
+	targetSchema *string
 }
 
 type dbMigrator struct {
-	// fieldDescs []*fieldDesc
-	// schemasMap map[string]*string
 	db *DB
 	*model.Migrator
 }
@@ -73,76 +71,93 @@ func migrateFrom(ent any, db *DB) *dbMigrator {
 			if colName == "" {
 				continue
 			}
-			// Skip if already added by helperAttributeMigrate
-			alreadyExists := false
-			for _, rel := range tm.ManyToSomes {
-				if rel.Name == colName {
-					alreadyExists = true
-					break
-				}
-			}
-			for _, rel := range tm.OneToSomes {
-				if rel.Name == colName {
-					alreadyExists = true
-					break
-				}
-			}
-			if alreadyExists {
+			if dm.isRelationExists(tm, colName) {
 				continue
 			}
-			targetInfo := tableRegistry[foreign.Reference.TableAddr]
-			if targetInfo == nil {
+			fd := dm.createFieldDesc(info, colName, foreign)
+			if fd == nil {
 				continue
 			}
-			if dm.Tables[targetInfo.TableName] == nil {
-				continue
-			}
-			col, ok := info.Columns[colName]
-			if !ok {
-				continue
-			}
-			var targetSchema *string
-			if targetInfo.SchemaName != "" {
-				targetSchema = &targetInfo.SchemaName
-			}
-			if foreign.Type == M2O {
-				rel := model.ManyToSomeMigrate{
-					TargetTable:          targetInfo.TableName,
-					TargetColumn:         foreign.Reference.ColumnName,
-					EscapingTargetTable:  db.driver.KeywordHandler(targetInfo.TableName),
-					EscapingTargetColumn: db.driver.KeywordHandler(foreign.Reference.ColumnName),
-					TargetSchema:         targetSchema,
-					AttributeMigrate: model.AttributeMigrate{
-						FieldName:    col.FieldName,
-						Name:         colName,
-						EscapingName: db.driver.KeywordHandler(colName),
-						DataType:     col.ColumnType,
-						Nullable:     col.AllowNull,
-					},
-				}
-				tm.ManyToSomes = append(tm.ManyToSomes, rel)
-			} else if foreign.Type == O2O || foreign.Type == O2M {
-				rel := model.OneToSomeMigrate{
-					IsOneToMany:          foreign.Type == O2M,
-					TargetTable:          targetInfo.TableName,
-					TargetColumn:         foreign.Reference.ColumnName,
-					EscapingTargetTable:  db.driver.KeywordHandler(targetInfo.TableName),
-					EscapingTargetColumn: db.driver.KeywordHandler(foreign.Reference.ColumnName),
-					TargetSchema:         targetSchema,
-					AttributeMigrate: model.AttributeMigrate{
-						FieldName:    col.FieldName,
-						Name:         colName,
-						EscapingName: db.driver.KeywordHandler(colName),
-						DataType:     col.ColumnType,
-						Nullable:     col.AllowNull,
-					},
-				}
-				tm.OneToSomes = append(tm.OneToSomes, rel)
-			}
+			dm.addForeignRelation(tm, fd, foreign)
 		}
 	}
 
 	return dm
+}
+
+func (dm *dbMigrator) isRelationExists(tm *model.TableMigrate, colName string) bool {
+	for _, rel := range tm.ManyToSomes {
+		if rel.Name == colName {
+			return true
+		}
+	}
+	for _, rel := range tm.OneToSomes {
+		if rel.Name == colName {
+			return true
+		}
+	}
+	return false
+}
+
+func (dm *dbMigrator) createFieldDesc(info *TableInfo, colName string, foreign *Foreign) *fieldDesc {
+	targetInfo := tableRegistry[foreign.Reference.TableAddr]
+	if targetInfo == nil {
+		return nil
+	}
+	if dm.Tables[targetInfo.TableName] == nil {
+		return nil
+	}
+	if _, ok := info.Columns[colName]; !ok {
+		return nil
+	}
+	var targetSchema *string
+	if targetInfo.SchemaName != "" {
+		targetSchema = &targetInfo.SchemaName
+	}
+	return &fieldDesc{
+		info:         info,
+		colName:      colName,
+		targetInfo:   targetInfo,
+		targetSchema: targetSchema,
+	}
+}
+
+func (dm *dbMigrator) addForeignRelation(tm *model.TableMigrate, fd *fieldDesc, foreign *Foreign) {
+	col := fd.info.Columns[fd.colName]
+	if foreign.Type == M2O {
+		rel := model.ManyToSomeMigrate{
+			TargetTable:          fd.targetInfo.TableName,
+			TargetColumn:         foreign.Reference.ColumnName,
+			EscapingTargetTable:  dm.db.driver.KeywordHandler(fd.targetInfo.TableName),
+			EscapingTargetColumn: dm.db.driver.KeywordHandler(foreign.Reference.ColumnName),
+			TargetSchema:         fd.targetSchema,
+			AttributeMigrate: model.AttributeMigrate{
+				FieldName:    col.FieldName,
+				Name:         fd.colName,
+				EscapingName: dm.db.driver.KeywordHandler(fd.colName),
+				DataType:     col.ColumnType,
+				Nullable:     col.AllowNull,
+			},
+		}
+		tm.ManyToSomes = append(tm.ManyToSomes, rel)
+	} else if foreign.Type == O2O || foreign.Type == O2M {
+		rel := model.OneToSomeMigrate{
+			IsOneToMany:          foreign.Type == O2M,
+			TargetTable:          fd.targetInfo.TableName,
+			TargetColumn:         foreign.Reference.ColumnName,
+			EscapingTargetTable:  dm.db.driver.KeywordHandler(fd.targetInfo.TableName),
+			EscapingTargetColumn: dm.db.driver.KeywordHandler(foreign.Reference.ColumnName),
+			TargetSchema:         fd.targetSchema,
+			AttributeMigrate: model.AttributeMigrate{
+				FieldName:    col.FieldName,
+				Name:         fd.colName,
+				EscapingName: dm.db.driver.KeywordHandler(fd.colName),
+				DataType:     col.ColumnType,
+				Nullable:     col.AllowNull,
+			},
+		}
+		tm.OneToSomes = append(tm.OneToSomes, rel)
+	}
 }
 
 func (dm *dbMigrator) typeField(tm *model.TableMigrate, tables, elem reflect.Value, driver model.Driver) (*model.TableMigrate, error) {
@@ -478,68 +493,12 @@ func helperAttributeMigrate(b body) error {
 	if utils.HasTagValue(goeTag, "m2o") || utils.HasTagValue(goeTag, "o2o") {
 		table, _ := foreignKeyNamePattern(b.tables, migField.Name)
 		if table == "" {
-			tableName := strings.TrimSuffix(migField.Name, "Id")
-			tableName = strings.TrimSuffix(tableName, "ID")
-			tableNameSnake := utils.ToSnakeCase(tableName)
-			for _, info := range tableRegistry {
-				if info.TableName == tableName || info.TableName == strings.ToLower(tableName) ||
-					info.TableName == tableNameSnake || info.TableName == strings.ToLower(tableNameSnake) ||
-					info.TableName == "t_"+tableNameSnake || info.TableName == "t_"+strings.ToLower(tableName) {
-					table = info.TableName
-					break
-				}
-			}
+			table = findTableByFieldName(migField.Name)
 		}
 		if table != "" {
-			var targetInfo *TableInfo
-			for _, info := range tableRegistry {
-				if info.TableName == table {
-					targetInfo = info
-					break
-				}
-			}
-			if targetInfo != nil && len(targetInfo.PrimaryKeys) > 0 {
-				pkName := targetInfo.PrimaryKeys[0].ColumnName
-				var targetSchema *string
-				if targetInfo.SchemaName != "" {
-					targetSchema = &targetInfo.SchemaName
-				}
-				migTable := b.migrate.table
-				if utils.HasTagValue(goeTag, "o2o") {
-					rel := model.OneToSomeMigrate{
-						IsOneToMany:          false,
-						TargetTable:          targetInfo.TableName,
-						TargetColumn:         pkName,
-						EscapingTargetTable:  b.driver.KeywordHandler(targetInfo.TableName),
-						EscapingTargetColumn: b.driver.KeywordHandler(pkName),
-						TargetSchema:         targetSchema,
-						AttributeMigrate: model.AttributeMigrate{
-							FieldName:    migField.Name,
-							Name:         utils.ToSnakeCase(migField.Name),
-							EscapingName: b.driver.KeywordHandler(utils.ToSnakeCase(migField.Name)),
-							DataType:     getTagType(migField),
-							Nullable:     b.nullable,
-						},
-					}
-					migTable.OneToSomes = append(migTable.OneToSomes, rel)
-				} else {
-					rel := model.ManyToSomeMigrate{
-						TargetTable:          targetInfo.TableName,
-						TargetColumn:         pkName,
-						EscapingTargetTable:  b.driver.KeywordHandler(targetInfo.TableName),
-						EscapingTargetColumn: b.driver.KeywordHandler(pkName),
-						TargetSchema:         targetSchema,
-						AttributeMigrate: model.AttributeMigrate{
-							FieldName:    migField.Name,
-							Name:         utils.ToSnakeCase(migField.Name),
-							EscapingName: b.driver.KeywordHandler(utils.ToSnakeCase(migField.Name)),
-							DataType:     getTagType(migField),
-							Nullable:     b.nullable,
-						},
-					}
-					migTable.ManyToSomes = append(migTable.ManyToSomes, rel)
-				}
-				return nil
+			fd := createFieldDescForTag(b, table, migField.Name)
+			if fd != nil {
+				return addRelationForTag(b, fd, migField, goeTag)
 			}
 		}
 		return migrateAtt(b)
@@ -552,21 +511,8 @@ func helperAttributeMigrate(b body) error {
 
 	migTable := b.migrate.table
 	fkColName := utils.ToSnakeCase(migField.Name) + "_id"
-	for _, rel := range migTable.ManyToSomes {
-		if rel.Name == fkColName || rel.Name == utils.ToSnakeCase(migField.Name) {
-			return nil
-		}
-	}
-	for _, rel := range migTable.OneToSomes {
-		if rel.Name == fkColName || rel.Name == utils.ToSnakeCase(migField.Name) {
-			return nil
-		}
-	}
-
-	for _, attr := range migTable.Attributes {
-		if attr.Name == fkColName || attr.Name == utils.ToSnakeCase(migField.Name) {
-			return nil
-		}
+	if isRelationOrAttributeExists(migTable, fkColName, utils.ToSnakeCase(migField.Name)) {
+		return nil
 	}
 
 	b.stringInfos = stringInfos{prefixName: prefix, tableName: table, fieldName: migField.Name}
@@ -585,6 +531,103 @@ func helperAttributeMigrate(b body) error {
 		migTable.OneToSomes = append(migTable.OneToSomes, *v)
 	}
 	return nil
+}
+
+func findTableByFieldName(fieldName string) string {
+	tableName := strings.TrimSuffix(fieldName, "Id")
+	tableName = strings.TrimSuffix(tableName, "ID")
+	tableNameSnake := utils.ToSnakeCase(tableName)
+	for _, info := range tableRegistry {
+		if info.TableName == tableName || info.TableName == strings.ToLower(tableName) ||
+			info.TableName == tableNameSnake || info.TableName == strings.ToLower(tableNameSnake) ||
+			info.TableName == "t_"+tableNameSnake || info.TableName == "t_"+strings.ToLower(tableName) {
+			return info.TableName
+		}
+	}
+	return ""
+}
+
+func createFieldDescForTag(b body, tableName string, fieldName string) *fieldDesc {
+	var targetInfo *TableInfo
+	for _, info := range tableRegistry {
+		if info.TableName == tableName {
+			targetInfo = info
+			break
+		}
+	}
+	if targetInfo == nil || len(targetInfo.PrimaryKeys) == 0 {
+		return nil
+	}
+	var targetSchema *string
+	if targetInfo.SchemaName != "" {
+		targetSchema = &targetInfo.SchemaName
+	}
+	return &fieldDesc{
+		colName:      utils.ToSnakeCase(fieldName),
+		targetInfo:   targetInfo,
+		targetSchema: targetSchema,
+	}
+}
+
+func addRelationForTag(b body, fd *fieldDesc, migField reflect.StructField, goeTag string) error {
+	migTable := b.migrate.table
+	pkName := fd.targetInfo.PrimaryKeys[0].ColumnName
+	if utils.HasTagValue(goeTag, "o2o") {
+		rel := model.OneToSomeMigrate{
+			IsOneToMany:          false,
+			TargetTable:          fd.targetInfo.TableName,
+			TargetColumn:         pkName,
+			EscapingTargetTable:  b.driver.KeywordHandler(fd.targetInfo.TableName),
+			EscapingTargetColumn: b.driver.KeywordHandler(pkName),
+			TargetSchema:         fd.targetSchema,
+			AttributeMigrate: model.AttributeMigrate{
+				FieldName:    migField.Name,
+				Name:         utils.ToSnakeCase(migField.Name),
+				EscapingName: b.driver.KeywordHandler(utils.ToSnakeCase(migField.Name)),
+				DataType:     getTagType(migField),
+				Nullable:     b.nullable,
+			},
+		}
+		migTable.OneToSomes = append(migTable.OneToSomes, rel)
+	} else {
+		rel := model.ManyToSomeMigrate{
+			TargetTable:          fd.targetInfo.TableName,
+			TargetColumn:         pkName,
+			EscapingTargetTable:  b.driver.KeywordHandler(fd.targetInfo.TableName),
+			EscapingTargetColumn: b.driver.KeywordHandler(pkName),
+			TargetSchema:         fd.targetSchema,
+			AttributeMigrate: model.AttributeMigrate{
+				FieldName:    migField.Name,
+				Name:         utils.ToSnakeCase(migField.Name),
+				EscapingName: b.driver.KeywordHandler(utils.ToSnakeCase(migField.Name)),
+				DataType:     getTagType(migField),
+				Nullable:     b.nullable,
+			},
+		}
+		migTable.ManyToSomes = append(migTable.ManyToSomes, rel)
+	}
+	return nil
+}
+
+func isRelationOrAttributeExists(tm *model.TableMigrate, colNames ...string) bool {
+	for _, colName := range colNames {
+		for _, rel := range tm.ManyToSomes {
+			if rel.Name == colName {
+				return true
+			}
+		}
+		for _, rel := range tm.OneToSomes {
+			if rel.Name == colName {
+				return true
+			}
+		}
+		for _, attr := range tm.Attributes {
+			if attr.Name == colName {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func checkIndex(b body, at model.AttributeMigrate, skipUnique bool) error {
