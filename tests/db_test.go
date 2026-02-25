@@ -230,7 +230,7 @@ var mapDriver = map[string]func() (*Database, error){
 func TestMain(m *testing.M) {
 	code := m.Run()
 	if db != nil {
-		if db.Name() == "PostgreSQL" {
+		if db.DriverName() == "PostgreSQL" {
 			sql := `
 			DROP TABLE IF EXISTS public.animal, public.person_job_title, public.person, public.job_title,
 			public.weather, public.info, public.status, public.default, public.exam, public.page,

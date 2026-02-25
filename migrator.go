@@ -10,12 +10,12 @@ import (
 	"github.com/azhai/goent/utils"
 )
 
-// type fieldDesc struct {
-// 	Field      reflect.Value
-// 	FieldName  string
-// 	HasSchema  bool
-// 	SchemaName string
-// }
+type fieldDesc struct {
+	// Field      reflect.Value
+	// FieldName  string
+	// HasSchema  bool
+	// SchemaName string
+}
 
 type dbMigrator struct {
 	// fieldDescs []*fieldDesc

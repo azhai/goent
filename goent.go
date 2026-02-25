@@ -123,38 +123,15 @@ func travelSchemas(db *DB, dbId int, valueOf reflect.Value) ([]string, error) {
 			if foreign.Reference != nil {
 				continue
 			}
-			var refTableName string
-			switch foreign.Type {
-			case M2O, O2O:
-				if _, ok := info.Columns[fkName]; !ok {
-					continue
-				}
-				refTableName = strings.TrimSuffix(fkName, "_id")
-			case O2M:
-				refTableName = strings.TrimSuffix(foreign.ForeignKey, "_id")
-			case M2M:
-				if foreign.Middle == nil {
-					continue
-				}
-				refTableName = strings.TrimSuffix(foreign.Middle.Right, "_id")
+			refTableName, ok := info.getRefTableName(foreign, fkName)
+			if !ok {
+				continue
 			}
 			for otherAddr, otherInfo := range tableRegistry {
 				if otherAddr == info.TableAddr {
 					continue
 				}
-				if strings.EqualFold(otherInfo.TableName, refTableName) ||
-					strings.EqualFold(otherInfo.FieldName, refTableName) ||
-					strings.HasSuffix(strings.ToLower(otherInfo.TableName), "_"+strings.ToLower(refTableName)) {
-					foreign.Reference = &Field{
-						TableAddr:  otherAddr,
-						ColumnName: "id",
-					}
-					for _, pk := range otherInfo.PrimaryKeys {
-						if pk.IsAutoIncr {
-							foreign.Reference.FieldId = pk.FieldId
-							break
-						}
-					}
+				if foreign, ok = otherInfo.setForeignReference(foreign, refTableName); ok {
 					break
 				}
 			}

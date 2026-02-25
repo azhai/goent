@@ -31,7 +31,7 @@ type TableInfo struct {
 	Columns      map[string]*Column  // Columns is a map of column names to Column metadata.
 	Foreigns     map[string]*Foreign // Foreigns is a map of foreign key column names to Foreign metadata.
 	Ignores      []string            // Ignores is a list of column names to ignore.
-	sortedFields []*Field            // SortedFields is a list of columns sorted by field ID.
+	sortedFields []*Field            // sortedFields is a list of columns sorted by field ID.
 	simpleTable  bool                // simpleTable is true if the table has a single primary key.
 }
 
@@ -153,6 +153,43 @@ func (info TableInfo) GetSortedFields() []*Field {
 		}
 	}
 	return info.sortedFields
+}
+
+func (info TableInfo) getRefTableName(foreign *Foreign, fkName string) (string, bool) {
+	switch foreign.Type {
+	case M2O, O2O:
+		if _, ok := info.Columns[fkName]; !ok {
+			return "", false
+		}
+		return strings.TrimSuffix(fkName, "_id"), true
+	case O2M:
+		return strings.TrimSuffix(foreign.ForeignKey, "_id"), true
+	case M2M:
+		if foreign.Middle == nil {
+			return "", false
+		}
+		return strings.TrimSuffix(foreign.Middle.Right, "_id"), true
+	}
+	return "", false
+}
+
+func (info TableInfo) setForeignReference(foreign *Foreign, refTableName string) (*Foreign, bool) {
+	if strings.EqualFold(info.TableName, refTableName) ||
+		strings.EqualFold(info.FieldName, refTableName) ||
+		strings.HasSuffix(strings.ToLower(info.TableName), "_"+strings.ToLower(refTableName)) {
+		foreign.Reference = &Field{
+			TableAddr:  info.TableAddr,
+			ColumnName: "id",
+		}
+		for _, pk := range info.PrimaryKeys {
+			if pk.IsAutoIncr {
+				foreign.Reference.FieldId = pk.FieldId
+				break
+			}
+		}
+		return foreign, true
+	}
+	return foreign, false
 }
 
 // Table represents a database table with its model and metadata.

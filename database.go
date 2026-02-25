@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 
 	"github.com/azhai/goent/model"
@@ -70,8 +71,8 @@ func (db *DB) SetDriver(driver model.Driver) {
 	db.driver = driver
 }
 
-// Name returns the database name (SQLite, PostgreSQL, etc.).
-func (db *DB) Name() string {
+// DriverName returns the database name (SQLite, PostgreSQL, etc.).
+func (db *DB) DriverName() string {
 	return db.driver.Name()
 }
 
@@ -187,6 +188,24 @@ func (db *DB) BeginTransactionContext(ctx context.Context, isolation sql.Isolati
 		return
 	}
 	return t.Commit()
+}
+
+func (db *DB) DropTables() error {
+	var tables []string
+	tableRegLock.RLock()
+	defer tableRegLock.RUnlock()
+	for _, info := range tableRegistry {
+		tables = append(tables, info.TableName)
+	}
+	if len(tables) == 0 {
+		return nil
+	}
+	sql := "DROP TABLE IF EXISTS %s"
+	if db.DriverName() == "PostgreSQL" {
+		sql += " CASCADE"
+	}
+	sql = fmt.Sprintf(sql, strings.Join(tables, ", "))
+	return db.RawExecContext(context.Background(), sql)
 }
 
 // Close closes the database connection and cleans up the table registry.

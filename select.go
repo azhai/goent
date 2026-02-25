@@ -266,19 +266,19 @@ func (s *StateSelect[T, R]) GetJoinForeigns() []*Foreign {
 	for _, join := range s.builder.Joins {
 		if foreign, ok := s.table.Foreigns[join.Table.Name]; ok {
 			foreigns = append(foreigns, foreign)
-		} else {
-			info := findTableInfoByName(join.Table.Name)
-			if info != nil {
-				if field, ok := valueType.FieldByName(info.FieldName); ok {
-					if field.Type.Kind() == reflect.Slice {
-						continue
-					}
-					foreigns = append(foreigns, &Foreign{
-						Type:       O2O,
-						MountField: info.FieldName,
-						Reference:  &Field{TableAddr: info.TableAddr},
-					})
+			continue
+		}
+		info := findTableInfoByName(join.Table.Name)
+		if info != nil {
+			if field, ok := valueType.FieldByName(info.FieldName); ok {
+				if field.Type.Kind() == reflect.Slice {
+					continue
 				}
+				foreigns = append(foreigns, &Foreign{
+					Type:       O2O,
+					MountField: info.FieldName,
+					Reference:  &Field{TableAddr: info.TableAddr},
+				})
 			}
 		}
 	}

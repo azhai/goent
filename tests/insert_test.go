@@ -351,7 +351,7 @@ func TestInsert(t *testing.T) {
 		{
 			desc: "Insert_ErrForeignKey",
 			testCase: func(t *testing.T) {
-				if db.Name() == "SQLite" {
+				if db.DriverName() == "SQLite" {
 					db.RawExecContext(context.Background(), "PRAGMA foreign_keys = ON;")
 					defer db.RawExecContext(context.Background(), "PRAGMA foreign_keys = OFF;")
 				}

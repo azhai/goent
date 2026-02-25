@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -118,7 +117,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer clearDatabase(db, false)
+	defer clearDatabase(db, true)
 
 	if err = goent.AutoMigrate(db); err != nil {
 		panic(err)
@@ -199,8 +198,9 @@ func connect(dbType, dbDSN, logFile string) (*Database, error) {
 func clearDatabase(db *Database, isDrop bool) {
 	var err error
 	if isDrop {
-		sql := "DROP TABLE IF EXISTS public.t_order_product, public.t_order, public.t_product, public.t_category CASCADE"
-		err = db.RawExecContext(context.Background(), sql)
+		// sql := "DROP TABLE IF EXISTS public.t_order_product, public.t_order, public.t_product, public.t_category CASCADE"
+		// err = db.RawExecContext(context.Background(), sql)
+		err = db.DropTables()
 	}
 	_ = goent.Close(db)
 	if err != nil {

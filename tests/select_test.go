@@ -399,7 +399,7 @@ func TestSelect(t *testing.T) {
 		{
 			desc: "Select_Where_ILike",
 			testCase: func(t *testing.T) {
-				if db.Name() == "SQLite" {
+				if db.DriverName() == "SQLite" {
 					t.Skip("SQLite does not support ILIKE")
 				}
 				a, err := db.Animal.Select().Filter(goent.ILike(db.Animal.Field("name"), "%cat%")).All()
@@ -414,7 +414,7 @@ func TestSelect(t *testing.T) {
 		{
 			desc: "Select_Where_NotILike",
 			testCase: func(t *testing.T) {
-				if db.Name() == "SQLite" {
+				if db.DriverName() == "SQLite" {
 					t.Skip("SQLite does not support ILIKE")
 				}
 				a, err := db.Animal.Select().Filter(goent.NotILike(db.Animal.Field("name"), "%cat%")).All()
