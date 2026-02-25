@@ -117,7 +117,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer clearDatabase(db, true)
+	defer clearDatabase(db, false)
 
 	if err = goent.AutoMigrate(db); err != nil {
 		panic(err)

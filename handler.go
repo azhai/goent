@@ -188,6 +188,9 @@ func (f *Fetcher[R]) FetchRows(rows model.Rows, err error, limit int) ([]*R, err
 			return nil, err
 		}
 		objs = append(objs, target)
+		if limit > 0 && len(objs) >= limit {
+			break
+		}
 	}
 	return objs, nil
 }

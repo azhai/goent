@@ -27,6 +27,10 @@ type Animal struct {
 	AnimalFoods []AnimalFood
 }
 
+func (*Animal) TableName() string {
+	return "animals"
+}
+
 // AnimalFood is the relationship between an animal and its food.
 type AnimalFood struct {
 	AnimalId int       `goe:"pk"`
@@ -66,7 +70,7 @@ type Info struct {
 
 // Status is a status of an animal.
 type Status struct {
-	Id   int `goe:"pk"`
+	ID   int64 `goe:"pk"`
 	Name string
 }
 
@@ -232,7 +236,7 @@ func TestMain(m *testing.M) {
 	if db != nil {
 		if db.DriverName() == "PostgreSQL" {
 			sql := `
-			DROP TABLE IF EXISTS public.animal, public.person_job_title, public.person, public.job_title,
+			DROP TABLE IF EXISTS public.animals, public.person_job_title, public.person, public.job_title,
 			public.weather, public.info, public.status, public.default, public.exam, public.page,
 			public.select, public.animal_food, auth.user, auth.role, auth.user_role,
 			food.food, food.habitat, flag.flag, drop.drop CASCADE;
@@ -277,7 +281,7 @@ func SetupPostgres() (*Database, error) {
 		return nil, err
 	}
 	sql := `
-	TRUNCATE TABLE public.animal, public.person_job_title, public.person, public.job_title,
+	TRUNCATE TABLE public.animals, public.person_job_title, public.person, public.job_title,
 	public.weather, public.info, public.status, public.default, public.exam, public.page,
 	public.select, public.animal_food, auth.user, auth.role, auth.user_role,
 	food.food, food.habitat, flag.flag, drop.drop RESTART IDENTITY CASCADE;

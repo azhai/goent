@@ -39,6 +39,10 @@ func (m Migration) OnTable(table string) TableMigration {
 	return TableMigration{SchemaMigration{Migration: m}, table}
 }
 
+func (m Migration) KeywordHandler(name string) string {
+	return m.db.driver.KeywordHandler(name)
+}
+
 // SchemaMigration provides migration methods scoped to a specific schema.
 type SchemaMigration struct {
 	Migration
@@ -55,30 +59,31 @@ type TableMigration struct {
 	table string
 }
 
+func (m TableMigration) SchemaTable() (schema, table string) {
+	return m.KeywordHandler(utils.ToSnakeCase(m.schema)),
+		m.KeywordHandler(utils.TableNamePattern(m.table))
+}
+
 func (m TableMigration) DropTable() error {
-	return m.db.driver.DropTable(
-		m.db.driver.KeywordHandler(utils.ToSnakeCase(m.schema)),
-		m.db.driver.KeywordHandler(utils.TableNamePattern(m.table)))
+	schema, table := m.SchemaTable()
+	return m.db.driver.DropTable(schema, table)
 }
 
 func (m TableMigration) RenameTable(newName string) error {
-	return m.db.driver.RenameTable(
-		m.db.driver.KeywordHandler(utils.ToSnakeCase(m.schema)),
-		m.db.driver.KeywordHandler(utils.TableNamePattern(m.table)),
-		m.db.driver.KeywordHandler(utils.TableNamePattern(newName)))
+	schema, table := m.SchemaTable()
+	newName = m.KeywordHandler(utils.TableNamePattern(newName))
+	return m.db.driver.RenameTable(schema, table, newName)
 }
 
 func (m TableMigration) DropColumn(column string) error {
-	return m.db.driver.DropColumn(
-		m.db.driver.KeywordHandler(utils.ToSnakeCase(m.schema)),
-		m.db.driver.KeywordHandler(utils.TableNamePattern(m.table)),
-		m.db.driver.KeywordHandler(utils.ToSnakeCase(column)))
+	schema, table := m.SchemaTable()
+	column = m.KeywordHandler(utils.ToSnakeCase(column))
+	return m.db.driver.DropColumn(schema, table, column)
 }
 
 func (m TableMigration) RenameColumn(column, newName string) error {
-	return m.db.driver.RenameColumn(
-		m.db.driver.KeywordHandler(utils.ToSnakeCase(m.schema)),
-		m.db.driver.KeywordHandler(utils.TableNamePattern(m.table)),
-		m.db.driver.KeywordHandler(utils.ToSnakeCase(column)),
-		m.db.driver.KeywordHandler(utils.ToSnakeCase(newName)))
+	schema, table := m.SchemaTable()
+	column = m.KeywordHandler(utils.ToSnakeCase(column))
+	newName = m.KeywordHandler(utils.ToSnakeCase(newName))
+	return m.db.driver.RenameColumn(schema, table, column, newName)
 }

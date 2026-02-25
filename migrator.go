@@ -124,6 +124,14 @@ func (dm *dbMigrator) createFieldDesc(info *TableInfo, colName string, foreign *
 
 func (dm *dbMigrator) addForeignRelation(tm *model.TableMigrate, fd *fieldDesc, foreign *Foreign) {
 	col := fd.info.Columns[fd.colName]
+	attrMig := model.AttributeMigrate{
+		FieldName:    col.FieldName,
+		Name:         fd.colName,
+		EscapingName: dm.db.driver.KeywordHandler(fd.colName),
+		DataType:     col.ColumnType,
+		Nullable:     col.AllowNull,
+	}
+
 	if foreign.Type == M2O {
 		rel := model.ManyToSomeMigrate{
 			TargetTable:          fd.targetInfo.TableName,
@@ -131,13 +139,7 @@ func (dm *dbMigrator) addForeignRelation(tm *model.TableMigrate, fd *fieldDesc, 
 			EscapingTargetTable:  dm.db.driver.KeywordHandler(fd.targetInfo.TableName),
 			EscapingTargetColumn: dm.db.driver.KeywordHandler(foreign.Reference.ColumnName),
 			TargetSchema:         fd.targetSchema,
-			AttributeMigrate: model.AttributeMigrate{
-				FieldName:    col.FieldName,
-				Name:         fd.colName,
-				EscapingName: dm.db.driver.KeywordHandler(fd.colName),
-				DataType:     col.ColumnType,
-				Nullable:     col.AllowNull,
-			},
+			AttributeMigrate:     attrMig,
 		}
 		tm.ManyToSomes = append(tm.ManyToSomes, rel)
 	} else if foreign.Type == O2O || foreign.Type == O2M {
@@ -148,13 +150,7 @@ func (dm *dbMigrator) addForeignRelation(tm *model.TableMigrate, fd *fieldDesc, 
 			EscapingTargetTable:  dm.db.driver.KeywordHandler(fd.targetInfo.TableName),
 			EscapingTargetColumn: dm.db.driver.KeywordHandler(foreign.Reference.ColumnName),
 			TargetSchema:         fd.targetSchema,
-			AttributeMigrate: model.AttributeMigrate{
-				FieldName:    col.FieldName,
-				Name:         fd.colName,
-				EscapingName: dm.db.driver.KeywordHandler(fd.colName),
-				DataType:     col.ColumnType,
-				Nullable:     col.AllowNull,
-			},
+			AttributeMigrate:     attrMig,
 		}
 		tm.OneToSomes = append(tm.OneToSomes, rel)
 	}
@@ -572,7 +568,17 @@ func createFieldDescForTag(b body, tableName string, fieldName string) *fieldDes
 func addRelationForTag(b body, fd *fieldDesc, migField reflect.StructField, goeTag string) error {
 	migTable := b.migrate.table
 	pkName := fd.targetInfo.PrimaryKeys[0].ColumnName
-	if utils.HasTagValue(goeTag, "o2o") {
+	isO2O := utils.HasTagValue(goeTag, "o2o")
+
+	attrMig := model.AttributeMigrate{
+		FieldName:    migField.Name,
+		Name:         utils.ToSnakeCase(migField.Name),
+		EscapingName: b.driver.KeywordHandler(utils.ToSnakeCase(migField.Name)),
+		DataType:     getTagType(migField),
+		Nullable:     b.nullable,
+	}
+
+	if isO2O {
 		rel := model.OneToSomeMigrate{
 			IsOneToMany:          false,
 			TargetTable:          fd.targetInfo.TableName,
@@ -580,13 +586,7 @@ func addRelationForTag(b body, fd *fieldDesc, migField reflect.StructField, goeT
 			EscapingTargetTable:  b.driver.KeywordHandler(fd.targetInfo.TableName),
 			EscapingTargetColumn: b.driver.KeywordHandler(pkName),
 			TargetSchema:         fd.targetSchema,
-			AttributeMigrate: model.AttributeMigrate{
-				FieldName:    migField.Name,
-				Name:         utils.ToSnakeCase(migField.Name),
-				EscapingName: b.driver.KeywordHandler(utils.ToSnakeCase(migField.Name)),
-				DataType:     getTagType(migField),
-				Nullable:     b.nullable,
-			},
+			AttributeMigrate:     attrMig,
 		}
 		migTable.OneToSomes = append(migTable.OneToSomes, rel)
 	} else {
@@ -596,13 +596,7 @@ func addRelationForTag(b body, fd *fieldDesc, migField reflect.StructField, goeT
 			EscapingTargetTable:  b.driver.KeywordHandler(fd.targetInfo.TableName),
 			EscapingTargetColumn: b.driver.KeywordHandler(pkName),
 			TargetSchema:         fd.targetSchema,
-			AttributeMigrate: model.AttributeMigrate{
-				FieldName:    migField.Name,
-				Name:         utils.ToSnakeCase(migField.Name),
-				EscapingName: b.driver.KeywordHandler(utils.ToSnakeCase(migField.Name)),
-				DataType:     getTagType(migField),
-				Nullable:     b.nullable,
-			},
+			AttributeMigrate:     attrMig,
 		}
 		migTable.ManyToSomes = append(migTable.ManyToSomes, rel)
 	}
@@ -667,23 +661,21 @@ func checkIndex(b body, at model.AttributeMigrate, skipUnique bool) error {
 
 	tagValue := migField.Tag.Get("goe")
 	if !skipUnique && utils.HasTagValue(tagValue, "unique") {
-		in := model.IndexMigrate{
-			Name:         migTable.Name + "_idx_" + strings.ToLower(migField.Name),
-			EscapingName: b.driver.KeywordHandler(migTable.Name + "_idx_" + strings.ToLower(migField.Name)),
-			Unique:       true,
-			Attributes:   []model.AttributeMigrate{at},
-		}
-		migTable.Indexes = append(migTable.Indexes, in)
+		migTable.Indexes = append(migTable.Indexes, createIndexMigrate(b, at, true))
 	}
 
 	if utils.HasTagValue(tagValue, "index") {
-		in := model.IndexMigrate{
-			Name:         migTable.Name + "_idx_" + strings.ToLower(migField.Name),
-			EscapingName: b.driver.KeywordHandler(migTable.Name + "_idx_" + strings.ToLower(migField.Name)),
-			Unique:       false,
-			Attributes:   []model.AttributeMigrate{at},
-		}
-		migTable.Indexes = append(migTable.Indexes, in)
+		migTable.Indexes = append(migTable.Indexes, createIndexMigrate(b, at, false))
 	}
 	return nil
+}
+
+func createIndexMigrate(b body, at model.AttributeMigrate, unique bool) model.IndexMigrate {
+	name := b.migrate.table.Name + "_idx_" + strings.ToLower(b.migrate.field.Name)
+	return model.IndexMigrate{
+		Name:         name,
+		EscapingName: b.driver.KeywordHandler(name),
+		Unique:       unique,
+		Attributes:   []model.AttributeMigrate{at},
+	}
 }

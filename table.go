@@ -35,49 +35,31 @@ type TableInfo struct {
 	simpleTable  bool                // simpleTable is true if the table has a single primary key.
 }
 
-// getColumnTypeName returns the string representation of a column type.
-// It handles pointer, slice, array, and custom types.
-func getColumnTypeName(t reflect.Type) string {
-	if t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-	if t.Kind() == reflect.Slice {
-		return "[]" + t.Elem().Kind().String()
-	}
-	if t.PkgPath() != "" {
-		return t.PkgPath() + "." + t.Name()
-	}
-	if t.Kind() == reflect.Array {
-		return fmt.Sprintf("[%d]%s", t.Len(), t.Elem().Kind().String())
-	}
-	return t.Kind().String()
-}
-
 // String returns the table name as a string representation.
-func (t TableInfo) String() string {
-	return t.TableName
+func (info TableInfo) String() string {
+	return info.TableName
 	// return fmt.Sprintf("%s.%s", t.SchemaName, t.TableName)
 }
 
 // Table returns a model.Table representation with schema and table name.
-func (t TableInfo) Table() *model.Table {
+func (info TableInfo) Table() *model.Table {
 	var schemaName *string
-	if t.SchemaName != "" {
-		schemaName = &t.SchemaName
+	if info.SchemaName != "" {
+		schemaName = &info.SchemaName
 	}
 	return &model.Table{
 		Schema: schemaName,
-		Name:   t.TableName,
+		Name:   info.TableName,
 	}
 }
 
 // ColumnInfo returns the Column metadata for a given column name.
 // It performs case-insensitive lookup.
-func (t TableInfo) ColumnInfo(name string) *Column {
-	if col, ok := t.Columns[name]; ok {
+func (info TableInfo) ColumnInfo(name string) *Column {
+	if col, ok := info.Columns[name]; ok {
 		return col
 	}
-	for _, col := range t.Columns {
+	for _, col := range info.Columns {
 		if strings.EqualFold(col.ColumnName, name) {
 			return col
 		}
@@ -87,23 +69,23 @@ func (t TableInfo) ColumnInfo(name string) *Column {
 
 // Field returns a Field pointer for the specified column name.
 // It panics if the column is not found in the table.
-func (t TableInfo) Field(col string) *Field {
+func (info TableInfo) Field(col string) *Field {
 	col = strings.TrimSpace(col)
-	if fid, ok := t.Check(col); ok {
-		return &Field{TableAddr: t.TableAddr, FieldId: fid, ColumnName: col}
+	if fid, ok := info.Check(col); ok {
+		return &Field{TableAddr: info.TableAddr, FieldId: fid, ColumnName: col}
 	}
-	panic(fmt.Sprintf("column %s not found in table %s", col, t.TableName))
+	panic(fmt.Sprintf("column %s not found in table %s", col, info.TableName))
 }
 
 // Check returns the field ID and whether the column exists in the table.
 // It returns (-1, true) for wildcard (*) or simple tables.
-func (t TableInfo) Check(col string) (int, bool) {
+func (info TableInfo) Check(col string) (int, bool) {
 	col = strings.TrimSpace(col)
-	if t.simpleTable || col == "" || col == "*" ||
+	if info.simpleTable || col == "" || col == "*" ||
 		strings.ContainsAny(col, " ,+*/%()") {
 		return -1, true
 	}
-	if info := t.ColumnInfo(col); info != nil {
+	if info := info.ColumnInfo(col); info != nil {
 		return info.FieldId, true
 	}
 	return -1, false
@@ -111,16 +93,16 @@ func (t TableInfo) Check(col string) (int, bool) {
 
 // GetPrimaryInfo returns the primary key field ID, column name, and all primary key column names.
 // It only returns valid field ID and column name for single-column primary keys.
-func (t TableInfo) GetPrimaryInfo() (int, string, []string) {
+func (info TableInfo) GetPrimaryInfo() (int, string, []string) {
 	pkFid, pkName := -1, ""
-	size := len(t.PrimaryKeys)
+	size := len(info.PrimaryKeys)
 	pkeys := make([]string, 0, size)
-	for _, pkey := range t.PrimaryKeys {
+	for _, pkey := range info.PrimaryKeys {
 		pkeys = append(pkeys, pkey.ColumnName)
 	}
 	if size == 1 {
-		pkFid = t.PrimaryKeys[0].Column.FieldId
-		pkName = t.PrimaryKeys[0].ColumnName
+		pkFid = info.PrimaryKeys[0].Column.FieldId
+		pkName = info.PrimaryKeys[0].ColumnName
 	}
 	sort.Strings(pkeys)
 	return pkFid, pkName, pkeys
@@ -338,7 +320,11 @@ func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schem
 				Column:     column,
 			})
 		}
-		if utils.HasTagValue(geoTag, "m2o") {
+		if utils.HasTagValue(geoTag, "m2o") || utils.HasTagValue(geoTag, "o2o") {
+			fkType := M2O
+			if utils.HasTagValue(geoTag, "o2o") {
+				fkType = O2O
+			}
 			mountField := strings.TrimSuffix(fieldOf.Name, "ID")
 			mountField = strings.TrimSuffix(mountField, "Id")
 			if mountField == fieldOf.Name {
@@ -346,20 +332,7 @@ func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schem
 				mountField = utils.TitleCase(mountField)
 			}
 			info.Foreigns[columnName] = &Foreign{
-				Type:       M2O,
-				MountField: mountField,
-				ForeignKey: columnName,
-				Reference:  nil,
-			}
-		} else if utils.HasTagValue(geoTag, "o2o") {
-			mountField := strings.TrimSuffix(fieldOf.Name, "ID")
-			mountField = strings.TrimSuffix(mountField, "Id")
-			if mountField == fieldOf.Name {
-				mountField = strings.TrimSuffix(columnName, "_id")
-				mountField = utils.TitleCase(mountField)
-			}
-			info.Foreigns[columnName] = &Foreign{
-				Type:       O2O,
+				Type:       fkType,
 				MountField: mountField,
 				ForeignKey: columnName,
 				Reference:  nil,
@@ -367,15 +340,9 @@ func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schem
 		}
 		if !utils.HasTagValue(geoTag, "pk") && !strings.EqualFold(fieldOf.Name, "id") &&
 			!utils.HasTagValue(geoTag, "m2o") && !utils.HasTagValue(geoTag, "o2o") {
-			if utils.HasTagValue(geoTag, "unique") {
+			if utils.HasTagValue(geoTag, "unique") || utils.HasTagValue(geoTag, "index") {
 				info.Indexes = append(info.Indexes, &Index{
-					IsUnique:   true,
-					IsAutoIncr: false,
-					Column:     column,
-				})
-			} else if utils.HasTagValue(geoTag, "index") {
-				info.Indexes = append(info.Indexes, &Index{
-					IsUnique:   false,
+					IsUnique:   utils.HasTagValue(geoTag, "unique"),
 					IsAutoIncr: false,
 					Column:     column,
 				})
@@ -385,27 +352,6 @@ func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schem
 
 	tb.Elem().FieldByName("TableInfo").Set(reflect.ValueOf(info))
 	return tb, info
-}
-
-func isTableTypeField(t reflect.Type) bool {
-	if t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-	if t.Kind() != reflect.Struct {
-		return false
-	}
-	ptrType := reflect.PointerTo(t)
-	if method, ok := ptrType.MethodByName("TableName"); ok {
-		if method.Type.NumIn() == 0 && method.Type.NumOut() == 1 {
-			return true
-		}
-	}
-	for _, info := range tableRegistry {
-		if info.FieldName == t.Name() {
-			return true
-		}
-	}
-	return false
 }
 
 // SetDB sets the database connection for the table.
@@ -608,4 +554,43 @@ func (t *Table[T]) SelectContext(ctx context.Context, fields ...any) *StateSelec
 		state.sameModel = true
 	}
 	return state
+}
+
+// getColumnTypeName returns the string representation of a column type.
+// It handles pointer, slice, array, and custom types.
+func getColumnTypeName(t reflect.Type) string {
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t.Kind() == reflect.Slice {
+		return "[]" + t.Elem().Kind().String()
+	}
+	if t.PkgPath() != "" {
+		return t.PkgPath() + "." + t.Name()
+	}
+	if t.Kind() == reflect.Array {
+		return fmt.Sprintf("[%d]%s", t.Len(), t.Elem().Kind().String())
+	}
+	return t.Kind().String()
+}
+
+func isTableTypeField(t reflect.Type) bool {
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return false
+	}
+	ptrType := reflect.PointerTo(t)
+	if method, ok := ptrType.MethodByName("TableName"); ok {
+		if method.Type.NumIn() == 0 && method.Type.NumOut() == 1 {
+			return true
+		}
+	}
+	for _, info := range tableRegistry {
+		if info.FieldName == t.Name() {
+			return true
+		}
+	}
+	return false
 }

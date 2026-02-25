@@ -49,25 +49,29 @@ type Group struct {
 
 // Builder constructs SQL queries with support for SELECT, INSERT, UPDATE, and DELETE operations.
 type Builder struct {
+	Type  model.QueryType
+	Table *model.Table
+	Joins []*JoinTable
+
+	Changes  map[*Field]any
+	MoreRows [][]any
+	Where    Condition
+	Selects  []*Field
+
+	Orders []*Order
+	Groups []*Group
+	Limit  int
+	Offset int
+
+	Returning string
+	RollUp    string
+	ForUpdate bool
+
 	argNo         int
 	holders       []string
-	Type          model.QueryType
-	Table         *model.Table
 	tableName     string
-	Joins         []*JoinTable
-	Changes       map[*Field]any
-	MoreRows      [][]any
-	Where         Condition
-	Selects       []*Field
-	Orders        []*Order
-	Groups        []*Group
-	Limit         int
-	Offset        int
-	Returning     string
-	RollUp        string
-	ForUpdate     bool
 	sortedColumns []*Field
-	// Clause    *Builder
+
 	strings.Builder
 }
 
@@ -264,17 +268,16 @@ func (b *Builder) BuildTail() []any {
 
 		if len(b.Orders) != 0 {
 			b.WriteString(" ")
-			ob := b.Orders[0]
-			if ob.Desc {
-				b.WriteString("ORDER BY " + ob.String() + " DESC")
-			} else {
-				b.WriteString("ORDER BY " + ob.String() + " ASC")
-			}
-			for _, ob = range b.Orders[1:] {
+			b.WriteString("ORDER BY ")
+			for i, ob := range b.Orders {
+				if i > 0 {
+					b.WriteString(",")
+				}
+				b.WriteString(ob.String())
 				if ob.Desc {
-					b.WriteString("," + ob.String() + " DESC")
+					b.WriteString(" DESC")
 				} else {
-					b.WriteString("," + ob.String() + " ASC")
+					b.WriteString(" ASC")
 				}
 			}
 		}
@@ -304,50 +307,58 @@ func (b *Builder) BuildWhere() []any {
 	}
 
 	b.WriteString(" WHERE ")
+	b.argNo = b.buildTemplate(b.Where, b.argNo, func(fld *Field) string {
+		if b.Type == model.SelectJoinQuery || b.Type == model.UpdateJoinQuery {
+			return fld.String()
+		}
+		return fld.Simple()
+	}, &args)
 
+	return args
+}
+
+func (b *Builder) buildTemplate(cond Condition, startIdx int, fieldFmt func(*Field) string, args *[]any) int {
 	fi, vi := 0, 0
-	template := b.Where.Template
+	template := cond.Template
 	for idx := 0; idx < len(template); idx++ {
 		if idx+1 < len(template) && template[idx:idx+2] == "%s" {
-			if fi < len(b.Where.Fields) {
-				fld := b.Where.Fields[fi]
-				if b.Type == model.SelectJoinQuery || b.Type == model.UpdateJoinQuery {
-					b.WriteString(fld.String())
-				} else {
-					b.WriteString(fld.Simple())
-				}
-
+			if fi < len(cond.Fields) {
+				b.WriteString(fieldFmt(cond.Fields[fi]))
 				fi++
 			}
 			idx++
 		} else if template[idx] == '?' {
-			if vi < len(b.Where.Values) {
-				val := b.Where.Values[vi]
-				if val.Type == reflect.Slice && len(val.Args) > 0 {
-					b.WriteString("(")
-					for j, arg := range val.Args {
-						b.argNo += 1
-						if j > 0 {
-							b.WriteString(",$" + strconv.Itoa(b.argNo))
-						} else {
-							b.WriteString("$" + strconv.Itoa(b.argNo))
-						}
-						args = append(args, arg)
-					}
-					b.WriteByte(')')
-				} else if len(val.Args) > 0 {
-					b.argNo += 1
-					b.WriteString("$" + strconv.Itoa(b.argNo))
-					args = append(args, val.Args[0])
-				}
+			if vi < len(cond.Values) {
+				val := cond.Values[vi]
+				startIdx = b.appendValueParam(val, startIdx, args)
 				vi++
 			}
 		} else {
 			b.WriteByte(template[idx])
 		}
 	}
+	return startIdx
+}
 
-	return args
+func (b *Builder) appendValueParam(val *Value, startIdx int, args *[]any) int {
+	if val.Type == reflect.Slice && len(val.Args) > 0 {
+		b.WriteString("(")
+		for j, arg := range val.Args {
+			startIdx++
+			if j > 0 {
+				b.WriteString(",$" + strconv.Itoa(startIdx))
+			} else {
+				b.WriteString("$" + strconv.Itoa(startIdx))
+			}
+			*args = append(*args, arg)
+		}
+		b.WriteByte(')')
+	} else if len(val.Args) > 0 {
+		startIdx++
+		b.WriteString("$" + strconv.Itoa(startIdx))
+		*args = append(*args, val.Args[0])
+	}
+	return startIdx
 }
 
 // BuildJoins builds the JOIN clauses for the query.
@@ -372,42 +383,9 @@ func (b *Builder) BuildJoins() []any {
 		}
 		b.WriteString(" ON ")
 		if j.On.Template != "" {
-			fi, vi, pi := 0, 0, 1
-			template := j.On.Template
-
-			for idx := 0; idx < len(template); idx++ {
-				if idx+1 < len(template) && template[idx:idx+2] == "%s" {
-					if fi < len(j.On.Fields) {
-						b.WriteString(j.On.Fields[fi].String())
-						fi++
-					}
-					idx++
-				} else if template[idx] == '?' {
-					if vi < len(j.On.Values) {
-						val := j.On.Values[vi]
-						if val.Type == reflect.Slice && len(val.Args) > 0 {
-							b.WriteString("(")
-							for j, arg := range val.Args {
-								if j > 0 {
-									b.WriteString(",$" + strconv.Itoa(pi))
-								} else {
-									b.WriteString("$" + strconv.Itoa(pi))
-								}
-								args = append(args, arg)
-								pi++
-							}
-							b.WriteByte(')')
-						} else if len(val.Args) > 0 {
-							b.WriteString("$" + strconv.Itoa(pi))
-							args = append(args, val.Args[0])
-							pi++
-						}
-						vi++
-					}
-				} else {
-					b.WriteByte(template[idx])
-				}
-			}
+			b.buildTemplate(j.On, len(args), func(fld *Field) string {
+				return fld.String()
+			}, &args)
 		}
 	}
 

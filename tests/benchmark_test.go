@@ -2,6 +2,7 @@ package tests_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/azhai/goent"
@@ -9,12 +10,29 @@ import (
 	"github.com/google/uuid"
 )
 
-var animals []*Animal
-var size int = 100
+var (
+	animals []*Animal
+	size    = 100
+)
 
 func BenchmarkSelect(b *testing.B) {
 	db, _ := Setup()
+	db.Status.Delete().Exec()
 
+	data := make([]*Status, size)
+	for i := 0; i < size; i++ {
+		data[i] = &Status{Name: fmt.Sprintf("Status %d", i)}
+	}
+	db.Status.Insert().All(false, data)
+
+	for b.Loop() {
+		result, _ := db.Status.Select().Take(size).Rows()
+		_ = result
+	}
+}
+
+func BenchmarkSelectUUID(b *testing.B) {
+	db, _ := Setup()
 	db.AnimalFood.Delete().Exec()
 	db.Animal.Delete().Exec()
 
@@ -32,7 +50,6 @@ func BenchmarkSelect(b *testing.B) {
 
 func BenchmarkSelectRaw(b *testing.B) {
 	db, _ := Setup()
-
 	db.Animal.Delete().Exec()
 
 	animals = make([]*Animal, size)
@@ -41,9 +58,14 @@ func BenchmarkSelectRaw(b *testing.B) {
 	}
 	db.Animal.Insert().All(false, animals)
 
+	tableName := db.Animal.TableName
+	sql := fmt.Sprintf("select a.id, a.name, a.info_id, a.habitat_id from %s a;", tableName)
+
 	for b.Loop() {
-		sql := "select a.id, a.name, a.info_id, a.habitat_id from animals a;"
-		rows, _ := db.DB.RawQueryContext(context.Background(), sql)
+		rows, err := db.DB.RawQueryContext(context.Background(), sql)
+		if err != nil {
+			panic(err)
+		}
 		defer rows.Close()
 
 		var a Animal
@@ -118,13 +140,16 @@ func BenchmarkJoinSql(b *testing.B) {
 	af := AnimalFood{AnimalId: a.Id, FoodId: f.Id}
 	db.AnimalFood.Insert().One(&af)
 
-	for b.Loop() {
-		sql := `select f.id, f.name from foods f
-						join animal_foods af on f.id = af.food_id
-						join animals a on af.animal_id = a.id
-						join habitats h on a.habitat_id = h.id
-						join weathers w on h.weather_id = w.id
+	sql := `select f.id, f.name from %s f
+						join %s af on f.id = af.food_id
+						join %s a on af.animal_id = a.id
+						join %s h on a.habitat_id = h.id
+						join %s w on h.weather_id = w.id
 						where f.id = $1 and f.name = $2;`
+	sql = fmt.Sprintf(sql, db.Food.TableName, db.AnimalFood.TableName,
+		db.Animal.TableName, db.Habitat.TableName, db.Weather.TableName)
+
+	for b.Loop() {
 		rows, _ := db.DB.RawQueryContext(context.Background(), sql, f.Id, f.Name)
 		defer rows.Close()
 

@@ -12,7 +12,7 @@ type CoMap[K int | int64 | string, V any] struct {
 	data map[K]*V
 }
 
-func NewCoMap[K int64 | string, V any]() *CoMap[K, V] {
+func NewCoMap[K int | int64 | string, V any]() *CoMap[K, V] {
 	return &CoMap[K, V]{
 		data: make(map[K]*V),
 	}
