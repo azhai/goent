@@ -161,10 +161,11 @@ func (info TableInfo) setForeignReference(foreign *Foreign, refTableName string)
 // Table represents a database table with its model and metadata.
 // It provides methods for querying, inserting, updating, and deleting records.
 type Table[T any] struct {
-	Model *T
-	Cache *utils.CoMap[int64, T]
-	State *StateWhere
-	db    *DB
+	Model       *T
+	Cache       *utils.CoMap[int64, T]
+	State       *StateWhere
+	StateDelete *StateDeleteWhere
+	db          *DB
 	TableInfo
 }
 
@@ -448,12 +449,11 @@ func (t *Table[T]) Delete() *StateDelete[T] {
 
 // DeleteContext creates a new StateDelete with a specific context.
 func (t *Table[T]) DeleteContext(ctx context.Context) *StateDelete[T] {
-	var s *StateWhere
-	if s = t.State; s == nil {
-		s = NewStateWhere(ctx)
-		s.builder.Type = model.DeleteQuery
+	var s *StateDeleteWhere
+	if s = t.StateDelete; s == nil {
+		s = NewStateDeleteWhere(ctx)
 	}
-	return &StateDelete[T]{table: t, StateWhere: s}
+	return &StateDelete[T]{table: t, StateDeleteWhere: s}
 }
 
 // ------------------------------

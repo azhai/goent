@@ -126,7 +126,7 @@ func (o *GoentBenchmark) Delete(b *testing.B) {
 		bookID = books[i].ID
 		b.StartTimer()
 
-		filter := goent.Greater(o.db.Book.Field("id"), bookID)
+		filter := goent.Equals(o.db.Book.Field("id"), bookID)
 		err = o.db.Book.Delete().Filter(filter).Exec()
 
 		b.StopTimer()
@@ -150,7 +150,8 @@ func (o *GoentBenchmark) FindByID(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		for range tools.FindOneLoop {
-			_, err = o.db.Book.Select().Match(models.Book{ID: book.ID}).One()
+			// _, err = o.db.Book.Select().Match(*book).One()
+			_, err = o.db.Book.Select().Where("id = ?", book.ID).One()
 
 			b.StopTimer()
 			if err != nil {

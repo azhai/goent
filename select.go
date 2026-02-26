@@ -85,7 +85,7 @@ func (s *StateSelect[T, R]) Query(creator FetchCreator) (*Fetcher[R], model.Quer
 // QueryFetch returns a Fetcher and a Query.
 func (s *StateSelect[T, R]) QueryFetch(to FetchFunc) (*Fetcher[R], model.Query) {
 	qr := model.CreateQuery(s.builder.Build(false))
-	defer PutBuilder(s.builder)
+	// defer PutBuilder(s.builder)
 	fet := &Fetcher[R]{
 		Handler:   s.Prepare(s.table.db.driver),
 		NewTarget: func() *R { return new(R) },
@@ -117,7 +117,7 @@ func (s *StateSelect[T, R]) IterRows() iter.Seq2[*R, error] {
 
 // One executes the query and returns the first row as a single result.
 func (s *StateSelect[T, R]) One() (*R, error) {
-	limit := -1
+	limit := TakeNoLimit
 	if s.sameModel {
 		limit = 1
 	}
@@ -132,12 +132,17 @@ func (s *StateSelect[T, R]) One() (*R, error) {
 
 // All executes the query and returns all rows as a slice.
 func (s *StateSelect[T, R]) All() ([]*R, error) {
-	rows := make([]*R, 0, s.builder.Limit)
+	var rows []*R
+	if s.builder.Limit > 0 {
+		rows = make([]*R, 0, s.builder.Limit)
+	} else {
+		rows = make([]*R, 0)
+	}
 	for row, err := range s.IterRows() {
 		if err != nil {
 			return rows, err
 		}
-		if s.sameModel && row != nil {
+		if row != nil && s.sameModel {
 			s.table.CacheOne(row)
 		}
 		rows = append(rows, row)
@@ -246,7 +251,7 @@ func (s *StateSelect[T, R]) GroupBy(args ...string) *StateSelect[T, R] {
 
 // Take takes i elements
 func (s *StateSelect[T, R]) Take(i int) *StateSelect[T, R] {
-	if i >= 0 {
+	if i >= TakeNoLimit {
 		s.builder.Limit = i
 	}
 	return s
@@ -254,7 +259,9 @@ func (s *StateSelect[T, R]) Take(i int) *StateSelect[T, R] {
 
 // Skip skips i elements
 func (s *StateSelect[T, R]) Skip(i int) *StateSelect[T, R] {
-	s.builder.Offset = i
+	if i >= 0 {
+		s.builder.Offset = i
+	}
 	return s
 }
 

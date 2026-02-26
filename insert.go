@@ -2,7 +2,6 @@ package goent
 
 import (
 	"reflect"
-	"time"
 
 	"github.com/azhai/goent/model"
 )
@@ -44,16 +43,32 @@ func (s *StateInsert[T]) One(obj *T) error {
 func (s *StateInsert[T]) getLastInsertId(valueOf reflect.Value, retFid int) error {
 	qr := model.CreateQuery("SELECT last_insert_rowid()", nil)
 	hd := s.Prepare(s.table.db.driver)
-	startTime := time.Now()
-	row := hd.conn.QueryRowContext(hd.ctx, &qr)
-	qr.QueryDuration = time.Since(startTime)
+	row, err := hd.QueryOneRow(qr)
+	if err != nil {
+		return err
+	}
 	fieldOf := valueOf.Field(retFid)
 	qr.Err = row.Scan(fieldOf.Addr().Interface())
 	if qr.Err != nil {
 		return hd.ErrHandler(qr)
 	}
-	hd.InfoHandler(qr)
 	return nil
+}
+
+func (s *StateInsert[T]) queryLastInsertId() (int64, error) {
+	qr := model.CreateQuery("SELECT last_insert_rowid()", nil)
+	hd := s.Prepare(s.table.db.driver)
+	row, err := hd.QueryOneRow(qr)
+	if err != nil {
+		return 0, err
+	}
+
+	var id int64
+	qr.Err = row.Scan(&id)
+	if qr.Err != nil {
+		return 0, hd.ErrHandler(qr)
+	}
+	return id, nil
 }
 
 // All inserts multiple records into the table.
@@ -136,21 +151,6 @@ func (s *StateInsert[T]) getLastInsertIds(data []*T, pkFid int) error {
 	return nil
 }
 
-func (s *StateInsert[T]) queryLastInsertId() (int64, error) {
-	qr := model.CreateQuery("SELECT last_insert_rowid()", nil)
-	hd := s.Prepare(s.table.db.driver)
-	startTime := time.Now()
-	row := hd.conn.QueryRowContext(hd.ctx, &qr)
-	qr.QueryDuration = time.Since(startTime)
-	var id int64
-	qr.Err = row.Scan(&id)
-	if qr.Err != nil {
-		return 0, hd.ErrHandler(qr)
-	}
-	hd.InfoHandler(qr)
-	return id, nil
-}
-
 // OnTransaction sets the transaction for the insert operation.
 func (s *StateInsert[T]) OnTransaction(tx model.Transaction) *StateInsert[T] {
 	s.StateWhere.conn = tx
@@ -226,7 +226,7 @@ func (s *StateSave[T]) Match(obj T) *StateSave[T] {
 
 // Take takes i elements
 func (s *StateSave[T]) Take(i int) *StateSave[T] {
-	if i >= 0 {
+	if i >= TakeNoLimit {
 		s.builder.Limit = i
 	}
 	return s

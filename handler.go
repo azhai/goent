@@ -67,16 +67,15 @@ func (h *Handler) ExecuteNoReturn(query model.Query) error {
 //	}
 //	fmt.Println(valueOf.Field(returnFid).Int()) // printed generated ID
 func (h *Handler) ExecuteReturning(query model.Query, valueOf reflect.Value, returnFid int) error {
-	var row model.Row
-	startTime := time.Now()
-	row = h.conn.QueryRowContext(h.ctx, &query)
-	query.QueryDuration = time.Since(startTime)
+	row, err := h.QueryOneRow(query)
+	if err != nil {
+		return err
+	}
 	fieldOf := valueOf.Field(returnFid)
 	query.Err = row.Scan(fieldOf.Addr().Interface())
 	if query.Err != nil {
 		return h.ErrHandler(query)
 	}
-	h.InfoHandler(query)
 	return nil
 }
 
@@ -115,6 +114,21 @@ func (h *Handler) BatchReturning(query model.Query, valueOf reflect.Value, retur
 		i++
 	}
 	return nil
+}
+
+// QueryOneRow executes a query that returns a single row (SELECT).
+// It logs the query execution time and handles any errors.
+func (h *Handler) QueryOneRow(query model.Query) (model.Row, error) {
+	var row model.Row
+	startTime := time.Now()
+	row = h.conn.QueryRowContext(h.ctx, &query)
+	query.QueryDuration = time.Since(startTime)
+	if row == nil {
+		query.Err = ErrNotFound
+		return nil, h.ErrHandler(query)
+	}
+	h.InfoHandler(query)
+	return row, nil
 }
 
 // QueryResult executes a query that returns rows (SELECT).

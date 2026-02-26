@@ -1,6 +1,7 @@
 package goent
 
 import (
+	"bytes"
 	"reflect"
 	"slices"
 	"strconv"
@@ -10,13 +11,7 @@ import (
 	"github.com/azhai/goent/model"
 )
 
-var builderPool = sync.Pool{
-	New: func() any {
-		return &Builder{
-			Changes: make(map[*Field]any),
-		}
-	},
-}
+const TakeNoLimit = -1
 
 type Dict = map[string]any
 
@@ -46,73 +41,40 @@ type Group struct {
 	*Field
 }
 
-// Builder constructs SQL queries with support for SELECT, INSERT, UPDATE, and DELETE operations.
-type Builder struct {
-	Type  model.QueryType
+var bufPool = sync.Pool{
+	New: func() any {
+		// The Pool's New function should generally only return pointer
+		// types, since a pointer can be put into the return interface
+		// value without an allocation:
+		return new(bytes.Buffer)
+	},
+}
+
+type DeleteBuilder struct {
 	Table *model.Table
-	Joins []*JoinTable
-
-	InsertValues [][]any
-	VisitFields  []*Field
-	Changes      map[*Field]any
-	Where        Condition
-
-	Orders []*Order
-	Groups []*Group
-	Limit  int
-	Offset int
-
-	Returning string
-	RollUp    string
-	ForUpdate bool
+	Where Condition
+	Limit int
 
 	argNo    int
 	holders  []string
 	fullName string
 
-	strings.Builder
+	buf *bytes.Buffer
 }
 
-// GetBuilder retrieves a Builder from the pool.
-func GetBuilder() *Builder {
-	return builderPool.Get().(*Builder)
+func CreateDeleteBuilder() DeleteBuilder {
+	return DeleteBuilder{
+		Limit: TakeNoLimit,
+		buf:   bufPool.Get().(*bytes.Buffer),
+	}
 }
 
-// PutBuilder resets and returns a Builder to the pool.
-func PutBuilder(b *Builder) {
-	b.Reset()
-	builderPool.Put(b)
+func NewDeleteBuilder() *DeleteBuilder {
+	builder := CreateDeleteBuilder()
+	return &builder
 }
 
-// Reset resets the Builder to its initial state.
-func (b *Builder) Reset() {
-	b.Builder.Reset()
-	b.ResetForSave()
-	b.Type = 0
-	b.Table = nil
-	b.fullName = ""
-	b.Joins = make([]*JoinTable, 0)
-	b.Where = Condition{}
-	b.Orders = make([]*Order, 0)
-	b.Groups = make([]*Group, 0)
-	b.Limit = 0
-	b.Offset = 0
-	b.RollUp = ""
-}
-
-// ResetForSave resets the Builder for INSERT/UPDATE operations.
-func (b *Builder) ResetForSave() {
-	b.Changes = make(map[*Field]any)
-	b.InsertValues = make([][]any, 0)
-	b.VisitFields = make([]*Field, 0)
-	b.argNo = 0
-	b.holders = make([]string, 0)
-	b.Returning = ""
-	b.ForUpdate = false
-}
-
-// SetTable sets the table for the query builder.
-func (b *Builder) SetTable(table TableInfo, driver model.Driver) *Builder {
+func (b *DeleteBuilder) SetTable(table TableInfo, driver model.Driver) *DeleteBuilder {
 	b.Table = table.Table()
 	var schema string
 	if b.Table.Schema != nil {
@@ -122,37 +84,214 @@ func (b *Builder) SetTable(table TableInfo, driver model.Driver) *Builder {
 	return b
 }
 
+func (b *DeleteBuilder) BuildHead() []any {
+	b.buf.WriteString("DELETE FROM ")
+	if b.fullName != "" {
+		b.buf.WriteString(b.fullName)
+	}
+	return nil
+}
+
+func (b *DeleteBuilder) BuildTail() []any {
+	if b.Limit > 0 {
+		b.buf.WriteString(" LIMIT " + strconv.Itoa(b.Limit))
+	}
+	return nil
+}
+
+func (b *DeleteBuilder) BuildWhere(full bool) []any {
+	if b.Where.IsEmpty() {
+		return nil
+	}
+	var args []any
+	b.buf.WriteString(" WHERE ")
+	b.argNo = b.buildTemplate(b.Where, &args, b.argNo, full)
+	return args
+}
+
+func (b *DeleteBuilder) buildTemplate(cond Condition, args *[]any, startIdx int, full bool) int {
+	fi, vi := 0, 0
+	template := cond.Template
+	name, last := "", len(template)-1
+	for idx := 0; idx <= last; idx++ {
+		curr := template[idx]
+		if idx < last && curr == '%' && template[idx+1] == 's' {
+			if fi < len(cond.Fields) {
+				if full {
+					name = cond.Fields[fi].String()
+				} else {
+					name = cond.Fields[fi].Simple()
+				}
+				b.buf.WriteString(name)
+				fi++
+			}
+			idx++
+		} else if curr == '?' {
+			if vi < len(cond.Values) {
+				val := cond.Values[vi]
+				startIdx = b.appendValueParam(val, startIdx, args)
+				vi++
+			}
+		} else {
+			b.buf.WriteByte(curr)
+		}
+	}
+	return startIdx
+}
+
+func (b *DeleteBuilder) appendValueParam(val *Value, startIdx int, args *[]any) int {
+	if val.Type == reflect.Slice && len(val.Args) > 0 {
+		b.buf.WriteString("(")
+		for j, arg := range val.Args {
+			startIdx++
+			if j > 0 {
+				b.buf.WriteString(", $" + strconv.Itoa(startIdx))
+			} else {
+				b.buf.WriteString("$" + strconv.Itoa(startIdx))
+			}
+			*args = append(*args, arg)
+		}
+		b.buf.WriteByte(')')
+	} else if len(val.Args) > 0 {
+		startIdx++
+		b.buf.WriteString("$" + strconv.Itoa(startIdx))
+		*args = append(*args, val.Args[0])
+	}
+	return startIdx
+}
+
+func (b *DeleteBuilder) Build() (sql string, args []any) {
+	_ = b.BuildHead()
+	args = b.BuildWhere(false)
+	_ = b.BuildTail()
+	sql = b.buf.String()
+	b.buf.Reset()
+	bufPool.Put(b.buf)
+	return
+}
+
+type Builder struct {
+	Type  model.QueryType
+	Joins []*JoinTable
+
+	InsertValues [][]any
+	VisitFields  []*Field
+	Changes      map[*Field]any
+
+	Orders []*Order
+	Groups []*Group
+	Offset int
+
+	Returning string
+	RollUp    string
+	ForUpdate bool
+
+	DeleteBuilder
+}
+
+func NewBuilder() *Builder {
+	return &Builder{
+		Changes:       make(map[*Field]any),
+		DeleteBuilder: CreateDeleteBuilder(),
+	}
+}
+
+// var builderPool = sync.Pool{
+// 	New: func() any {
+// 		buf := bufPool.Get().(*bytes.Buffer)
+// 		buf.Reset()
+// 		return &Builder{
+// 			Changes: make(map[*Field]any),
+// 			buf:     buf,
+// 		}
+// 	},
+// }
+
+// // GetBuilder retrieves a Builder from the pool.
+// func GetBuilder() *Builder {
+// 	return builderPool.Get().(*Builder)
+// }
+
+// // PutBuilder resets and returns a Builder to the pool.
+// func PutBuilder(b *Builder) {
+// 	bufPool.Put(b.buf)
+// 	b.Reset()
+// 	builderPool.Put(b)
+// }
+
+// // Reset resets the Builder to its initial state.
+// func (b *Builder) Reset() {
+// 	b.ResetForSave()
+// 	b.Type = 0
+// 	b.Table = nil
+// 	b.fullName = ""
+// 	b.Joins = make([]*JoinTable, 0)
+// 	b.Where = Condition{}
+// 	b.Orders = make([]*Order, 0)
+// 	b.Groups = make([]*Group, 0)
+// 	b.Offset = 0
+// 	b.RollUp = ""
+// }
+
+// ResetForSave resets the Builder for INSERT/UPDATE operations.
+func (b *Builder) ResetForSave() {
+	b.Changes = make(map[*Field]any)
+	b.InsertValues = make([][]any, 0)
+	b.VisitFields = make([]*Field, 0)
+	b.Limit = -1
+	b.Returning = ""
+	b.ForUpdate = false
+	b.argNo = 0
+	b.holders = make([]string, 0)
+}
+
+func (b *Builder) IsJoinQuery() bool {
+	return b.Type == model.SelectJoinQuery || b.Type == model.UpdateJoinQuery
+}
+
+func (b *Builder) IsInsertQuery() bool {
+	return b.Type == model.InsertQuery || b.Type == model.InsertAllQuery
+}
+
+// SetTable sets the table for the query builder.
+func (b *Builder) SetTable(table TableInfo, driver model.Driver) *Builder {
+	b.DeleteBuilder.SetTable(table, driver)
+	return b
+}
+
 // BuildHead builds the SELECT, INSERT, UPDATE, or DELETE statement head (e.g., "SELECT * FROM table").
 func (b *Builder) BuildHead() []any {
 	var args []any
 	switch b.Type {
 	default:
-		b.WriteString("SELECT ")
+		b.buf.WriteString("SELECT ")
 		if len(b.VisitFields) == 0 {
-			b.WriteString("*")
+			b.buf.WriteString("*")
 		} else if b.Type == model.SelectJoinQuery {
-			b.WriteString(b.VisitFields[0].String())
+			b.buf.WriteString(b.VisitFields[0].String())
 			for _, f := range b.VisitFields[1:] {
-				b.WriteByte(',')
-				b.WriteString(f.String())
+				b.buf.WriteByte(',')
+				b.buf.WriteString(f.String())
 			}
 		} else {
-			b.WriteString(b.VisitFields[0].Simple())
+			b.buf.WriteString(b.VisitFields[0].Simple())
 			for _, f := range b.VisitFields[1:] {
-				b.WriteByte(',')
-				b.WriteString(f.Simple())
+				b.buf.WriteByte(',')
+				b.buf.WriteString(f.Simple())
 			}
 		}
-		b.WriteString(" FROM ")
+		b.buf.WriteString(" FROM ")
 		if b.fullName != "" {
-			b.WriteString(b.fullName)
+			b.buf.WriteString(b.fullName)
 		}
+	case model.DeleteQuery:
+		_ = b.DeleteBuilder.BuildHead()
 	case model.InsertQuery:
-		b.WriteString("INSERT INTO ")
+		b.buf.WriteString("INSERT INTO ")
 		if b.fullName != "" {
-			b.WriteString(b.fullName)
+			b.buf.WriteString(b.fullName)
 		}
-		b.WriteByte('(')
+		b.buf.WriteByte('(')
 		var columns []string
 		for f, v := range b.Changes {
 			b.argNo += 1
@@ -160,30 +299,24 @@ func (b *Builder) BuildHead() []any {
 			args = append(args, v)
 			columns = append(columns, f.Simple())
 		}
-		b.WriteString(strings.Join(columns, ", "))
+		b.buf.WriteString(strings.Join(columns, ", "))
 	case model.InsertAllQuery:
-		b.WriteString("INSERT INTO ")
+		b.buf.WriteString("INSERT INTO ")
 		if b.fullName != "" {
-			b.WriteString(b.fullName)
+			b.buf.WriteString(b.fullName)
 		}
-		b.WriteByte('(')
+		b.buf.WriteByte('(')
 		columns := make([]string, len(b.VisitFields))
 		for i, f := range b.VisitFields {
 			columns[i] = f.ColumnName
 		}
-		b.WriteString(strings.Join(columns, ", "))
+		b.buf.WriteString(strings.Join(columns, ", "))
 	case model.UpdateQuery, model.UpdateJoinQuery:
-		b.WriteString("UPDATE ")
+		b.buf.WriteString("UPDATE ")
 		if b.fullName != "" {
-			b.WriteString(b.fullName)
-		}
-	case model.DeleteQuery:
-		b.WriteString("DELETE FROM ")
-		if b.fullName != "" {
-			b.WriteString(b.fullName)
+			b.buf.WriteString(b.fullName)
 		}
 	}
-
 	return args
 }
 
@@ -194,12 +327,12 @@ func (b *Builder) BuildDoing() []any {
 	default:
 		return args
 	case model.InsertQuery:
-		b.WriteString(") VALUES (")
-		b.WriteString(strings.Join(b.holders, ", "))
-		b.WriteByte(')')
+		b.buf.WriteString(") VALUES (")
+		b.buf.WriteString(strings.Join(b.holders, ", "))
+		b.buf.WriteByte(')')
 	case model.InsertAllQuery:
 		size, last := len(b.VisitFields), len(b.InsertValues)-1
-		b.WriteString(") VALUES (")
+		b.buf.WriteString(") VALUES (")
 		for i, row := range b.InsertValues {
 			b.holders = make([]string, size)
 			for j := range size {
@@ -207,34 +340,34 @@ func (b *Builder) BuildDoing() []any {
 				b.holders[j] = "$" + strconv.Itoa(b.argNo)
 			}
 			args = append(args, row...)
-			b.WriteString(strings.Join(b.holders, ", "))
+			b.buf.WriteString(strings.Join(b.holders, ", "))
 			if i != last {
-				b.WriteString("), (")
+				b.buf.WriteString("), (")
 			}
 		}
-		b.WriteByte(')')
+		b.buf.WriteByte(')')
 	case model.UpdateQuery:
-		b.WriteString(" SET ")
+		b.buf.WriteString(" SET ")
 		for f, v := range b.Changes {
 			b.argNo += 1
 			if b.argNo > 1 {
-				b.WriteString(", ")
+				b.buf.WriteString(", ")
 			}
-			b.WriteString(f.Simple() + "=$" + strconv.Itoa(b.argNo))
+			b.buf.WriteString(f.Simple() + "=$" + strconv.Itoa(b.argNo))
 			args = append(args, v)
 		}
 	case model.UpdateJoinQuery:
-		b.WriteString(" SET ")
+		b.buf.WriteString(" SET ")
 		isFirst := true
 		for f, v := range b.Changes {
 			if !isFirst {
-				b.WriteString(", ")
+				b.buf.WriteString(", ")
 			}
 			if fld, ok := v.(*Field); ok {
-				b.WriteString(f.Simple() + "=" + fld.String())
+				b.buf.WriteString(f.Simple() + "=" + fld.String())
 			} else {
 				b.argNo += 1
-				b.WriteString(f.Simple() + "=$" + strconv.Itoa(b.argNo))
+				b.buf.WriteString(f.Simple() + "=$" + strconv.Itoa(b.argNo))
 				args = append(args, v)
 			}
 			isFirst = false
@@ -248,107 +381,48 @@ func (b *Builder) BuildDoing() []any {
 func (b *Builder) BuildTail() []any {
 	var args []any
 
+	if b.Type == model.DeleteQuery {
+		b.DeleteBuilder.BuildTail()
+	}
+
 	if b.Type == model.SelectQuery {
 		if len(b.Groups) != 0 {
-			b.WriteString(" ")
+			b.buf.WriteString(" ")
 			gp := b.Groups[0]
-			b.WriteString("GROUP BY " + gp.String())
+			b.buf.WriteString("GROUP BY " + gp.String())
 			for _, gp = range b.Groups[1:] {
-				b.WriteString("," + gp.String())
+				b.buf.WriteString("," + gp.String())
 			}
 		}
 
 		if len(b.Orders) != 0 {
-			b.WriteString(" ")
-			b.WriteString("ORDER BY ")
+			b.buf.WriteString(" ")
+			b.buf.WriteString("ORDER BY ")
 			for i, ob := range b.Orders {
 				if i > 0 {
-					b.WriteString("")
+					b.buf.WriteString(", ")
 				}
-				b.WriteString(ob.String())
+				b.buf.WriteString(ob.String())
 				if ob.Desc {
-					b.WriteString(" DESC")
+					b.buf.WriteString(" DESC")
 				}
 			}
 		}
 
-		if b.Limit != 0 {
-			b.WriteString(" LIMIT " + strconv.Itoa(b.Limit))
+		if b.Limit > 0 {
+			b.buf.WriteString(" LIMIT " + strconv.Itoa(b.Limit))
 		}
-		if b.Offset != 0 {
-			b.WriteString(" OFFSET " + strconv.Itoa(b.Offset))
+		if b.Offset > 0 {
+			b.buf.WriteString(" OFFSET " + strconv.Itoa(b.Offset))
 		}
 	}
 
-	if b.Returning != "" && (b.Type == model.InsertQuery || b.Type == model.InsertAllQuery) {
-		b.WriteString(" RETURNING ")
-		b.WriteString(b.Returning)
+	if b.Returning != "" && b.IsInsertQuery() {
+		b.buf.WriteString(" RETURNING ")
+		b.buf.WriteString(b.Returning)
 	}
 
 	return args
-}
-
-// BuildWhere builds the WHERE clause for the query.
-func (b *Builder) BuildWhere() []any {
-	if b.Where.IsEmpty() {
-		return nil
-	}
-
-	var args []any
-	b.WriteString(" WHERE ")
-	b.argNo = b.buildTemplate(b.Where, b.argNo, func(fld *Field) string {
-		if b.Type == model.SelectJoinQuery || b.Type == model.UpdateJoinQuery {
-			return fld.String()
-		}
-		return fld.Simple()
-	}, &args)
-	return args
-}
-
-func (b *Builder) buildTemplate(cond Condition, startIdx int, fieldFmt func(*Field) string, args *[]any) int {
-	fi, vi := 0, 0
-	template := cond.Template
-	last := len(template) - 1
-	for idx := 0; idx <= last; idx++ {
-		curr := template[idx]
-		if idx < last && curr == '%' && template[idx+1] == 's' {
-			if fi < len(cond.Fields) {
-				b.WriteString(fieldFmt(cond.Fields[fi]))
-				fi++
-			}
-			idx++
-		} else if curr == '?' {
-			if vi < len(cond.Values) {
-				val := cond.Values[vi]
-				startIdx = b.appendValueParam(val, startIdx, args)
-				vi++
-			}
-		} else {
-			b.WriteByte(curr)
-		}
-	}
-	return startIdx
-}
-
-func (b *Builder) appendValueParam(val *Value, startIdx int, args *[]any) int {
-	if val.Type == reflect.Slice && len(val.Args) > 0 {
-		b.WriteString("(")
-		for j, arg := range val.Args {
-			startIdx++
-			if j > 0 {
-				b.WriteString(", $" + strconv.Itoa(startIdx))
-			} else {
-				b.WriteString("$" + strconv.Itoa(startIdx))
-			}
-			*args = append(*args, arg)
-		}
-		b.WriteByte(')')
-	} else if len(val.Args) > 0 {
-		startIdx++
-		b.WriteString("$" + strconv.Itoa(startIdx))
-		*args = append(*args, val.Args[0])
-	}
-	return startIdx
 }
 
 // BuildJoins builds the JOIN clauses for the query.
@@ -357,25 +431,23 @@ func (b *Builder) BuildJoins() []any {
 		return nil
 	}
 	if b.Type == model.UpdateJoinQuery {
-		b.WriteString(" FROM ")
-		b.WriteString(b.Joins[0].Table.String())
+		b.buf.WriteString(" FROM ")
+		b.buf.WriteString(b.Joins[0].Table.String())
 		return nil
 	}
 
 	var args []any
 	for _, j := range b.Joins {
-		b.WriteString(" ")
-		b.WriteString(string(j.JoinType) + " ")
+		b.buf.WriteString(" ")
+		b.buf.WriteString(string(j.JoinType) + " ")
 		if j.fullName != "" {
-			b.WriteString(j.fullName)
+			b.buf.WriteString(j.fullName)
 		} else if j.Table != nil {
-			b.WriteString(j.Table.String())
+			b.buf.WriteString(j.Table.String())
 		}
-		b.WriteString(" ON ")
+		b.buf.WriteString(" ON ")
 		if j.On.Template != "" {
-			b.buildTemplate(j.On, len(args), func(fld *Field) string {
-				return fld.String()
-			}, &args)
+			b.buildTemplate(j.On, &args, len(args), true)
 		}
 	}
 	return args
@@ -383,26 +455,25 @@ func (b *Builder) BuildJoins() []any {
 
 // Build assembles the complete SQL query and returns it along with query arguments.
 func (b *Builder) Build(destroy bool) (sql string, args []any) {
-	args = append(args, b.BuildHead()...)
-	args = append(args, b.BuildDoing()...)
-	args = append(args, b.BuildJoins()...)
-	args = append(args, b.BuildWhere()...)
-	args = append(args, b.BuildTail()...)
-	sql = b.String()
-	if destroy {
-		PutBuilder(b)
+	args = b.BuildHead()
+	if doArgs := b.BuildDoing(); len(doArgs) > 0 {
+		args = append(args, doArgs...)
 	}
-	return
-}
-
-// BuildForDelete
-func (b *Builder) BuildForDelete(destroy bool) (sql string, args []any) {
-	args = append(args, b.BuildHead()...)
-	args = append(args, b.BuildWhere()...)
-	sql = b.String()
-	if destroy {
-		PutBuilder(b)
+	if joinArgs := b.BuildJoins(); len(joinArgs) > 0 {
+		args = append(args, joinArgs...)
 	}
+	if whereArgs := b.BuildWhere(b.IsJoinQuery()); len(whereArgs) > 0 {
+		args = append(args, whereArgs...)
+	}
+	if tailArgs := b.BuildTail(); len(tailArgs) > 0 {
+		args = append(args, tailArgs...)
+	}
+	sql = b.buf.String()
+	b.buf.Reset()
+	bufPool.Put(b.buf)
+	// if destroy {
+	// 	PutBuilder(b)
+	// }
 	return
 }
 

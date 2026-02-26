@@ -5,6 +5,8 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+
+	"github.com/azhai/goent/model"
 )
 
 const (
@@ -280,9 +282,9 @@ func QueryMiddleTable[T any](foreign *Foreign, table *Table[T], leftCol, rightCo
 	leftField := &Field{ColumnName: leftCol}
 	filter := And(foreign.Middle.Where, In(leftField, pkIds))
 
-	builder := GetBuilder()
-	defer PutBuilder(builder)
-	builder.Type = 1
+	builder := NewBuilder()
+	// defer PutBuilder(builder)
+	builder.Type = model.SelectQuery
 	builder.Where = filter
 	builder.VisitFields = []*Field{
 		{ColumnName: leftCol},

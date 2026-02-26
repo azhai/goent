@@ -86,7 +86,10 @@ func (s *StateUpdate[T]) Match(obj T) *StateUpdate[T] {
 //	change := Pair{Key:"status", Value:"archived"}
 //	err := db.User.Update().Set(change).Take(100).Exec() // updates only 100 records
 func (s *StateUpdate[T]) Take(i int) *StateUpdate[T] {
-	if i >= 0 {
+	if s.table.db.DriverName() == "PostgreSQL" {
+		return s // PostgreSQL does not support LIMIT in UPDATE
+	}
+	if i >= TakeNoLimit {
 		s.builder.Limit = i
 	}
 	return s
