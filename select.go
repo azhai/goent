@@ -32,14 +32,14 @@ func NewStateSelectFrom[T, R any](state *StateWhere, table *Table[T]) *StateSele
 	}
 	state.builder.Type = model.SelectQuery
 	state.builder.SetTable(table.TableInfo, table.db.driver)
-	state.builder.Selects = table.GetSortedFields()
+	state.builder.VisitFields = table.GetSortedFields()
 	return &StateSelect[T, R]{table: table, StateWhere: state}
 }
 
 // CopyFrom copies the query builder state from another builder and connection.
 func (s *StateSelect[T, R]) CopyFrom(ob *Builder, conn model.Connection) *StateSelect[T, R] {
 	// copy joins
-	// s.builder.Selects = ob.Selects
+	// s.builder.VisitFields = ob.VisitFields
 	s.builder.Joins = ob.Joins
 	// copy operations
 	s.builder.Where = ob.Where
@@ -62,7 +62,7 @@ func (s *StateSelect[T, R]) Select(fields ...any) *StateSelect[T, R] {
 		} else if fld, ok = one.(*Field); !ok {
 			continue
 		}
-		s.builder.Selects = append(s.builder.Selects, fld)
+		s.builder.VisitFields = append(s.builder.VisitFields, fld)
 	}
 	return s
 }
@@ -76,7 +76,7 @@ func (s *StateSelect[T, R]) Query(creator FetchCreator) (*Fetcher[R], model.Quer
 		}
 	}
 	if to == nil {
-		info, fields := s.table.TableInfo, slices.Clone(s.builder.Selects)
+		info, fields := s.table.TableInfo, slices.Clone(s.builder.VisitFields)
 		to = creator(info, fields, s.GetJoinForeigns())
 	}
 	return s.QueryFetch(to)
@@ -312,7 +312,7 @@ func (s *StateSelect[T, R]) Join(joinType model.JoinType, info TableInfo, on Con
 		if jt.Table.Schema != nil {
 			schema = *jt.Table.Schema
 		}
-		jt.tableName = s.table.db.driver.FormatTableName(schema, jt.Table.Name)
+		jt.fullName = s.table.db.driver.FormatTableName(schema, jt.Table.Name)
 	}
 	s.builder.Joins = append(s.builder.Joins, jt)
 	return s
@@ -333,7 +333,7 @@ func (s *StateSelect[T, R]) LeftJoin(fkey string, refer *Field) *StateSelect[T, 
 		leftField = s.table.Field(fkey)
 	}
 	s.Join(model.LeftJoin, *info, EqualsField(leftField, refer))
-	s.builder.Selects = append(s.builder.Selects, info.GetSortedFields()...)
+	s.builder.VisitFields = append(s.builder.VisitFields, info.GetSortedFields()...)
 	return s
 }
 
@@ -380,7 +380,7 @@ func (s *StateSelect[T, R]) Pagination(page, size int) (*Pagination[T, R], error
 
 	fld := &Field{TableAddr: s.table.TableAddr, ColumnName: "*", Function: "COUNT(%s)"}
 	counter := NewStateSelect[T, ResultLong](s.ctx, s.table)
-	counter.builder.Selects = nil
+	counter.builder.VisitFields = nil
 	counter.Select(fld)
 	counter.CopyFrom(s.builder, s.conn)
 	count, err := FetchSingleResult(counter)

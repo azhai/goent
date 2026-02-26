@@ -2,7 +2,6 @@ package goent
 
 import (
 	"reflect"
-	"sort"
 	"time"
 
 	"github.com/azhai/goent/model"
@@ -79,32 +78,26 @@ func (s *StateInsert[T]) All(retPK bool, data []*T) error {
 		pkFid = -1
 	}
 
-	var columns []*Column
-	for _, col := range s.table.Columns {
+	s.builder.VisitFields = make([]*Field, 0)
+	for _, name := range s.table.ColumnNames {
+		col := s.table.Columns[name]
 		if col.ColumnName == pkName && isAutoIncr {
 			continue
 		}
-		columns = append(columns, col)
-	}
-	sort.Slice(columns, func(i, j int) bool {
-		return columns[i].FieldId < columns[j].FieldId
-	})
-
-	for _, col := range columns {
 		fld := s.table.Field(col.ColumnName)
-		s.builder.Changes[fld] = col.FieldId
+		s.builder.VisitFields = append(s.builder.VisitFields, fld)
 	}
 
-	size := len(columns)
+	size := len(s.builder.VisitFields)
 	for _, row := range data {
 		newbie := make([]any, size)
 		valueOf := reflect.ValueOf(row).Elem()
-		for i, col := range columns {
-			if val := valueOf.Field(col.FieldId); val.IsValid() {
+		for i, fld := range s.builder.VisitFields {
+			if val := valueOf.Field(fld.FieldId); val.IsValid() {
 				newbie[i] = val.Interface()
 			}
 		}
-		s.builder.MoreRows = append(s.builder.MoreRows, newbie)
+		s.builder.InsertValues = append(s.builder.InsertValues, newbie)
 	}
 
 	returning := s.builder.Returning

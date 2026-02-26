@@ -3,7 +3,6 @@ package goent
 import (
 	"reflect"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,7 +13,7 @@ import (
 var builderPool = sync.Pool{
 	New: func() any {
 		return &Builder{
-			Changes: map[*Field]any{},
+			Changes: make(map[*Field]any),
 		}
 	},
 }
@@ -23,10 +22,10 @@ type Dict = map[string]any
 
 // JoinTable represents a JOIN clause with the join type, target table, and ON condition.
 type JoinTable struct {
-	JoinType  model.JoinType
-	Table     *model.Table
-	tableName string
-	On        Condition
+	JoinType model.JoinType
+	Table    *model.Table
+	fullName string
+	On       Condition
 }
 
 // Pair represents a key-value pair.
@@ -53,10 +52,10 @@ type Builder struct {
 	Table *model.Table
 	Joins []*JoinTable
 
-	Changes  map[*Field]any
-	MoreRows [][]any
-	Where    Condition
-	Selects  []*Field
+	InsertValues [][]any
+	VisitFields  []*Field
+	Changes      map[*Field]any
+	Where        Condition
 
 	Orders []*Order
 	Groups []*Group
@@ -67,10 +66,9 @@ type Builder struct {
 	RollUp    string
 	ForUpdate bool
 
-	argNo         int
-	holders       []string
-	tableName     string
-	sortedColumns []*Field
+	argNo    int
+	holders  []string
+	fullName string
 
 	strings.Builder
 }
@@ -92,12 +90,11 @@ func (b *Builder) Reset() {
 	b.ResetForSave()
 	b.Type = 0
 	b.Table = nil
-	b.tableName = ""
-	b.Joins = nil
+	b.fullName = ""
+	b.Joins = make([]*JoinTable, 0)
 	b.Where = Condition{}
-	b.Selects = nil
-	b.Orders = nil
-	b.Groups = nil
+	b.Orders = make([]*Order, 0)
+	b.Groups = make([]*Group, 0)
 	b.Limit = 0
 	b.Offset = 0
 	b.RollUp = ""
@@ -106,10 +103,12 @@ func (b *Builder) Reset() {
 // ResetForSave resets the Builder for INSERT/UPDATE operations.
 func (b *Builder) ResetForSave() {
 	b.Changes = make(map[*Field]any)
-	b.MoreRows = make([][]any, 0)
+	b.InsertValues = make([][]any, 0)
+	b.VisitFields = make([]*Field, 0)
 	b.argNo = 0
 	b.holders = make([]string, 0)
 	b.Returning = ""
+	b.ForUpdate = false
 }
 
 // SetTable sets the table for the query builder.
@@ -119,7 +118,7 @@ func (b *Builder) SetTable(table TableInfo, driver model.Driver) *Builder {
 	if b.Table.Schema != nil {
 		schema = *b.Table.Schema
 	}
-	b.tableName = driver.FormatTableName(schema, b.Table.Name)
+	b.fullName = driver.FormatTableName(schema, b.Table.Name)
 	return b
 }
 
@@ -129,29 +128,29 @@ func (b *Builder) BuildHead() []any {
 	switch b.Type {
 	default:
 		b.WriteString("SELECT ")
-		if len(b.Selects) == 0 {
+		if len(b.VisitFields) == 0 {
 			b.WriteString("*")
 		} else if b.Type == model.SelectJoinQuery {
-			b.WriteString(b.Selects[0].String())
-			for _, f := range b.Selects[1:] {
+			b.WriteString(b.VisitFields[0].String())
+			for _, f := range b.VisitFields[1:] {
 				b.WriteByte(',')
 				b.WriteString(f.String())
 			}
 		} else {
-			b.WriteString(b.Selects[0].Simple())
-			for _, f := range b.Selects[1:] {
+			b.WriteString(b.VisitFields[0].Simple())
+			for _, f := range b.VisitFields[1:] {
 				b.WriteByte(',')
 				b.WriteString(f.Simple())
 			}
 		}
 		b.WriteString(" FROM ")
-		if b.tableName != "" {
-			b.WriteString(b.tableName)
+		if b.fullName != "" {
+			b.WriteString(b.fullName)
 		}
 	case model.InsertQuery:
 		b.WriteString("INSERT INTO ")
-		if b.tableName != "" {
-			b.WriteString(b.tableName)
+		if b.fullName != "" {
+			b.WriteString(b.fullName)
 		}
 		b.WriteByte('(')
 		var columns []string
@@ -164,31 +163,24 @@ func (b *Builder) BuildHead() []any {
 		b.WriteString(strings.Join(columns, ", "))
 	case model.InsertAllQuery:
 		b.WriteString("INSERT INTO ")
-		if b.tableName != "" {
-			b.WriteString(b.tableName)
+		if b.fullName != "" {
+			b.WriteString(b.fullName)
 		}
 		b.WriteByte('(')
-		b.sortedColumns = make([]*Field, 0, len(b.Changes))
-		for f := range b.Changes {
-			b.sortedColumns = append(b.sortedColumns, f)
-		}
-		sort.Slice(b.sortedColumns, func(i, j int) bool {
-			return b.sortedColumns[i].GetFid() < b.sortedColumns[j].GetFid()
-		})
-		columns := make([]string, len(b.sortedColumns))
-		for i, f := range b.sortedColumns {
+		columns := make([]string, len(b.VisitFields))
+		for i, f := range b.VisitFields {
 			columns[i] = f.ColumnName
 		}
 		b.WriteString(strings.Join(columns, ", "))
 	case model.UpdateQuery, model.UpdateJoinQuery:
 		b.WriteString("UPDATE ")
-		if b.tableName != "" {
-			b.WriteString(b.tableName)
+		if b.fullName != "" {
+			b.WriteString(b.fullName)
 		}
 	case model.DeleteQuery:
 		b.WriteString("DELETE FROM ")
-		if b.tableName != "" {
-			b.WriteString(b.tableName)
+		if b.fullName != "" {
+			b.WriteString(b.fullName)
 		}
 	}
 
@@ -206,9 +198,9 @@ func (b *Builder) BuildDoing() []any {
 		b.WriteString(strings.Join(b.holders, ", "))
 		b.WriteByte(')')
 	case model.InsertAllQuery:
-		size, last := len(b.sortedColumns), len(b.MoreRows)-1
+		size, last := len(b.VisitFields), len(b.InsertValues)-1
 		b.WriteString(") VALUES (")
-		for i, row := range b.MoreRows {
+		for i, row := range b.InsertValues {
 			b.holders = make([]string, size)
 			for j := range size {
 				b.argNo += 1
@@ -271,13 +263,11 @@ func (b *Builder) BuildTail() []any {
 			b.WriteString("ORDER BY ")
 			for i, ob := range b.Orders {
 				if i > 0 {
-					b.WriteString(",")
+					b.WriteString("")
 				}
 				b.WriteString(ob.String())
 				if ob.Desc {
 					b.WriteString(" DESC")
-				} else {
-					b.WriteString(" ASC")
 				}
 			}
 		}
@@ -300,12 +290,11 @@ func (b *Builder) BuildTail() []any {
 
 // BuildWhere builds the WHERE clause for the query.
 func (b *Builder) BuildWhere() []any {
-	var args []any
-
-	if b.Where.Template == "" {
+	if b.Where.IsEmpty() {
 		return nil
 	}
 
+	var args []any
 	b.WriteString(" WHERE ")
 	b.argNo = b.buildTemplate(b.Where, b.argNo, func(fld *Field) string {
 		if b.Type == model.SelectJoinQuery || b.Type == model.UpdateJoinQuery {
@@ -313,28 +302,29 @@ func (b *Builder) BuildWhere() []any {
 		}
 		return fld.Simple()
 	}, &args)
-
 	return args
 }
 
 func (b *Builder) buildTemplate(cond Condition, startIdx int, fieldFmt func(*Field) string, args *[]any) int {
 	fi, vi := 0, 0
 	template := cond.Template
-	for idx := 0; idx < len(template); idx++ {
-		if idx+1 < len(template) && template[idx:idx+2] == "%s" {
+	last := len(template) - 1
+	for idx := 0; idx <= last; idx++ {
+		curr := template[idx]
+		if idx < last && curr == '%' && template[idx+1] == 's' {
 			if fi < len(cond.Fields) {
 				b.WriteString(fieldFmt(cond.Fields[fi]))
 				fi++
 			}
 			idx++
-		} else if template[idx] == '?' {
+		} else if curr == '?' {
 			if vi < len(cond.Values) {
 				val := cond.Values[vi]
 				startIdx = b.appendValueParam(val, startIdx, args)
 				vi++
 			}
 		} else {
-			b.WriteByte(template[idx])
+			b.WriteByte(curr)
 		}
 	}
 	return startIdx
@@ -346,7 +336,7 @@ func (b *Builder) appendValueParam(val *Value, startIdx int, args *[]any) int {
 		for j, arg := range val.Args {
 			startIdx++
 			if j > 0 {
-				b.WriteString(",$" + strconv.Itoa(startIdx))
+				b.WriteString(", $" + strconv.Itoa(startIdx))
 			} else {
 				b.WriteString("$" + strconv.Itoa(startIdx))
 			}
@@ -363,7 +353,6 @@ func (b *Builder) appendValueParam(val *Value, startIdx int, args *[]any) int {
 
 // BuildJoins builds the JOIN clauses for the query.
 func (b *Builder) BuildJoins() []any {
-	var args []any
 	if len(b.Joins) == 0 {
 		return nil
 	}
@@ -373,11 +362,12 @@ func (b *Builder) BuildJoins() []any {
 		return nil
 	}
 
+	var args []any
 	for _, j := range b.Joins {
 		b.WriteString(" ")
 		b.WriteString(string(j.JoinType) + " ")
-		if j.tableName != "" {
-			b.WriteString(j.tableName)
+		if j.fullName != "" {
+			b.WriteString(j.fullName)
 		} else if j.Table != nil {
 			b.WriteString(j.Table.String())
 		}
@@ -388,7 +378,6 @@ func (b *Builder) BuildJoins() []any {
 			}, &args)
 		}
 	}
-
 	return args
 }
 
@@ -399,6 +388,17 @@ func (b *Builder) Build(destroy bool) (sql string, args []any) {
 	args = append(args, b.BuildJoins()...)
 	args = append(args, b.BuildWhere()...)
 	args = append(args, b.BuildTail()...)
+	sql = b.String()
+	if destroy {
+		PutBuilder(b)
+	}
+	return
+}
+
+// BuildForDelete
+func (b *Builder) BuildForDelete(destroy bool) (sql string, args []any) {
+	args = append(args, b.BuildHead()...)
+	args = append(args, b.BuildWhere()...)
 	sql = b.String()
 	if destroy {
 		PutBuilder(b)
@@ -449,10 +449,7 @@ func CollectFields[T any](builder *Builder, table *Table[T], valueOf reflect.Val
 
 func setDefaultValue(fieldOf reflect.Value, defaultValue string) {
 	if fieldOf.Kind() == reflect.String {
-		if len(defaultValue) >= 2 && defaultValue[0] == '\'' && defaultValue[len(defaultValue)-1] == '\'' {
-			fieldOf.SetString(defaultValue[1 : len(defaultValue)-1])
-		} else {
-			fieldOf.SetString(defaultValue)
-		}
+		defaultValue = strings.Trim(defaultValue, "'")
+		fieldOf.SetString(defaultValue)
 	}
 }

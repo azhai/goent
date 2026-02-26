@@ -5,7 +5,7 @@ package goent
 func NewSelectFunc[T, R any](state *StateWhere, table *Table[T], col, fun string) *StateSelect[T, R] {
 	fld := &Field{TableAddr: table.TableAddr, ColumnName: col, Function: fun}
 	s := NewStateSelectFrom[T, R](state, table)
-	s.builder.Selects = []*Field{fld}
+	s.builder.VisitFields = []*Field{fld}
 	return s
 }
 

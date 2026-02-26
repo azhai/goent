@@ -97,7 +97,7 @@ func (s *StateDelete[T]) Match(obj T) *StateDelete[T] {
 func (s *StateDelete[T]) Exec() error {
 	s.builder.Type = model.DeleteQuery
 	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
-	qr := model.CreateQuery(s.builder.Build(true))
+	qr := model.CreateQuery(s.builder.BuildForDelete(true))
 	hd := s.Prepare(s.table.db.driver)
 	return hd.ExecuteNoReturn(qr)
 }

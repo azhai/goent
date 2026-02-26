@@ -142,7 +142,7 @@ func (o *GoentBenchmark) FindByID(b *testing.B) {
 
 	err := o.db.Book.Insert().One(book)
 	if err != nil {
-		b.Error(err)
+		return
 	}
 
 	b.ReportAllocs()
@@ -154,7 +154,7 @@ func (o *GoentBenchmark) FindByID(b *testing.B) {
 
 			b.StopTimer()
 			if err != nil {
-				b.Error(err)
+				return
 			}
 			b.StartTimer()
 		}

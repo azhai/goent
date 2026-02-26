@@ -181,7 +181,6 @@ func sortResultsForMarkdown(results *[]benchmark.ResultWrapper) {
 func printMarkdown(results []benchmark.ResultWrapper, operations ...string) {
 	fmt.Println("\n| Operation       | Package |    N    | Avg ns/op |  Avg B/op | Avg allocs/op |  percent  |")
 	fmt.Println("|-----------------|---------|--------:|----------:|----------:|--------------:|----------:|")
-
 	tpl := "| %-15s | %-7s | %7d | %9d | %9d | %13d | %9s |\n"
 	for _, op := range operations {
 		var npo int64
@@ -190,21 +189,30 @@ func printMarkdown(results []benchmark.ResultWrapper, operations ...string) {
 			if !ok {
 				continue
 			}
-			var opStr, centStr string
+			first, opStr := false, ""
 			if i == 0 {
+				first, npo = true, 0
 				opStr = fmt.Sprintf("**%s**", op)
-				centStr, npo = "=", result.NsPerOp()
-			} else if npo > 0 {
-				kilo := result.NsPerOp() * 1000 / npo
-				centStr = fmt.Sprintf("%6.1f%%", float64(kilo-1000)/10.0)
 			}
-			fmt.Printf(tpl, opStr, r.Orm,
-				result.N, result.NsPerOp(),
-				result.AllocedBytesPerOp(),
-				result.AllocsPerOp(),
-				centStr,
-			)
+			var values []any
+			npo, values = getRowValues(result, first, npo)
+			values = append([]any{opStr, r.Orm}, values...)
+			fmt.Printf(tpl, values...)
 		}
 	}
 	fmt.Println("")
+}
+
+func getRowValues(result testing.BenchmarkResult, first bool, npo int64) (int64, []any) {
+	var centStr string
+	if first {
+		centStr, npo = "=", result.NsPerOp()
+	} else if npo > 0 {
+		kilo := result.NsPerOp() * 1000 / npo
+		centStr = fmt.Sprintf("%6.1f%%", float64(kilo-1000)/10.0)
+	}
+	values := []any{result.N, result.NsPerOp(),
+		result.AllocedBytesPerOp(),
+		result.AllocsPerOp(), centStr}
+	return npo, values
 }
