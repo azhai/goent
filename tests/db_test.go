@@ -78,6 +78,21 @@ type Status struct {
 	Name string
 }
 
+// ScanFields returns a slice of pointers to Status fields for database scanning.
+func (t *Status) ScanFields() []any {
+	return []any{
+		&t.ID,
+		&t.Name,
+	}
+}
+
+// FetchStatus creates a FetchFunc for Status.
+func FetchStatus() goent.FetchFunc {
+	return func(target any) []any {
+		return target.(*Status).ScanFields()
+	}
+}
+
 // User is a user in the system.
 type User struct {
 	Id        int    `goe:"pk"`

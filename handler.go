@@ -4,11 +4,15 @@ import (
 	"context"
 	"iter"
 	"reflect"
-	"slices"
 	"time"
 
 	"github.com/azhai/goent/model"
 )
+
+// GenScanFields is an interface for Model which is modifiable by goent-gen.
+type GenScanFields interface {
+	ScanFields() []any
+}
 
 // Handler handles database query execution and result processing.
 type Handler struct {
@@ -239,16 +243,81 @@ func CreateFetchOne(tblInfo TableInfo, fields []*Field, foreigns []*Foreign) Fet
 	}
 }
 
+type fieldScanInfo struct {
+	fieldId    int
+	tableAddr  uintptr
+	isWildcard bool
+}
+
+type fetchContext struct {
+	tblInfo   TableInfo
+	fields    []*Field
+	foreigns  []*Foreign
+	scanInfos []fieldScanInfo
+	destSize  int
+}
+
+func (ctx *fetchContext) buildDest(valueOf reflect.Value) []any {
+	dest := make([]any, 0, ctx.destSize)
+	foreignValues := make(map[uintptr]reflect.Value)
+	var mainTableAddr uintptr
+	if len(ctx.fields) > 0 {
+		mainTableAddr = ctx.fields[0].TableAddr
+	}
+	for _, foreign := range ctx.foreigns {
+		if typeOf, ok := valueOf.Type().FieldByName(foreign.MountField); ok {
+			if typeOf.Type.Kind() == reflect.Slice {
+				continue
+			}
+			foreignValue := reflect.New(typeOf.Type.Elem())
+			valueOf.FieldByName(foreign.MountField).Set(foreignValue)
+			frnInfo := GetTableInfo(foreign.Reference.TableAddr)
+			if frnInfo != nil {
+				foreignValues[frnInfo.TableAddr] = foreignValue
+			}
+		}
+	}
+	var dummy any
+	for _, fld := range ctx.fields {
+		if fld.ColumnName == "*" {
+			if info := GetTableInfo(fld.TableAddr); info != nil {
+				dest = append(dest, AppendDestTable(*info, valueOf)...)
+			}
+		} else if fld.TableAddr != mainTableAddr && fld.TableAddr != 0 {
+			if fv, ok := foreignValues[fld.TableAddr]; ok {
+				fieldOf := fv.Elem().Field(fld.FieldId)
+				dest = append(dest, fieldOf.Addr().Interface())
+			} else {
+				dest = append(dest, &dummy)
+			}
+		} else if fld.TableAddr == mainTableAddr {
+			fieldOf := valueOf.Field(fld.FieldId)
+			dest = append(dest, fieldOf.Addr().Interface())
+		}
+	}
+	return dest
+}
+
 // CreateFetchFunc creates a FetchFunc based on the specified fields and foreign relationships.
 // It handles both aggregate function results and regular table field scanning.
 func CreateFetchFunc(tblInfo TableInfo, fields []*Field, foreigns []*Foreign) FetchFunc {
+	ctx := &fetchContext{
+		tblInfo:  tblInfo,
+		fields:   fields,
+		foreigns: foreigns,
+	}
+	if len(fields) > 0 {
+		ctx.destSize = len(fields)
+	} else {
+		ctx.destSize = len(tblInfo.GetSortedFields())
+	}
 	return func(target any) []any {
 		valueOf := reflect.ValueOf(target).Elem()
 		if len(fields) > 0 && fields[0].Function != "" {
 			return FlattenDest(valueOf)
 		}
 		if len(fields) > 0 {
-			return AppendDestFields(valueOf, fields, foreigns)
+			return ctx.buildDest(valueOf)
 		}
 		dest := AppendDestTable(tblInfo, valueOf)
 		for _, foreign := range foreigns {
@@ -320,16 +389,13 @@ func AppendDestFields(valueOf reflect.Value, fields []*Field, foreigns []*Foreig
 
 // AppendDestTable returns a slice of pointers to the fields of a struct
 func AppendDestTable(info TableInfo, valueOf reflect.Value) []any {
-	columns := make([]*Column, 0, len(info.Columns))
-	for _, col := range info.Columns {
-		columns = append(columns, col)
+	if method := valueOf.MethodByName("ScanFields"); method.IsValid() {
+		return method.Call([]reflect.Value{})[0].Interface().([]any)
 	}
-	slices.SortFunc(columns, func(a, b *Column) int {
-		return a.FieldId - b.FieldId
-	})
-	dest := make([]any, len(columns))
-	for i, col := range columns {
-		fieldOf := valueOf.Field(col.FieldId)
+	fields := info.GetSortedFields()
+	dest := make([]any, len(fields))
+	for i, fld := range fields {
+		fieldOf := valueOf.Field(fld.FieldId)
 		dest[i] = fieldOf.Addr().Interface()
 	}
 	return dest

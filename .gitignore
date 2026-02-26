@@ -25,3 +25,4 @@ tmp/
 vendor/
 
 /tests/go.sum
+goent_gen.go

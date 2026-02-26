@@ -3,7 +3,8 @@ package main
 import (
 	"fmt"
 	"strings"
-	"time"
+
+	"goent-example/models"
 
 	"github.com/azhai/goent"
 	"github.com/azhai/goent/drivers/pgsql"
@@ -12,107 +13,23 @@ import (
 	"github.com/azhai/goent/utils"
 )
 
-const TestOrderNo = "20250801098"
-
-// Category is a category of products.
-type Category struct {
-	ID   int64
-	Name string
-}
-
-func (m *Category) GetID() int64 {
-	return m.ID
-}
-
-func (m *Category) SetID(id int64) {
-	m.ID = id
-}
-
-// Product is a product in the store.
-// CategoryID with `m2o` tag creates a foreign key to Category table.
-// The Category field is a pointer to the related Category entity.
-type Product struct {
-	ID         int64
-	CategoryID int64 `goe:"m2o"`
-	Name       string
-	Color      string
-	Price      float64
-	Category   *Category
-}
-
-func (m *Product) GetID() int64 {
-	return m.ID
-}
-
-func (m *Product) SetID(id int64) {
-	m.ID = id
-}
-
-// Order is an order in the store.
-type Order struct {
-	ID       int64
-	OrderNo  string `goe:"unique"`
-	Customer string
-	Total    float64
-	Status   string
-	Created  time.Time
-	Details  []*OrderDetail
-	Products []*Product `goe:"-"`
-}
-
-func (m *Order) GetID() int64 {
-	return m.ID
-}
-
-func (m *Order) SetID(id int64) {
-	m.ID = id
-}
-
-func (m *Order) GetProductIds() (ids []int64) {
-	for _, dt := range m.Details {
-		ids = append(ids, dt.ProductID)
-	}
-	return
-}
-
-// OrderDetail is a detail of an order.
-// OrderID and ProductID form a composite primary key with `pk;not_incr` tags.
-// `m2o` tag on OrderID creates a foreign key to Order table.
-// `o2o` tag on ProductID creates a one-to-one relationship with Product table.
-type OrderDetail struct {
-	OrderID   int64 `goe:"pk;not_incr;m2o"`
-	ProductID int64 `goe:"pk;not_incr;o2o"`
-	Quantity  int
-	Price     float64
-	Product   *Product
-}
-
-func (*OrderDetail) TableName() string {
-	return "t_order_product"
-}
-
-// PublicSchema is the public schema of the database.
-type PublicSchema struct {
-	Category    *goent.Table[Category]
-	Product     *goent.Table[Product]
-	Order       *goent.Table[Order]
-	OrderDetail *goent.Table[OrderDetail]
-}
-
 // Database is the database connection with its driver.
 type Database struct {
-	PublicSchema `goe:"public;prefix:t_"`
+	models.PublicSchema `goe:"public;prefix:t_"`
 	*goent.DB
 }
 
 func main() {
-	var dbDSN string
+	var dbDSN, logFile string
 	env := utils.NewEnvWithFile("../.env")
 	dbType := env.GetStr("GOE_DRIVER", "sqlite")
 	if dbDSN = env.Get("GOE_DATABASE_DSN"); dbDSN == "" {
-		dbDSN = defaultDSN(dbType)
+		dbDSN = models.DefaultDSN(dbType)
 	}
-	db, err := connect(dbType, dbDSN, env.Get("GOE_LOG_FILE"))
+	if logFile = env.Get("GOE_LOG_FILE"); logFile == "" {
+		logFile = "stdout"
+	}
+	db, err := connect(dbType, dbDSN, logFile)
 	if err != nil {
 		panic(err)
 	}
@@ -128,11 +45,11 @@ func main() {
 		panic(err)
 	}
 
-	order := &Order{OrderNo: TestOrderNo}
+	order := &models.Order{OrderNo: models.TestOrderNo}
 	fields := []any{"id", "order_no", "total", "status"}
 	order, err = db.Order.Select(fields...).Match(*order).One()
 	if order == nil {
-		order, err = createOrder(db, TestOrderNo)
+		order, err = createOrder(db, models.TestOrderNo)
 	}
 	if err != nil {
 		fmt.Println(err)
@@ -181,13 +98,6 @@ func addForeignKeys(db *Database) {
 	}
 }
 
-func defaultDSN(dbType string) string {
-	if dbType == "pgsql" || dbType == "postgres" {
-		return "user=postgres password=postgres host=localhost port=5432 database=postgres sslmode=disable"
-	}
-	return "table-crud.db"
-}
-
 func connect(dbType, dbDSN, logFile string) (*Database, error) {
 	var drv model.Driver
 	if dbType == "pgsql" || dbType == "postgres" {
@@ -214,76 +124,37 @@ func clearDatabase(db *Database, isDrop bool) {
 	}
 }
 
-func dataCategories() []*Category {
-	return []*Category{
-		{ID: 1, Name: "Coat"},
-		{ID: 2, Name: "Jeans"},
-		{ID: 3, Name: "Shorts"},
-		{ID: 4, Name: "T-Shirt"},
-	}
-}
-
-func dataProducts() []*Product {
-	return []*Product{
-		{ID: 1, CategoryID: 1, Name: "Product 1", Color: "Red", Price: 200.0},
-		{ID: 2, CategoryID: 2, Name: "Product 2", Color: "Blue", Price: 120.0},
-		{ID: 3, CategoryID: 3, Name: "Product 3", Color: "Green", Price: 50.0},
-		{ID: 4, CategoryID: 4, Name: "Product 4", Color: "Yellow", Price: 88.0},
-		{ID: 5, CategoryID: 1, Name: "Product 5", Color: "White", Price: 330.0},
-		{ID: 6, CategoryID: 2, Name: "Product 6", Color: "Blue", Price: 68.8},
-		{ID: 7, CategoryID: 3, Name: "Product 7", Color: "Green", Price: 72.5},
-	}
-}
-
-func dataOrder(orderNo string) *Order {
-	return &Order{
-		OrderNo:  orderNo,
-		Customer: "Customer 1",
-		Total:    0.0,
-		Status:   "Paid",
-		Created:  time.Now(),
-	}
-}
-
-func dataOrderDetail(orderID int64) []*OrderDetail {
-	return []*OrderDetail{
-		{OrderID: orderID, ProductID: 1, Quantity: 1, Price: 0.0},
-		{OrderID: orderID, ProductID: 3, Quantity: 5, Price: 0.0},
-		{OrderID: orderID, ProductID: 6, Quantity: 2, Price: 0.0},
-	}
-}
-
 func seedData(db *Database) error {
 	count, err := db.Category.Count("*")
 	if err != nil || count > 0 {
 		return err
 	}
-	if err = db.Category.Insert().All(false, dataCategories()); err != nil {
+	if err = db.Category.Insert().All(false, models.DataCategories()); err != nil {
 		return err
 	}
-	if err = db.Product.Insert().All(false, dataProducts()); err != nil {
+	if err = db.Product.Insert().All(false, models.DataProducts()); err != nil {
 		return err
 	}
 	return nil
 }
 
-func createOrder(db *Database, orderNo string) (*Order, error) {
-	obj, err := db.Order.Select("id", "status", "total").Match(Order{OrderNo: orderNo}).One()
+func createOrder(db *Database, orderNo string) (*models.Order, error) {
+	obj, err := db.Order.Select("id", "status", "total").Match(models.Order{OrderNo: orderNo}).One()
 	if err != nil && err != goent.ErrNotFound || obj != nil && obj.ID > 0 {
 		return nil, err
 	}
-	order := dataOrder(orderNo)
+	order := models.DataOrder(orderNo)
 	if err = db.Order.Insert().One(order); err != nil {
 		return nil, err
 	}
-	orderDetail := dataOrderDetail(order.ID)
+	orderDetail := models.DataOrderDetail(order.ID)
 	if err = db.OrderDetail.Insert().All(true, orderDetail); err != nil {
 		return nil, err
 	}
 	return order, nil
 }
 
-func CalcTotalPrice(db *Database, order *Order) (float64, error) {
+func CalcTotalPrice(db *Database, order *models.Order) (float64, error) {
 	var err error
 	if order == nil {
 		return 0.0, err
@@ -302,7 +173,7 @@ func CalcTotalPrice(db *Database, order *Order) (float64, error) {
 		return 0.0, err
 	}
 
-	productMap := make(map[int64]*Product, len(order.Products))
+	productMap := make(map[int64]*models.Product, len(order.Products))
 	for _, p := range order.Products {
 		productMap[p.ID] = p
 	}
@@ -325,7 +196,7 @@ func CalcTotalPrice(db *Database, order *Order) (float64, error) {
 	return total, err
 }
 
-func CalcTotalPrice2(db *Database, order *Order) (float64, error) {
+func CalcTotalPrice2(db *Database, order *models.Order) (float64, error) {
 	var err error
 	if order == nil {
 		return 0.0, err
@@ -355,7 +226,7 @@ func CalcTotalPrice2(db *Database, order *Order) (float64, error) {
 	return total, err
 }
 
-func CalcTotalPrice3(db *Database, order *Order) (float64, error) {
+func CalcTotalPrice3(db *Database, order *models.Order) (float64, error) {
 	var err error
 	if order == nil {
 		return 0.0, err
@@ -379,7 +250,7 @@ func CalcTotalPrice3(db *Database, order *Order) (float64, error) {
 	return total, err
 }
 
-func ListAllProducts(db *Database) ([]*Product, error) {
+func ListAllProducts(db *Database) ([]*models.Product, error) {
 	filter := goent.LessEquals(db.Product.Field("price"), 100)
 	products, err := db.Product.Select().Filter(filter).All()
 	if err != nil {

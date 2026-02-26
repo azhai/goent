@@ -69,28 +69,36 @@ func (s *StateSelect[T, R]) Select(fields ...any) *StateSelect[T, R] {
 
 // Query returns a Fetcher and a Query.
 func (s *StateSelect[T, R]) Query(creator FetchCreator) (*Fetcher[R], model.Query) {
+	var to FetchFunc
+	if s.sameModel && len(s.builder.Joins) == 0 {
+		if obj, ok := any(new(R)).(GenScanFields); ok {
+			to = func(_ any) []any { return obj.ScanFields() }
+		}
+	}
+	if to == nil {
+		info, fields := s.table.TableInfo, slices.Clone(s.builder.Selects)
+		to = creator(info, fields, s.GetJoinForeigns())
+	}
+	return s.QueryFetch(to)
+}
+
+// QueryFetch returns a Fetcher and a Query.
+func (s *StateSelect[T, R]) QueryFetch(to FetchFunc) (*Fetcher[R], model.Query) {
 	qr := model.CreateQuery(s.builder.Build(false))
 	defer PutBuilder(s.builder)
-	info, fields := s.table.TableInfo, slices.Clone(s.builder.Selects)
 	fet := &Fetcher[R]{
-		NewTarget: func() *R { return new(R) },
-		FetchTo:   creator(info, fields, s.GetJoinForeigns()),
 		Handler:   s.Prepare(s.table.db.driver),
+		NewTarget: func() *R { return new(R) },
+		FetchTo:   to,
 	}
 	return fet, qr
 }
 
-// IterRows return a iterator on rows.
-func (s *StateSelect[T, R]) IterRows() iter.Seq2[*R, error] {
-	fet, qr := s.Query(CreateFetchFunc)
-	return fet.FetchResult(qr)
-}
-
-// Rows executes the query and returns all rows as a slice.
-func (s *StateSelect[T, R]) Rows() (data []*R, err error) {
+// QueryRows executes the query and returns all rows as a slice.
+func (s *StateSelect[T, R]) QueryRows(to FetchFunc) (data []*R, err error) {
 	var rows model.Rows
 	limit := s.builder.Limit
-	fet, qr := s.Query(CreateFetchFunc)
+	fet, qr := s.QueryFetch(to)
 	if rows, err = fet.QueryResult(qr); err != nil {
 		return
 	}
@@ -99,6 +107,12 @@ func (s *StateSelect[T, R]) Rows() (data []*R, err error) {
 		err = fet.ErrHandler(qr)
 	}
 	return
+}
+
+// IterRows return a iterator on rows.
+func (s *StateSelect[T, R]) IterRows() iter.Seq2[*R, error] {
+	fet, qr := s.Query(CreateFetchFunc)
+	return fet.FetchResult(qr)
 }
 
 // One executes the query and returns the first row as a single result.

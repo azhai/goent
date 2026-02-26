@@ -1,4 +1,4 @@
-module one-file-crud
+module goent-example
 
 go 1.26.0
 

@@ -331,6 +331,7 @@ db.Default.Insert().One(&d)
 8. **PostgreSQL uses `RETURNING` clause** - SQLite uses `last_insert_rowid()` for auto-increment
 9. **LeftJoin auto-selects joined table columns** - No need to manually specify columns
 10. **Slice foreign fields are skipped in LeftJoin** - Use standard `Join` for slice relationships
+11. **Use code generator for best performance** - Generated code is 15-27x faster than reflection
 
 ## Common Tasks
 
@@ -350,6 +351,12 @@ db.Default.Insert().One(&d)
 1. Add the function to `where.go`
 2. Return a `Condition` struct with template and fields
 3. Update builder to handle the condition
+
+### Using the code generator
+1. Install: `go install github.com/azhai/goent/cmd/goent-gen@latest`
+2. Add `//go:generate goent-gen .` to your models package
+3. Run `go generate ./models`
+4. Use generated `ScanFields()` or `FetchXXX()` methods for best performance
 
 ## Build and Test Commands
 

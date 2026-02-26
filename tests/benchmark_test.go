@@ -41,9 +41,12 @@ func BenchmarkSelect(b *testing.B) {
 		data[i] = &Status{Name: fmt.Sprintf("Status %d", i)}
 	}
 	db.Status.Insert().All(false, data)
+	// fetchTo := FetchStatus()
 
 	for b.Loop() {
-		result, _ := db.Status.Select().Take(size).Rows()
+		query := db.Status.Select().Take(size)
+		// result, _ := query.QueryRows(fetchTo)
+		result, _ := query.All()
 		_ = result
 	}
 }
