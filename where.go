@@ -3,7 +3,6 @@ package goent
 import (
 	"fmt"
 	"reflect"
-	"strings"
 )
 
 // Field represents a database field with its table reference and column name.
@@ -121,7 +120,6 @@ func Expr(where string, args ...any) Condition {
 			values = append(values, val)
 		}
 	}
-	where = strings.ReplaceAll(where, "?", "%v")
 	return Condition{Template: where, Values: values}
 }
 

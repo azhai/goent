@@ -1137,7 +1137,7 @@ if err != nil {
 ```go
 animals, err = db.Animal.Select().
 			   Filter(
-					goent.Expr("ToUpper(name) LIKE %s", "%CAT%"),
+					goent.Expr("ToUpper(name) LIKE ?", "%CAT%"),
 			   ).All()
 
 if err != nil {
@@ -1431,19 +1431,19 @@ go run main.go -orm goent -operation all
 ```
 
 ### Benchmark on MacMini M4
-| Operation       | Package | Avg op/s | Avg ns/op | Avg B/op | Avg allocs/op |
-|-----------------|---------|---------:|----------:|---------:|--------------:|
-| **insert**      | goe     |    14930 |     81200 |     2644 |            31 |
-|                 | goent   |    14835 |     84908 |     3402 |            67 |
-| **insert-bulk** | goe     |      174 |   9098946 |  5202188 |         28013 |
-|                 | goent   |      133 |   9688873 |  8752617 |         46120 |
-| **update**      | goe     |    14932 |     77634 |     2593 |            27 |
-|                 | goent   |    14541 |     83918 |     3423 |            63 |
-| **delete**      | goe     |    45292 |     26490 |     1051 |            15 |
-|                 | goent   |     1226 |   1543646 |     1398 |            34 |
-| **select-one**  | goe     |    41014 |     29327 |     3508 |            54 |
-|                 | goent   |    34629 |     33767 |     4340 |            85 |
-| **select-page** | goe     |     3415 |    341912 |    55400 |           870 |
-|                 | goent   |     3132 |    388181 |    83605 |          1722 |
+| Operation       | Package |     N | Avg ns/op | Avg B/op | Avg allocs/op |
+|-----------------|---------|------:|----------:|---------:|--------------:|
+| **insert**      | goe     | 14930 |     81200 |     2644 |            31 |
+|                 | goent   | 14835 |     84908 |     3402 |            67 |
+| **insert-bulk** | goe     |   174 |   9098946 |  5202188 |         28013 |
+|                 | goent   |   133 |   9688873 |  8752617 |         46120 |
+| **update**      | goe     | 14932 |     77634 |     2593 |            27 |
+|                 | goent   | 14541 |     83918 |     3423 |            63 |
+| **delete**      | goe     | 45292 |     26490 |     1051 |            15 |
+|                 | goent   |  1226 |   1543646 |     1398 |            34 |
+| **select-one**  | goe     | 41014 |     29327 |     3508 |            54 |
+|                 | goent   | 34629 |     33767 |     4340 |            85 |
+| **select-page** | goe     |  3415 |    341912 |    55400 |           870 |
+|                 | goent   |  3132 |    388181 |    83605 |          1722 |
 
 [Back to Contents](#content)

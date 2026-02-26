@@ -15,6 +15,23 @@ var (
 	size    = 100
 )
 
+func BenchmarkDelete(b *testing.B) {
+	db, _ := Setup()
+	db.Status.Delete().Exec()
+
+	data := make([]*Status, size)
+	for i := 0; i < size; i++ {
+		data[i] = &Status{Name: fmt.Sprintf("Status %d", i)}
+	}
+	db.Status.Insert().All(false, data)
+
+	for i := range b.N {
+		_ = db.Status.Delete().Where("id > ?", i).Exec()
+		// filter := goent.Greater(db.Status.Field("id"), i)
+		// _ = db.Status.Delete().Filter(filter).Exec()
+	}
+}
+
 func BenchmarkSelect(b *testing.B) {
 	db, _ := Setup()
 	db.Status.Delete().Exec()

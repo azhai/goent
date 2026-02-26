@@ -8,29 +8,35 @@ import (
 
 // CreateLogger create logger by log file
 // If log file directory not exist, create it
-func CreateLogger(logFile string) (*slog.Logger, error) {
-	if logFile == "/dev/null" {
-		logger := slog.New(slog.DiscardHandler)
-		return logger, nil
-	} else if logFile == "stdout" {
-		logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-		return logger, nil
-	} else if logFile == "stderr" {
-		logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-		return logger, nil
+func CreateLogger(logFile string) (logger *slog.Logger, err error) {
+	var fh *os.File
+	switch logFile {
+	case "":
+		return
+	case "/dev/null":
+		logger = slog.New(slog.DiscardHandler)
+		return
+	case "stdout":
+		fh = os.Stdout
+	case "stderr":
+		fh = os.Stderr
+	default:
+		fh, err = CreateFileHandler(logFile)
+		if err != nil {
+			return
+		}
 	}
+	opts := &slog.HandlerOptions{AddSource: false}
+	logger = slog.New(slog.NewJSONHandler(fh, opts))
+	return
+}
 
+func CreateFileHandler(logFile string) (*os.File, error) {
 	if err := MakeDirForFile(logFile); err != nil {
 		return nil, err
 	}
 	mode := os.O_RDWR | os.O_CREATE | os.O_APPEND
-	fh, err := os.OpenFile(logFile, mode, 0666)
-	if err != nil {
-		return nil, err
-	}
-	opts := &slog.HandlerOptions{AddSource: false}
-	logger := slog.New(slog.NewJSONHandler(fh, opts))
-	return logger, nil
+	return os.OpenFile(logFile, mode, 0666)
 }
 
 // MakeDirForFile create directory for file if not exist

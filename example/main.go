@@ -14,13 +14,6 @@ import (
 
 const TestOrderNo = "20250801098"
 
-var (
-	// dbType = "sqlite"
-	// dbDSN  = "table-crud.db"
-	dbType = "pgsql"
-	dbDSN  = "postgres://dba:pass@127.0.0.1:5432/test?sslmode=disable"
-)
-
 // Category is a category of products.
 type Category struct {
 	ID   int64
@@ -113,7 +106,13 @@ type Database struct {
 }
 
 func main() {
-	db, err := connect(dbType, dbDSN, "stdout")
+	var dbDSN string
+	env := utils.NewEnvWithFile("../.env")
+	dbType := env.GetStr("GOE_DRIVER", "sqlite")
+	if dbDSN = env.Get("GOE_DATABASE_DSN"); dbDSN == "" {
+		dbDSN = defaultDSN(dbType)
+	}
+	db, err := connect(dbType, dbDSN, env.Get("GOE_LOG_FILE"))
 	if err != nil {
 		panic(err)
 	}
@@ -180,6 +179,13 @@ func addForeignKeys(db *Database) {
 			Middle:     nil,
 		},
 	}
+}
+
+func defaultDSN(dbType string) string {
+	if dbType == "pgsql" || dbType == "postgres" {
+		return "user=postgres password=postgres host=localhost port=5432 database=postgres sslmode=disable"
+	}
+	return "table-crud.db"
 }
 
 func connect(dbType, dbDSN, logFile string) (*Database, error) {

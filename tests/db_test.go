@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,8 +13,11 @@ import (
 	"time"
 
 	"github.com/azhai/goent"
+	// "github.com/azhai/goent-libpq"
 	"github.com/azhai/goent/drivers/pgsql"
 	"github.com/azhai/goent/drivers/sqlite"
+	"github.com/azhai/goent/model"
+	"github.com/azhai/goent/utils"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 )
@@ -223,10 +227,11 @@ type Database struct {
 
 var db *Database
 
-var mapDriver = map[string]func() (*Database, error){
-	"pgsql":      SetupPostgres,
-	"postgres":   SetupPostgres,
-	"postgresql": SetupPostgres,
+var mapDriver = map[string]func(dbDSN, logFile string) (*Database, error){
+	// "libpq":      SetupLibPq,
+	"pgsql":      SetupPgx,
+	"postgres":   SetupPgx,
+	"postgresql": SetupPgx,
 	"sqlite":     SetupSqlite,
 	"sqlite3":    SetupSqlite,
 }
@@ -250,13 +255,14 @@ func TestMain(m *testing.M) {
 }
 
 func Setup() (*Database, error) {
+	env := utils.NewEnvWithFile("../.env")
+	dbType := env.GetStr("GOE_DRIVER", "sqlite")
+	dbDSN := env.Get("GOE_DATABASE_DSN")
+	logFile := env.Get("GOE_LOG_FILE")
+
 	var err error
-	drvName := os.Getenv("GOE_DRIVER")
-	if drvName == "" {
-		drvName = "sqlite"
-	}
-	drvName = strings.ToLower(drvName)
-	db, err = mapDriver[drvName]()
+	dbType = strings.ToLower(dbType)
+	db, err = mapDriver[dbType](dbDSN, logFile)
 	if err != nil {
 		return nil, err
 	}
@@ -264,15 +270,25 @@ func Setup() (*Database, error) {
 	return db, nil
 }
 
-func SetupPostgres() (*Database, error) {
-	var err error
-	dbDSN := os.Getenv("GOE_DATABASE_DSN")
+// func SetupLibPq(dbDSN, logFile string) (*Database, error) {
+// 	if dbDSN == "" {
+// 		dbDSN = "user=postgres password=postgres host=localhost port=5432 database=postgres sslmode=disable"
+// 	}
+// 	drv := libpq.Open(dbDSN, libpq.NewConfig(libpq.Config{}))
+// 	return setupPostgres(drv, logFile)
+// }
+
+func SetupPgx(dbDSN, logFile string) (*Database, error) {
 	if dbDSN == "" {
-		dbDSN = "user=postgres password=postgres host=localhost port=5432 database=postgres"
+		dbDSN = "user=postgres password=postgres host=localhost port=5432 database=postgres sslmode=disable"
 	}
-	db, err = goent.Open[Database](pgsql.Open(dbDSN, pgsql.NewConfig(pgsql.Config{
-		// Logger: slog.New(slog.NewJSONHandler(os.Stdout, nil)),
-	})), "")
+	drv := pgsql.Open(dbDSN, pgsql.NewConfig(pgsql.Config{}))
+	return setupPostgres(drv, logFile)
+}
+
+func setupPostgres(drv model.Driver, logFile string) (*Database, error) {
+	var err error
+	db, err = goent.Open[Database](drv, logFile)
 	if err != nil {
 		return nil, err
 	}
@@ -293,21 +309,26 @@ func SetupPostgres() (*Database, error) {
 	return db, nil
 }
 
-func SetupSqlite() (*Database, error) {
-	filename := filepath.Join(os.TempDir(), "goent.db")
-	os.Remove(filename)
+func SetupSqlite(dbDSN, logFile string) (*Database, error) {
+	if dbDSN == "" {
+		dbDSN = filepath.Join(os.TempDir(), "goent.db")
+	}
+	os.Remove(dbDSN)
 	db = nil
 	goent.ResetRegistry()
-	var err error
-	db, err = goent.Open[Database](sqlite.Open(filename, sqlite.NewConfig(
-		sqlite.Config{
-			// Logger: slog.New(slog.NewJSONHandler(os.Stdout, nil)),
-			ConnectionHook: func(conn sqlite.ExecQuerierContext, dsn string) error {
-				conn.ExecContext(context.Background(), "PRAGMA foreign_keys = OFF;", nil)
-				return nil
-			},
+
+	cfg := sqlite.Config{
+		ConnectionHook: func(conn sqlite.ExecQuerierContext, dsn string) error {
+			conn.ExecContext(context.Background(), "PRAGMA foreign_keys = OFF;", nil)
+			return nil
 		},
-	)), "")
+	}
+	if strings.ToLower(logFile) == "stdout" {
+		cfg.Logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	}
+
+	var err error
+	db, err = goent.Open[Database](sqlite.Open(dbDSN, sqlite.NewConfig(cfg)), "")
 	if err != nil {
 		return nil, err
 	}
