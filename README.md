@@ -1524,27 +1524,33 @@ rows.Scan(user.ScanFields()...)
 
 ## Benchmarks
 
-Source code of benchmarks can be find on [azhai/go-orm-benchmarks](https://github.com/azhai/go-orm-benchmarks) or [lauro-santana/go-orm-benchmarks](https://github.com/lauro-santana/go-orm-benchmarks). 
+ original repo [lauro-santana/go-orm-benchmarks](https://github.com/lauro-santana/go-orm-benchmarks). 
 
 ```bash
-go run main.go -orm goe -operation all
-go run main.go -orm goent -operation all
+cd tests/benchmark/run/
+go run main.go -operation all --format both
 ```
 
 ### Benchmark on MacMini M4
-| Operation       | Package |     N | Avg ns/op | Avg B/op | Avg allocs/op |
-|-----------------|---------|------:|----------:|---------:|--------------:|
-| **insert**      | goe     | 14922 |     79575 |     2644 |            31 |
-|                 | goent   | 15036 |     80156 |     3014 |            58 |
-| **insert-bulk** | goe     |   181 |   7576239 |  5202183 |         28013 |
-|                 | goent   |   152 |  11665895 |  6859881 |         44068 |
-| **update**      | goe     | 15178 |     79464 |     2593 |            27 |
-|                 | goent   | 15165 |     80511 |     3037 |            54 |
-| **delete**      | goe     | 46515 |     25235 |     1051 |            15 |
-|                 | goent   |  1153 |   1204109 |     1076 |            26 |
-| **select-one**  | goe     | 41500 |     28608 |     3508 |            54 |
-|                 | goent   | 39538 |     29913 |     3680 |            72 |
-| **select-page** | goe     |  3598 |    331082 |    55400 |           870 |
-|                 | goent   |  3494 |    337809 |    59899 |          1140 |
+| Operation       | Package |    N    | Avg ns/op |  Avg B/op | Avg allocs/op |  percent  |
+|-----------------|---------|--------:|----------:|----------:|--------------:|----------:|
+| **insert**      | raw     |   15122 |     83751 |       624 |            12 |         = |
+|                 | goent   |   15099 |     80631 |      3043 |            58 |     -3.8% |
+|                 | goe     |   14799 |     82435 |      2644 |            31 |     -1.6% |
+| **insert-bulk** | raw     |     158 |   9479578 |   6054817 |         39833 |         = |
+|                 | goent   |     133 |  13862300 |   6860791 |         44070 |     46.2% |
+|                 | goe     |     174 |   8136145 |   5202194 |         28013 |    -14.2% |
+| **update**      | raw     |   14636 |     80099 |       680 |            12 |         = |
+|                 | goent   |   14179 |     82311 |      3065 |            54 |      2.7% |
+|                 | goe     |   14115 |     84426 |      2578 |            26 |      5.4% |
+| **delete**      | raw     |   15342 |     82328 |       256 |             8 |         = |
+|                 | goent   |    1267 |   1092834 |      1107 |            26 |   1227.4% |
+|                 | goe     |   46753 |     25814 |      1051 |            15 |    -68.7% |
+| **select-one**  | raw     |   49117 |     23968 |      1760 |            49 |         = |
+|                 | goent   |   40755 |     28735 |      3075 |            61 |     19.8% |
+|                 | goe     |   41384 |     29023 |      3508 |            54 |     21.0% |
+| **select-page** | raw     |     596 |   2104411 |     58608 |          1446 |         = |
+|                 | goent   |    3614 |    327778 |     57847 |          1120 |    -84.5% |
+|                 | goe     |    1185 |   1015329 |     55403 |           870 |    -51.8% |
 
 [Back to Contents](#content)

@@ -1,4 +1,4 @@
-package tests
+package goent_test
 
 import (
 	"testing"

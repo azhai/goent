@@ -28,6 +28,7 @@ type TableInfo struct {
 	SchemaName   string              // SchemaName is the name of the schema in the database.
 	PrimaryKeys  []*Index            // PrimaryKeys is a list of primary key indexes.
 	Indexes      []*Index            // Indexes is a list of non-primary key indexes.
+	ColumnNames  []string            // ColumnNames is a list of column names in the table.
 	Columns      map[string]*Column  // Columns is a map of column names to Column metadata.
 	Foreigns     map[string]*Foreign // Foreigns is a map of foreign key column names to Foreign metadata.
 	Ignores      []string            // Ignores is a list of column names to ignore.
@@ -117,24 +118,6 @@ func (info TableInfo) GetPrimaryInfo() (int, string, []string) {
 //		fmt.Println(field.ColumnName)
 //	}
 func (info TableInfo) GetSortedFields() []*Field {
-	if info.sortedFields != nil {
-		return info.sortedFields
-	}
-	columns := make([]*Column, 0, len(info.Columns))
-	for _, col := range info.Columns {
-		columns = append(columns, col)
-	}
-	sort.Slice(columns, func(i, j int) bool {
-		return columns[i].FieldId < columns[j].FieldId
-	})
-	info.sortedFields = make([]*Field, len(columns))
-	for i, col := range columns {
-		info.sortedFields[i] = &Field{
-			TableAddr:  info.TableAddr,
-			ColumnName: col.ColumnName,
-			FieldId:    col.FieldId,
-		}
-	}
 	return info.sortedFields
 }
 
@@ -309,7 +292,13 @@ func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schem
 			tableName:    tableName,
 			schemaName:   &schema,
 		}
+		info.ColumnNames = append(info.ColumnNames, columnName)
 		info.Columns[columnName] = column
+		info.sortedFields = append(info.sortedFields, &Field{
+			TableAddr:  info.TableAddr,
+			ColumnName: columnName,
+			FieldId:    column.FieldId,
+		})
 
 		if strings.EqualFold(fieldOf.Name, "id") || utils.HasTagValue(geoTag, "pk") {
 			isAutoIncr := !utils.HasTagValue(geoTag, "not_incr") && strings.Contains(fieldOf.Type.Kind().String(), "int")

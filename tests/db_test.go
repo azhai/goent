@@ -1,4 +1,4 @@
-package tests_test
+package goent_test
 
 import (
 	"context"
@@ -240,7 +240,10 @@ type Database struct {
 	*goent.DB
 }
 
-var db *Database
+var (
+	db  *Database
+	env *utils.Environ
+)
 
 var mapDriver = map[string]func(dbDSN, logFile string) (*Database, error){
 	// "libpq":      SetupLibPq,
@@ -249,6 +252,10 @@ var mapDriver = map[string]func(dbDSN, logFile string) (*Database, error){
 	"postgresql": SetupPgx,
 	"sqlite":     SetupSqlite,
 	"sqlite3":    SetupSqlite,
+}
+
+func init() {
+	env = utils.NewEnvWithFile("../.env")
 }
 
 func TestMain(m *testing.M) {
@@ -270,7 +277,6 @@ func TestMain(m *testing.M) {
 }
 
 func Setup() (*Database, error) {
-	env := utils.NewEnvWithFile("../.env")
 	dbType := env.GetStr("GOE_DRIVER", "sqlite")
 	dbDSN := env.Get("GOE_DATABASE_DSN")
 	logFile := env.Get("GOE_LOG_FILE")
@@ -407,10 +413,7 @@ func TestRace(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			driver := os.Getenv("GOE_DRIVER")
-			if driver == "" {
-				driver = "sqlite"
-			}
+			driver := env.GetStr("GOE_DRIVER", "sqlite")
 			driver = strings.ToLower(driver)
 			var raceDb *Database
 			var err error
@@ -419,7 +422,7 @@ func TestRace(t *testing.T) {
 				raceDb, err = goent.Open[Database](sqlite.Open(filename, sqlite.NewConfig(
 					sqlite.Config{})), "")
 			} else {
-				dsn := os.Getenv("GOE_DATABASE_DSN")
+				dsn := env.Get("GOE_DATABASE_DSN")
 				if dsn == "" {
 					dsn = "user=postgres password=postgres host=localhost port=5432 database=postgres"
 				}
