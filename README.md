@@ -1422,31 +1422,6 @@ defer func() {
 sv.Commit() // commit save point
 ```
 
-## Benchmarks
-
-Source code of benchmarks can be find on [azhai/go-orm-benchmarks](https://github.com/azhai/go-orm-benchmarks) or [lauro-santana/go-orm-benchmarks](https://github.com/lauro-santana/go-orm-benchmarks). 
-
-```bash
-go run main.go -orm goe -operation all
-go run main.go -orm goent -operation all
-```
-
-### Benchmark on MacMini M4
-| Operation       | Package |     N | Avg ns/op | Avg B/op | Avg allocs/op |
-|-----------------|---------|------:|----------:|---------:|--------------:|
-| **insert**      | goe     | 14930 |     81200 |     2644 |            31 |
-|                 | goent   | 14835 |     84908 |     3402 |            67 |
-| **insert-bulk** | goe     |   174 |   9098946 |  5202188 |         28013 |
-|                 | goent   |   133 |   9688873 |  8752617 |         46120 |
-| **update**      | goe     | 14932 |     77634 |     2593 |            27 |
-|                 | goent   | 14541 |     83918 |     3423 |            63 |
-| **delete**      | goe     | 45292 |     26490 |     1051 |            15 |
-|                 | goent   |  1226 |   1543646 |     1398 |            34 |
-| **select-one**  | goe     | 41014 |     29327 |     3508 |            54 |
-|                 | goent   | 34629 |     33767 |     4340 |            85 |
-| **select-page** | goe     |  3415 |    341912 |    55400 |           870 |
-|                 | goent   |  3132 |    388181 |    83605 |          1722 |
-
 [Back to Contents](#content)
 
 ## Code Generation
@@ -1544,5 +1519,32 @@ users, err := db.User.Select().QueryRows(models.FetchUser())
 user := models.NewUser()
 rows.Scan(user.ScanFields()...)
 ```
+
+[Back to Contents](#content)
+
+## Benchmarks
+
+Source code of benchmarks can be find on [azhai/go-orm-benchmarks](https://github.com/azhai/go-orm-benchmarks) or [lauro-santana/go-orm-benchmarks](https://github.com/lauro-santana/go-orm-benchmarks). 
+
+```bash
+go run main.go -orm goe -operation all
+go run main.go -orm goent -operation all
+```
+
+### Benchmark on MacMini M4
+| Operation       | Package |     N | Avg ns/op | Avg B/op | Avg allocs/op |
+|-----------------|---------|------:|----------:|---------:|--------------:|
+| **insert**      | goe     | 14922 |     79575 |     2644 |            31 |
+|                 | goent   | 15036 |     80156 |     3014 |            58 |
+| **insert-bulk** | goe     |   181 |   7576239 |  5202183 |         28013 |
+|                 | goent   |   152 |  11665895 |  6859881 |         44068 |
+| **update**      | goe     | 15178 |     79464 |     2593 |            27 |
+|                 | goent   | 15165 |     80511 |     3037 |            54 |
+| **delete**      | goe     | 46515 |     25235 |     1051 |            15 |
+|                 | goent   |  1153 |   1204109 |     1076 |            26 |
+| **select-one**  | goe     | 41500 |     28608 |     3508 |            54 |
+|                 | goent   | 39538 |     29913 |     3680 |            72 |
+| **select-page** | goe     |  3598 |    331082 |    55400 |           870 |
+|                 | goent   |  3494 |    337809 |    59899 |          1140 |
 
 [Back to Contents](#content)
