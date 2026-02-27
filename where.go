@@ -5,21 +5,24 @@ import (
 	"reflect"
 )
 
-// Field represents a database field with its table reference and column name.
+// Field represents a database field with its table reference and column name
+// It is used to reference columns in queries and conditions
 type Field struct {
-	TableAddr  uintptr
-	FieldId    int
-	ColumnName string
-	AliasName  string
-	Function   string
+	TableAddr  uintptr // Table address for table identification
+	FieldId    int     // Field ID for quick lookup
+	ColumnName string  // Database column name
+	AliasName  string  // Alias name for the field
+	Function   string  // SQL function to apply to the field
 }
 
-// SameTable checks if two fields belong to the same table.
+// SameTable checks if two fields belong to the same table
+// It compares the TableAddr of both fields
 func SameTable(field, another *Field) bool {
 	return field.TableAddr == another.TableAddr
 }
 
-// Func applies a SQL function to the field (e.g., "UPPER", "LOWER", "COUNT").
+// Func applies a SQL function to the field (e.g., "UPPER", "LOWER", "COUNT")
+// It sets the function to be applied when the field is used in queries
 //
 // Example:
 //
@@ -30,7 +33,8 @@ func (f *Field) Func(name string) *Field {
 	return f
 }
 
-// GetFid returns the field ID, resolving it from the table metadata if needed.
+// GetFid returns the field ID, resolving it from the table metadata if needed
+// It looks up the field ID from the table registry if not already set
 func (f *Field) GetFid() int {
 	if f.FieldId < 0 && f.ColumnName != "*" {
 		if col := GetTableColumn(f.TableAddr, f.ColumnName); col != nil {
@@ -40,8 +44,8 @@ func (f *Field) GetFid() int {
 	return f.FieldId
 }
 
-// Simple returns the column name with any SQL function applied.
-// It does not include the table name.
+// Simple returns the column name with any SQL function applied
+// It does not include the table name
 func (f *Field) Simple() string {
 	if f.Function != "" {
 		return fmt.Sprintf(f.Function, f.ColumnName)
@@ -49,7 +53,8 @@ func (f *Field) Simple() string {
 	return f.ColumnName
 }
 
-// String returns the qualified field name (table.column) with any SQL function applied.
+// String returns the qualified field name (table.column) with any SQL function applied
+// It includes the table name for unambiguous reference
 func (f *Field) String() string {
 	res, err := GetFieldName(f.TableAddr, f.ColumnName)
 	if err != nil {
@@ -61,15 +66,16 @@ func (f *Field) String() string {
 	return res
 }
 
-// Value represents a value or list of values for use in query conditions.
+// Value represents a value or list of values for use in query conditions
+// It handles both single values and slices for IN conditions
 type Value struct {
-	Type   reflect.Kind
-	Args   []any
-	Length int
+	Type   reflect.Kind // Type of the value
+	Args   []any        // Slice of values for IN conditions
+	Length int          // Length of the value slice
 }
 
-// NewValue creates a new Value from a Go value.
-// It handles both single values and slices.
+// NewValue creates a new Value from a Go value
+// It handles both single values and slices
 //
 // Example:
 //
@@ -92,19 +98,22 @@ func NewValue(value any) *Value {
 	}
 }
 
-// Condition represents a SQL WHERE condition with a template and associated fields/values.
+// Condition represents a SQL WHERE condition with a template and associated fields/values
+// It is used to build WHERE clauses in queries
 type Condition struct {
-	Template string
-	Fields   []*Field
-	Values   []*Value
+	Template string   // SQL template with placeholders
+	Fields   []*Field // Fields referenced in the condition
+	Values   []*Value // Values to bind to the placeholders
 }
 
-// IsEmpty returns true if the condition has no template (is empty).
+// IsEmpty returns true if the condition has no template (is empty)
+// It checks if the condition is effectively empty
 func (c Condition) IsEmpty() bool {
 	return c.Template == ""
 }
 
-// Expr creates a condition with a custom template and associated values.
+// Expr creates a condition with a custom template and associated values
+// It allows for raw SQL conditions with placeholders
 //
 // Example:
 //
@@ -123,7 +132,10 @@ func Expr(where string, args ...any) Condition {
 	return Condition{Template: where, Values: values}
 }
 
-// And Example
+// And combines multiple conditions with AND logic
+// It creates a compound condition where all branches must be true
+//
+// Example:
 //
 //	goent.And(
 //		goent.Equals(db.Animal.Field("status"), "Eating"),
@@ -156,7 +168,10 @@ func And(branches ...Condition) Condition {
 	return res
 }
 
-// Or Example
+// Or combines multiple conditions with OR logic
+// It creates a compound condition where at least one branch must be true
+//
+// Example:
 //
 //	goent.Or(
 //		goent.Equals(db.Animal.Field("status"), "Eating"),
@@ -186,7 +201,8 @@ func Or(branches ...Condition) Condition {
 	return res
 }
 
-// Not creates a condition that negates another condition.
+// Not creates a condition that negates another condition
+// It wraps the condition in a NOT clause
 //
 // Example:
 //
@@ -195,7 +211,8 @@ func Not(cond Condition) Condition {
 	return Condition{Template: fmt.Sprintf("NOT (%s)", cond.Template), Fields: cond.Fields, Values: cond.Values}
 }
 
-// IsNull creates a condition that checks if a field is NULL.
+// IsNull creates a condition that checks if a field is NULL
+// It generates an IS NULL clause for the field
 //
 // Example:
 //
@@ -204,7 +221,8 @@ func IsNull(left *Field) Condition {
 	return Condition{Template: "%s IS NULL", Fields: []*Field{left}, Values: []*Value{}}
 }
 
-// IsNotNull creates a condition that checks if a field is NOT NULL.
+// IsNotNull creates a condition that checks if a field is NOT NULL
+// It generates an IS NOT NULL clause for the field
 //
 // Example:
 //
@@ -213,9 +231,11 @@ func IsNotNull(left *Field) Condition {
 	return Condition{Template: "%s IS NOT NULL", Fields: []*Field{left}, Values: []*Value{}}
 }
 
-// Equals creates a condition that checks if a field is equal to a value.
+// Equals creates a condition that checks if a field is equal to a value
+// It generates an equality check, handling NULL values appropriately
 //
-//	Example: using Table with field name
+// Example: using Table with field name
+//
 //	goent.Equals(db.OrderDetail.Field("order_id"), 1)
 func Equals(left *Field, value any) Condition {
 	right := NewValue(value)
@@ -226,11 +246,14 @@ func Equals(left *Field, value any) Condition {
 	}
 }
 
+// EqualsField creates a condition that checks if one field is equal to another
+// It generates an equality check between two fields
 func EqualsField(left, right *Field) Condition {
 	return Condition{Template: "%s = %s", Fields: []*Field{left, right}}
 }
 
-// NotEquals creates a condition that checks if a field is not equal to a value.
+// NotEquals creates a condition that checks if a field is not equal to a value
+// It generates an inequality check, handling NULL values appropriately
 //
 // Example:
 //
@@ -245,11 +268,14 @@ func NotEquals(left *Field, value any) Condition {
 	return cond
 }
 
+// NotEqualsField creates a condition that checks if one field is not equal to another
+// It generates an inequality check between two fields
 func NotEqualsField(left, right *Field) Condition {
 	return Condition{Template: "%s != %s", Fields: []*Field{left, right}}
 }
 
-// EqualsMap creates a condition that checks if a field equals multiple values (from a map).
+// EqualsMap creates a condition that checks if multiple fields equal specified values
+// It generates AND conditions for each key-value pair in the map
 //
 // Example:
 //
@@ -267,7 +293,10 @@ func EqualsMap(left *Field, data map[string]any) Condition {
 	return And(branches...)
 }
 
-// Greater Example
+// Greater creates a condition that checks if a field is greater than a value
+// It generates a greater than comparison
+//
+// Example:
 //
 //	// get all animals that was created after this year
 //	thisYear, _ := time.Parse(time.RFC3339, "2026-01-01T00:00:00Z08:00")
@@ -276,11 +305,16 @@ func Greater(left *Field, value any) Condition {
 	return Condition{Template: "%s > ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }
 
+// GreaterField creates a condition that checks if one field is greater than another
+// It generates a greater than comparison between two fields
 func GreaterField(left, right *Field) Condition {
 	return Condition{Template: "%s > %s", Fields: []*Field{left, right}, Values: []*Value{}}
 }
 
-// GreaterEquals Example
+// GreaterEquals creates a condition that checks if a field is greater than or equal to a value
+// It generates a greater than or equal comparison
+//
+// Example:
 //
 //	// get all animals that was created in or after this year
 //	Filter(goent.GreaterEquals(db.Animal.Field("create_at"), time.Parse(time.DateOnly, "2026-01-01")))
@@ -288,12 +322,14 @@ func GreaterEquals(left *Field, value any) Condition {
 	return Condition{Template: "%s >= ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }
 
-// GreaterEqualsField creates a condition that checks if one field is greater than or equal to another.
+// GreaterEqualsField creates a condition that checks if one field is greater than or equal to another
+// It generates a greater than or equal comparison between two fields
 func GreaterEqualsField(left, right *Field) Condition {
 	return Condition{Template: "%s >= %s", Fields: []*Field{left, right}, Values: []*Value{}}
 }
 
-// Less creates a condition that checks if a field is less than a value.
+// Less creates a condition that checks if a field is less than a value
+// It generates a less than comparison
 //
 // Example: get all animals that was updated before this year
 //
@@ -302,12 +338,14 @@ func Less(left *Field, value any) Condition {
 	return Condition{Template: "%s < ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }
 
-// LessField creates a condition that checks if one field is less than another.
+// LessField creates a condition that checks if one field is less than another
+// It generates a less than comparison between two fields
 func LessField(left, right *Field) Condition {
 	return Condition{Template: "%s < %s", Fields: []*Field{left, right}, Values: []*Value{}}
 }
 
-// LessEquals creates a condition that checks if a field is less than or equal to a value.
+// LessEquals creates a condition that checks if a field is less than or equal to a value
+// It generates a less than or equal comparison
 //
 // Example: get all animals that was updated in or before this year
 //
@@ -316,12 +354,14 @@ func LessEquals(left *Field, value any) Condition {
 	return Condition{Template: "%s <= ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }
 
-// LessEqualsField creates a condition that checks if one field is less than or equal to another.
+// LessEqualsField creates a condition that checks if one field is less than or equal to another
+// It generates a less than or equal comparison between two fields
 func LessEqualsField(left, right *Field) Condition {
 	return Condition{Template: "%s <= %s", Fields: []*Field{left, right}, Values: []*Value{}}
 }
 
-// In creates a condition that checks if a field value is in a list of values.
+// In creates a condition that checks if a field value is in a list of values
+// It generates an IN clause for the field
 func In(left *Field, value any) Condition {
 	right := NewValue(value)
 	if right.Length <= 1 {
@@ -330,7 +370,8 @@ func In(left *Field, value any) Condition {
 	return Condition{Template: "%s IN ?", Fields: []*Field{left}, Values: []*Value{right}}
 }
 
-// NotIn creates a condition that checks if a field value is not in a list of values.
+// NotIn creates a condition that checks if a field value is not in a list of values
+// It generates a NOT IN clause for the field
 func NotIn(left *Field, value any) Condition {
 	right := NewValue(value)
 	if right.Length <= 1 {
@@ -339,7 +380,8 @@ func NotIn(left *Field, value any) Condition {
 	return Condition{Template: "%s NOT IN ?", Fields: []*Field{left}, Values: []*Value{right}}
 }
 
-// Like creates a condition that checks if a field matches a LIKE pattern.
+// Like creates a condition that checks if a field matches a LIKE pattern
+// It generates a LIKE clause for pattern matching
 //
 // Example: get all animals that has a "at" in his name
 //
@@ -348,17 +390,20 @@ func Like(left *Field, value string) Condition {
 	return Condition{Template: "%s LIKE ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }
 
-// NotLike creates a condition that checks if a field does not match a LIKE pattern.
+// NotLike creates a condition that checks if a field does not match a LIKE pattern
+// It generates a NOT LIKE clause for pattern matching
 func NotLike(left *Field, value string) Condition {
 	return Condition{Template: "%s NOT LIKE ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }
 
-// ILike creates a case-insensitive LIKE condition.
+// ILike creates a case-insensitive LIKE condition
+// It generates an ILIKE clause for case-insensitive pattern matching
 func ILike(left *Field, value string) Condition {
 	return Condition{Template: "%s ILIKE ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }
 
-// NotILike creates a case-insensitive NOT LIKE condition.
+// NotILike creates a case-insensitive NOT LIKE condition
+// It generates a NOT ILIKE clause for case-insensitive pattern matching
 func NotILike(left *Field, value string) Condition {
 	return Condition{Template: "%s NOT ILIKE ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }

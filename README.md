@@ -12,7 +12,7 @@ GO Entity or just "GoEnt" is an easy-to-use ORM for Go
 - go v1.26 or above
 
 ## Real world examples
-GoEnt has [examples](https://github.com/azhai/goent/tree/main/examples) of queries and integrations, if you think in a nice example and wanted to see if GoEnt can handler, just try out.
+GoEnt has [examples](https://github.com/azhai/goent/tree/main/examples) of queries and integrations, if you have a nice example and want to see if GoEnt can handle it, just try out.
 
 Common examples are:
 
@@ -20,20 +20,20 @@ Common examples are:
 - Where GoEnt key features can shine;
 
 ## Features
-Check out the [Benchmarks](#benchmarks) section for a overview on GoEnt performance compared to other packages like, ent, GORM, sqlc, and others.
+Check out the [Benchmarks](#benchmarks) section for an overview of GoEnt performance compared to other packages like ent, GORM, sqlc, and others.
 
 - 🔖 Type Safety;
-	- get errors on compile time
+	- Get errors at compile time
 - 📦 Auto Migrations;
-	- automatic generate tables from your structs
+	- Automatically generate tables from your structs
 - 📄 SQL Like queries; 
-	- use Go code to write queries with well known functions
+	- Use Go code to write queries with well-known functions
 - 🗂️ Iterator
-	- range over function to iterate over the rows
+	- Range over function to iterate over rows
 - 📚 Pagination
-	- paginate your large selects with just a function call
+	- Paginate your large selects with just a function call
 - ♻️ Wrappers
-	- wrappers for simple queries and builders for complex ones
+	- Wrappers for simple queries and builders for complex ones
 
 
 ## Content
@@ -99,7 +99,7 @@ Check out the [Benchmarks](#benchmarks) section for a overview on GoEnt performa
 ```
 go get github.com/azhai/goent
 ```
-As any database/sql support in go, you have to get a specific driver for your database, check [Available Drivers](#available-drivers)
+As with any database/sql support in Go, you have to get a specific driver for your database. Check [Available Drivers](#available-drivers)
 
 ## Available Drivers
 * PostgreSQL
@@ -228,9 +228,9 @@ type Database struct {
 	*goent.DB
 }
 ```
-In goe, it's necessary to define a Database struct,
-this struct implements *goent.DB and a pointer to all
-the structs that's it's to be mappend.
+In GoEnt, it's necessary to define a Database struct,
+this struct implements *goent.DB and pointers to all
+the structs that are to be mapped.
 
 It's through the Database struct that you will
 interact with your database.
@@ -257,7 +257,7 @@ type User struct {
 }
 ```
 > [!NOTE] 
-> By default the field "ID" is primary key and all ids of integers are auto increment.
+> By default, the field "ID" is the primary key and all integer IDs are auto-incrementing.
 
 [Back to Contents](#content)
 ### Table Name Resolution
@@ -310,8 +310,7 @@ type User struct {
 	Password	string
 }
 ```
-In case you want to specify 
-a primary key use the tag value "pk".
+If you want to specify a primary key, use the tag value "pk".
 
 #### Composite Primary Key
 ```go
@@ -321,7 +320,7 @@ type OrderDetail struct {
 	Quantity  int
 }
 ```
-Use multiple `pk` tags to create a composite primary key. Add `not_incr` to prevent auto-increment on primary key columns.
+Use multiple `pk` tags to create a composite primary key. Add `not_incr` to prevent auto-incrementing on primary key columns.
 
 #### Non-Auto-Increment Primary Key
 ```go
@@ -330,7 +329,7 @@ type User struct {
 	Name string
 }
 ```
-Use `not_incr` tag to prevent auto-increment behavior on primary key columns. This is useful for UUID or string primary keys.
+Use the `not_incr` tag to prevent auto-incrementing behavior on primary key columns. This is useful for UUID or string primary keys.
 
 [Back to Contents](#content)
 ### Setting type
@@ -372,14 +371,14 @@ type User struct {
 }
 ```
 
-A default value is used when the field is inserted with no value.
+A default value is used when the field is inserted without a value.
 
 ```go
 // CreatedAt will have the default value
 err = db.User.Insert().One(&User{Name: "Rose"})
 
 if err != nil {
-	// handler error
+	// Handle error
 }
 ```
 
@@ -407,7 +406,7 @@ err = db.Default.Insert().One(d)
 // d.ID == "Default" (set from default value)
 
 if err != nil {
-	// handler error
+	// Handle error
 }
 ```
 
@@ -697,7 +696,7 @@ dsn := "user=postgres password=postgres host=localhost port=5432 database=postgr
 db, err := facade.QuickOpen[Database]("pgsql", dsn, "")
 
 if err != nil {
-	// handler error
+	// Handle error
 }
 ```
 
@@ -712,7 +711,7 @@ To auto migrate the structs, use the `goent.AutoMigrate(db)` passing the databas
 // migrate all database structs
 err = goent.AutoMigrate(db)
 if err != nil {
-	// handler error
+	// Handle error
 }
 ```
 [Back to Contents](#content)
@@ -731,22 +730,22 @@ type Database struct {
 
 err = goent.AutoMigrate(db).OnTable("Select").RenameColumn("Name", "NewName")
 if err != nil {
-	// handler error
+	// Handle error
 }
 
 err = goent.AutoMigrate(db).OnTable("Select").DropColumn("NewName")
 if err != nil {
-	// handler error
+	// Handle error
 }
 
 err = goent.AutoMigrate(db).OnTable("Select").RenameTable("NewSelect")
 if err != nil {
-	// handler error
+	// Handle error
 }
 
 err = goent.AutoMigrate(db).OnTable("NewSelect").DropTable()
 if err != nil {
-	// handler error
+	// Handle error
 }
 ```
 [Back to Contents](#content)
@@ -760,13 +759,13 @@ db, err := goent.Open[Database](sqlite.Open("goent.db", sqlite.Config{
 	MigratePath: "migrate/",
 }))
 if err != nil {
-	// handler error
+	// Handle error
 }
 
 // AutoMigrate will output the result as a sql file, and not auto apply the migration
 err = goent.AutoMigrate(db)
 if err != nil {
-	// handler error
+	// Handle error
 }
 ```
 
@@ -1362,7 +1361,7 @@ Setup the transaction with the database function `db.NewTransaction()`
 ```go
 tx, err = db.NewTransaction()
 if err != nil {
-	// handler error
+	// Handle error
 }
 
 defer func() {
@@ -1511,12 +1510,17 @@ Generated code is **15-27x faster** than reflection with **zero memory allocatio
 
 ### Using Generated Code
 
+GoEnt automatically uses generated `ScanFields()` methods when available, providing significant performance improvements without requiring manual changes to your code.
+
 ```go
-// Use generated FetchFunc with Select
+// Automatic usage - no changes needed!
+users, err := db.User.Select().All()
+
+// Manual usage with FetchFunc
 query := db.User.Select()
 for user, err := range query.IterRows(models.FetchUser()) {
 	if err != nil {
-		// handler error
+		// Handle error
 	}
 	fmt.Printf("%+v\n", user)
 }
@@ -1530,7 +1534,7 @@ rows.Scan(user.ScanFields()...)
 
 ## Benchmarks
 
- original repo [lauro-santana/go-orm-benchmarks](https://github.com/lauro-santana/go-orm-benchmarks). 
+ Insprire from [lauro-santana/go-orm-benchmarks](https://github.com/lauro-santana/go-orm-benchmarks). 
 
 ```bash
 cd tests/benchmark/run/

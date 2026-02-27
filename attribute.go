@@ -7,41 +7,47 @@ import (
 	"github.com/azhai/goent/utils"
 )
 
-// attributeStrings holds common attribute information for database columns and relations.
+// attributeStrings holds common attribute information for database columns and relations
+// It contains basic metadata about database attributes
 type attributeStrings struct {
-	db            *DB
-	schemaName    *string
-	tableId       int
-	tableName     string
-	attributeName string
-	fieldId       int
+	db            *DB     // Database connection
+	schemaName    *string // Schema name
+	tableId       int     // Table ID
+	tableName     string  // Table name
+	attributeName string  // Attribute name
+	fieldId       int     // Field ID
 }
 
-// pk represents a primary key attribute.
+// pk represents a primary key attribute
+// It extends attributeStrings with auto-increment information
 type pk struct {
-	autoIncrement bool
-	attributeStrings
+	autoIncrement    bool // Whether the primary key is auto-incrementing
+	attributeStrings      // Embedded attribute strings
 }
 
-// att represents a regular column attribute.
+// att represents a regular column attribute
+// It extends attributeStrings with default value information
 type att struct {
-	isDefault bool
-	attributeStrings
+	isDefault        bool // Whether the column has a default value
+	attributeStrings      // Embedded attribute strings
 }
 
-// ManyToSomeRelation represents a many-to-one or many-to-many relationship between tables.
+// ManyToSomeRelation represents a many-to-one or many-to-many relationship between tables
+// It extends attributeStrings with relationship-specific information
 type ManyToSomeRelation struct {
-	IsDefault bool
-	attributeStrings
+	IsDefault        bool // Whether the relationship is the default one
+	attributeStrings      // Embedded attribute strings
 }
 
-// OneToSomeRelation represents a one-to-one or one-to-many relationship between tables.
+// OneToSomeRelation represents a one-to-one or one-to-many relationship between tables
+// It extends attributeStrings with relationship-specific information
 type OneToSomeRelation struct {
-	IsOneToMany bool
-	attributeStrings
+	IsOneToMany      bool // Whether the relationship is one-to-many
+	attributeStrings      // Embedded attribute strings
 }
 
-// createAttributeStrings creates an attributeStrings struct with the given parameters.
+// createAttributeStrings creates an attributeStrings struct with the given parameters
+// It handles keyword escaping and name formatting
 func createAttributeStrings(db *DB, schema *string, table string, attributeName string, tableId, fieldId int, Driver model.Driver) attributeStrings {
 	name := Driver.KeywordHandler(utils.ToSnakeCase(attributeName))
 	return attributeStrings{
@@ -59,14 +65,15 @@ func createAttributeStrings(db *DB, schema *string, table string, attributeName 
 // 	return pk{attributeStrings: attStr, autoIncrement: isAutoIncr}
 // }
 
-// createAttFromColumn creates an att struct from a Column.
+// createAttFromColumn creates an att struct from a Column
+// It converts a Column object to an att attribute
 func createAttFromColumn(db *DB, col *Column, tableId int) att {
 	attStr := createAttributeStrings(db, col.schemaName, col.tableName, col.FieldName, tableId, col.FieldId, db.driver)
 	return att{attributeStrings: attStr, isDefault: col.HasDefault}
 }
 
-// createManyToSome creates a ManyToSomeRelation from the given body and type.
-// It returns nil if no matching primary key is found.
+// createManyToSome creates a ManyToSomeRelation from the given body and type
+// It returns nil if no matching primary key is found
 func createManyToSome(b body, typeOf reflect.Type) any {
 	rel := ManyToSomeRelation{}
 	targetPks := getPksFromType(typeOf)
@@ -93,8 +100,8 @@ func createManyToSome(b body, typeOf reflect.Type) any {
 	return rel
 }
 
-// createOneToSome creates a OneToSomeRelation from the given body and type.
-// It returns nil if no matching primary key is found.
+// createOneToSome creates a OneToSomeRelation from the given body and type
+// It returns nil if no matching primary key is found
 func createOneToSome(b body, typeOf reflect.Type) any {
 	rel := OneToSomeRelation{}
 	targetPks := getPksFromType(typeOf)
@@ -121,7 +128,8 @@ func createOneToSome(b body, typeOf reflect.Type) any {
 	return rel
 }
 
-// newAttr creates a new attribute from the body.
+// newAttr creates a new attribute from the body
+// It creates a Column and converts it to an att attribute
 func newAttr(b body) error {
 	createAttFromColumn(b.mapp.db, &Column{
 		ColumnName: utils.ToSnakeCase(b.fieldName),
@@ -131,7 +139,8 @@ func newAttr(b body) error {
 	return nil
 }
 
-// getPksFromType returns the primary key fields from the given type.
+// getPksFromType returns the primary key fields from the given type
+// It looks for fields with pk tags or the TableName method
 func getPksFromType(typeOf reflect.Type) []reflect.StructField {
 	field, exists := utils.GetTableID(typeOf)
 	if exists {

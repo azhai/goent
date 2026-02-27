@@ -17,33 +17,33 @@ const (
 	M2M             // many-to-many
 )
 
-// ForeignType represents the type of foreign key relationship.
-// Values: O2O (one-to-one), O2M (one-to-many), M2O (many-to-one), M2M (many-to-many).
+// ForeignType represents the type of foreign key relationship
+// Values: O2O (one-to-one), O2M (one-to-many), M2O (many-to-one), M2M (many-to-many)
 type ForeignType uint
 
-// ThirdParty represents an intermediate junction table for many-to-many relationships.
-// It contains the table name and the left/right column mappings.
+// ThirdParty represents an intermediate junction table for many-to-many relationships
+// It contains the table name and the left/right column mappings
 type ThirdParty struct {
-	Table       string
-	Left, Right string
-	Where       Condition
+	Table       string    // Junction table name
+	Left, Right string    // Left and right column names
+	Where       Condition // WHERE clause for filtering
 }
 
-// Foreign represents a foreign key relationship between two tables.
+// Foreign represents a foreign key relationship between two tables
 // It contains the relationship type, mounting field, foreign key column,
-// reference field, and optional middle table for many-to-many relationships.
+// reference field, and optional middle table for many-to-many relationships
 type Foreign struct {
-	Type       ForeignType
-	MountField string
-	ForeignKey string
-	Reference  *Field
-	Middle     *ThirdParty
-	Where      Condition
+	Type       ForeignType // Type of foreign key relationship
+	MountField string      // Field name where the related object is mounted
+	ForeignKey string      // Foreign key column name
+	Reference  *Field      // Reference field in the related table
+	Middle     *ThirdParty // Intermediate table for many-to-many relationships
+	Where      Condition   // WHERE clause for filtering
 }
 
-// GetForeign retrieves the foreign key relationship between two tables.
-// It searches by table name first, then by table address.
-// Returns nil if no foreign key relationship is found.
+// GetForeign retrieves the foreign key relationship between two tables
+// It searches by table name first, then by table address
+// Returns nil if no foreign key relationship is found
 //
 // Example:
 //
@@ -65,9 +65,9 @@ func GetForeign[T, R any](table *Table[T], refer *Table[R]) *Foreign {
 	return nil
 }
 
-// QueryForeign queries and populates related records for a foreign key relationship.
-// It automatically determines the relationship type and calls the appropriate query method.
-// Returns nil if no foreign key relationship is found.
+// QueryForeign queries and populates related records for a foreign key relationship
+// It automatically determines the relationship type and calls the appropriate query method
+// Returns nil if no foreign key relationship is found
 //
 // Example:
 //
@@ -101,8 +101,8 @@ func QueryForeign[T, R any](table *Table[T], refer *Table[R]) error {
 	}
 }
 
-// QuerySome2One queries and populates many-to-one or one-to-one relationships.
-// It returns a map of foreign key IDs to referenced records.
+// QuerySome2One queries and populates many-to-one or one-to-one relationships
+// It returns a map of foreign key IDs to referenced records
 //
 // Example:
 //
@@ -147,8 +147,8 @@ func QuerySome2One[T, R any](foreign *Foreign, table *Table[T], refer *Table[R])
 	return data, err
 }
 
-// QueryOne2Many queries and populates one-to-many relationships.
-// It returns a map of parent IDs to slices of child records.
+// QueryOne2Many queries and populates one-to-many relationships
+// It returns a map of parent IDs to slices of child records
 //
 // Example:
 //
@@ -190,9 +190,9 @@ func QueryOne2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R])
 	return data, err
 }
 
-// QueryMany2Many queries and populates many-to-many relationships.
-// It uses the middle table to establish the relationship between two tables.
-// Returns a map of left-side IDs to right-side records.
+// QueryMany2Many queries and populates many-to-many relationships
+// It uses the middle table to establish the relationship between two tables
+// Returns a map of left-side IDs to right-side records
 //
 // Example:
 //
@@ -256,8 +256,8 @@ func QueryMany2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R]
 	return data, err
 }
 
-// QueryMiddleTable queries the middle junction table for many-to-many relationships.
-// It returns a map of left-side IDs to slices of right-side IDs.
+// QueryMiddleTable queries the middle junction table for many-to-many relationships
+// It returns a map of left-side IDs to slices of right-side IDs
 //
 // Example:
 //

@@ -9,6 +9,8 @@ import (
 	"golang.org/x/text/language"
 )
 
+// TitleCase converts a string to title case
+// It capitalizes the first letter of each word
 func TitleCase(word string) string {
 	caser := cases.Title(language.Und)
 	return caser.String(word)
@@ -20,7 +22,9 @@ func TitleCase(word string) string {
 	// return string(runes)
 }
 
-// ParseTableNameByValue parse table name by value
+// ParseTableNameByValue parses table name by value
+// If method TableName is found, return its value
+// Otherwise, parse table name by type name
 func ParseTableNameByValue(valueOf reflect.Value) string {
 	if tableName := TableNameMethod(valueOf); tableName != "" {
 		return tableName
@@ -73,7 +77,8 @@ func ParseTableNameByValue(valueOf reflect.Value) string {
 	return TableNamePattern(typeName)
 }
 
-// ParseTableNameByType parse table name by type
+// ParseTableNameByType parses table name by type
+// It uses the TableName method if available, otherwise uses the type name
 func ParseTableNameByType(typeOf reflect.Type) string {
 	valueOf := reflect.New(typeOf)
 	if tableName := TableNameMethod(valueOf); tableName != "" {
@@ -82,8 +87,8 @@ func ParseTableNameByType(typeOf reflect.Type) string {
 	return TableNamePattern(typeOf.Name())
 }
 
-// TableNameMethod try to get table name from method TableNames
-// If method TableNames is not found, return empty string
+// TableNameMethod tries to get table name from method TableName
+// If method TableName is not found, return empty string
 func TableNameMethod(valueOf reflect.Value) string {
 	method := valueOf.MethodByName("TableName")
 	if method.IsValid() && method.Type().NumIn() == 0 && method.Type().NumOut() == 1 {
@@ -93,6 +98,7 @@ func TableNameMethod(valueOf reflect.Value) string {
 }
 
 // TableNamePattern is the default name patterning for mapping struct to table
+// It converts the name to snake_case format
 func TableNamePattern(name string) string {
 	if len(name) == 0 {
 		return name
@@ -101,7 +107,8 @@ func TableNamePattern(name string) string {
 	return name
 }
 
-// ToSnakeCase convert camelCase or PascalCase to snake_case
+// ToSnakeCase converts camelCase or PascalCase to snake_case
+// It inserts underscores before uppercase letters based on context
 func ToSnakeCase(name string) string {
 	if len(name) == 0 {
 		return name
@@ -127,6 +134,8 @@ func ToSnakeCase(name string) string {
 	return result.String()
 }
 
+// HasTagValue checks if tag has key value
+// It returns true if the tag contains the specified key
 func HasTagValue(tag string, key string) bool {
 	return strings.Contains(";"+tag+";", ";"+key+";")
 	// values := strings.Split(tag, ";")
@@ -138,6 +147,8 @@ func HasTagValue(tag string, key string) bool {
 	// return false
 }
 
+// GetTagValue gets tag value by key
+// It returns the value and a boolean indicating if the key was found
 func GetTagValue(tag string, key string) (string, bool) {
 	pieces := strings.SplitN(";"+tag+";", ";"+key+":", 2)
 	if len(pieces) < 2 {
@@ -162,22 +173,9 @@ func ParseSchemaTag(tag string) (schema, prefix string) {
 	return schema, prefix
 }
 
-// IsFieldHasSchema check if field has schema tag or schema suffix
-func IsFieldHasSchema(valueOf reflect.Value, i int) bool {
-	goeTag := valueOf.Type().Field(i).Tag.Get("goe")
-	if HasTagValue(goeTag, "schema") {
-		return true
-	}
-	field := valueOf.Field(i)
-	if field.Kind() == reflect.Pointer && !field.IsNil() {
-		field = field.Elem()
-	}
-	if field.Kind() == reflect.Struct {
-		return strings.HasSuffix(field.Type().Name(), "Schema")
-	}
-	return false
-}
-
+// GetElemValue returns the element value of a pointer
+// If the value is a non-nil pointer, it returns the element
+// Otherwise, it returns the value itself
 func GetElemValue(valueOf reflect.Value) reflect.Value {
 	if valueOf.Kind() == reflect.Pointer && !valueOf.IsNil() {
 		return valueOf.Elem()
@@ -185,6 +183,9 @@ func GetElemValue(valueOf reflect.Value) reflect.Value {
 	return valueOf
 }
 
+// GetElemType returns the element type of a pointer
+// If the value is a pointer, it returns the element type
+// Otherwise, it returns the type itself
 func GetElemType(valueOf reflect.Value) reflect.Type {
 	typeOf := valueOf.Type()
 	if valueOf.Kind() == reflect.Pointer && valueOf.IsNil() {
@@ -196,6 +197,8 @@ func GetElemType(valueOf reflect.Value) reflect.Type {
 	return typeOf
 }
 
+// GetFieldNames returns a slice of field names for the given struct type.
+// It only includes exported fields.
 func GetFieldNames(typeOf reflect.Type) (names []string) {
 	if typeOf.Kind() != reflect.Struct {
 		return names
@@ -206,6 +209,8 @@ func GetFieldNames(typeOf reflect.Type) (names []string) {
 	return
 }
 
+// IsTableModel checks if the given field is a table model.
+// A table model is a struct type that has a field named "Model" of type *T.
 func IsTableModel(fieldOf reflect.Value) bool {
 	if !fieldOf.IsValid() {
 		return false
@@ -217,6 +222,9 @@ func IsTableModel(fieldOf reflect.Value) bool {
 	return strings.HasPrefix(typ.Name(), "Table")
 }
 
+// GetTableModel returns the "Model" field of the given table model field.
+// If the field is not a table model, or if the "Model" field does not exist,
+// it returns an invalid reflect.Value.
 func GetTableModel(fieldOf reflect.Value) reflect.Value {
 	if !fieldOf.IsValid() {
 		return reflect.Value{}
@@ -230,6 +238,8 @@ func GetTableModel(fieldOf reflect.Value) reflect.Value {
 	return reflect.Value{}
 }
 
+// GetTableID returns the struct field with the name "ID" in the given table model type.
+// If no such field exists, it returns an empty StructField and false.
 func GetTableID(typeOf reflect.Type) (reflect.StructField, bool) {
 	if typeOf.Kind() != reflect.Struct {
 		return reflect.StructField{}, false

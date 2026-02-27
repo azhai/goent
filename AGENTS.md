@@ -7,7 +7,7 @@ GoEnt is a type-safe ORM library for Go. This document provides guidance for dev
 GoEnt provides a type-safe ORM with the following key features:
 - Non-string query building using Go code
 - Type safety with compile-time errors
-- Auto migrations from struct definitions
+- Auto-migrations from struct definitions
 - SQL-like queries using Go functions
 - Iterator support for row iteration
 - Pagination support
@@ -55,8 +55,8 @@ The `Builder` struct in `builder.go` is the core of query construction:
 - `Where`: WHERE conditions
 - `Changes`: SET clause for UPDATE
 - `Joins`: JOIN clauses
-- `Orders`: ORDERBY clauses
-- `Groups`: GROUPBY clauses
+- `Orders`: ORDER BY clauses
+- `Groups`: GROUP BY clauses
 - `Limit`, `Offset`: Pagination
 - `Returning`: RETURNING clause for INSERT
 
@@ -210,7 +210,7 @@ Drivers must implement the `model.Driver` interface:
 Tables are auto-migrated from struct definitions:
 1. `AutoMigrate` scans registered tables
 2. `migrateFrom` builds `TableMigrate` structures
-3. Driver's `MigrateContext` generates and executes SQL
+3. The driver's `MigrateContext` generates and executes SQL
 
 Foreign keys are detected from:
 - `m2o` tag for many-to-one relationships
@@ -233,11 +233,11 @@ This approach:
 ### Foreign Key Auto-Generation
 
 Foreign keys are automatically generated for relationship fields:
-- `o2o` tag: Creates a one-to-one relationship with unique constraint
+- `o2o` tag: Creates a one-to-one relationship with a unique constraint
 - `m2o` tag: Creates a foreign key column pointing to the parent table
 - `o2m` tag: Creates a foreign key column in the child table
 - `m2m` tag: Creates a junction table with foreign keys to both sides
-- Field naming convention: `CategoryID` automatically links to `Category` table
+- Field naming convention: `CategoryID` automatically links to the `Category` table
 - The foreign key column is added in the correct position to preserve field order
 
 ### Schema Organization
@@ -332,6 +332,7 @@ db.Default.Insert().One(&d)
 9. **LeftJoin auto-selects joined table columns** - No need to manually specify columns
 10. **Slice foreign fields are skipped in LeftJoin** - Use standard `Join` for slice relationships
 11. **Use code generator for best performance** - Generated code is 15-27x faster than reflection
+12. **Automatic use of generated code** - GoEnt automatically uses generated `ScanFields()` methods when available, providing performance improvements without manual changes
 
 ## Common Tasks
 

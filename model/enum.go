@@ -1,6 +1,8 @@
 package model
 
-// QueryType represents the type of a SQL query.
+// QueryType represents the type of a SQL query
+// It defines the different types of SQL queries supported
+
 type QueryType uint
 
 const (
@@ -15,7 +17,9 @@ const (
 	RawQuery                  // Raw SQL query
 )
 
-// JoinType represents the type of a JOIN clause in a SQL query.
+// JoinType represents the type of a JOIN clause in a SQL query
+// It defines the different types of JOIN operations supported
+
 type JoinType string
 
 const (

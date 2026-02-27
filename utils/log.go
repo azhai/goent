@@ -6,8 +6,9 @@ import (
 	"path/filepath"
 )
 
-// CreateLogger create logger by log file
-// If log file directory not exist, create it
+// CreateLogger creates a logger by log file
+// If log file directory doesn't exist, it creates it
+// Returns the created logger or an error
 func CreateLogger(logFile string) (logger *slog.Logger, err error) {
 	var fh *os.File
 	switch logFile {
@@ -31,6 +32,9 @@ func CreateLogger(logFile string) (logger *slog.Logger, err error) {
 	return
 }
 
+// CreateFileHandler creates a file handler for logging
+// It ensures the directory exists and opens the file for writing
+// Returns the file handler or an error
 func CreateFileHandler(logFile string) (*os.File, error) {
 	if err := MakeDirForFile(logFile); err != nil {
 		return nil, err
@@ -39,7 +43,9 @@ func CreateFileHandler(logFile string) (*os.File, error) {
 	return os.OpenFile(logFile, mode, 0666)
 }
 
-// MakeDirForFile create directory for file if not exist
+// MakeDirForFile creates directory for file if it doesn't exist
+// It creates all necessary parent directories
+// Returns an error if directory creation fails
 func MakeDirForFile(filename string) (err error) {
 	dir := filepath.Dir(filename)
 	if _, err = os.Stat(dir); os.IsNotExist(err) {

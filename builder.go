@@ -11,8 +11,10 @@ import (
 	"github.com/azhai/goent/model"
 )
 
+// TakeNoLimit is a constant indicating no limit on query results
 const TakeNoLimit = -1
 
+// Dict is a type alias for a map of string keys to any values
 type Dict = map[string]any
 
 // JoinTable represents a JOIN clause with the join type, target table, and ON condition.
@@ -50,18 +52,22 @@ var bufPool = sync.Pool{
 	},
 }
 
+// DeleteBuilder builds DELETE SQL statements
+// It handles WHERE conditions and LIMIT clause for delete operations
 type DeleteBuilder struct {
-	Table *model.Table
-	Where Condition
-	Limit int
+	Table *model.Table // The target table for the DELETE operation
+	Where Condition    // The WHERE clause conditions
+	Limit int          // The LIMIT clause value (only supported by SQLite)
 
-	argNo    int
-	holders  []string
-	fullName string
+	argNo    int      // Current argument number for parameterized queries
+	holders  []string // Placeholder strings for parameterized queries
+	fullName string   // Full table name with schema
 
-	buf *bytes.Buffer
+	buf *bytes.Buffer // Buffer for building SQL statements
 }
 
+// CreateDeleteBuilder creates a new DeleteBuilder instance
+// It initializes the builder with no limit and a buffer from the pool
 func CreateDeleteBuilder() DeleteBuilder {
 	return DeleteBuilder{
 		Limit: TakeNoLimit,
@@ -69,11 +75,15 @@ func CreateDeleteBuilder() DeleteBuilder {
 	}
 }
 
+// NewDeleteBuilder creates a new DeleteBuilder pointer
+// It initializes the builder with default values
 func NewDeleteBuilder() *DeleteBuilder {
 	builder := CreateDeleteBuilder()
 	return &builder
 }
 
+// SetTable sets the table for the DeleteBuilder
+// It formats the full table name including schema using the driver
 func (b *DeleteBuilder) SetTable(table TableInfo, driver model.Driver) *DeleteBuilder {
 	b.Table = table.Table()
 	var schema string
@@ -84,6 +94,8 @@ func (b *DeleteBuilder) SetTable(table TableInfo, driver model.Driver) *DeleteBu
 	return b
 }
 
+// BuildHead builds the DELETE statement head
+// It writes "DELETE FROM table_name" to the buffer
 func (b *DeleteBuilder) BuildHead() []any {
 	b.buf.WriteString("DELETE FROM ")
 	if b.fullName != "" {
@@ -92,6 +104,8 @@ func (b *DeleteBuilder) BuildHead() []any {
 	return nil
 }
 
+// BuildTail builds the DELETE statement tail
+// It adds the LIMIT clause if specified
 func (b *DeleteBuilder) BuildTail() []any {
 	if b.Limit > 0 {
 		b.buf.WriteString(" LIMIT " + strconv.Itoa(b.Limit))
@@ -99,6 +113,8 @@ func (b *DeleteBuilder) BuildTail() []any {
 	return nil
 }
 
+// BuildWhere builds the WHERE clause for the DELETE statement
+// It processes the conditions and returns the query arguments
 func (b *DeleteBuilder) BuildWhere(full bool) []any {
 	if b.Where.IsEmpty() {
 		return nil
@@ -160,6 +176,8 @@ func (b *DeleteBuilder) appendValueParam(val *Value, startIdx int, args *[]any) 
 	return startIdx
 }
 
+// Build assembles the complete DELETE SQL statement
+// It builds the head, WHERE clause, and tail, then returns the SQL and arguments
 func (b *DeleteBuilder) Build() (sql string, args []any) {
 	_ = b.BuildHead()
 	args = b.BuildWhere(false)
@@ -170,25 +188,29 @@ func (b *DeleteBuilder) Build() (sql string, args []any) {
 	return
 }
 
+// Builder builds SQL statements for SELECT, INSERT, UPDATE, and DELETE operations
+// It handles complex query construction including joins, conditions, and pagination
 type Builder struct {
-	Type  model.QueryType
-	Joins []*JoinTable
+	Type  model.QueryType // The type of query (SELECT, INSERT, UPDATE, DELETE)
+	Joins []*JoinTable    // JOIN clauses for the query
 
-	InsertValues [][]any
-	VisitFields  []*Field
-	Changes      map[*Field]any
+	InsertValues [][]any        // Values for batch INSERT operations
+	VisitFields  []*Field       // Fields to select or insert
+	Changes      map[*Field]any // Changes for UPDATE operations
 
-	Orders []*Order
-	Groups []*Group
-	Offset int
+	Orders []*Order // ORDER BY clauses
+	Groups []*Group // GROUP BY clauses
+	Offset int      // OFFSET clause value
 
-	Returning string
-	RollUp    string
-	ForUpdate bool
+	Returning string // RETURNING clause for INSERT/UPDATE operations
+	RollUp    string // ROLL UP clause for GROUP BY operations
+	ForUpdate bool   // FOR UPDATE clause for transactional operations
 
-	DeleteBuilder
+	DeleteBuilder // Embedded DeleteBuilder for DELETE operations
 }
 
+// NewBuilder creates a new Builder instance
+// It initializes the builder with default values and an empty changes map
 func NewBuilder() *Builder {
 	return &Builder{
 		Changes:       make(map[*Field]any),
@@ -233,7 +255,8 @@ func NewBuilder() *Builder {
 // 	b.RollUp = ""
 // }
 
-// ResetForSave resets the Builder for INSERT/UPDATE operations.
+// ResetForSave resets the Builder for INSERT/UPDATE operations
+// It clears changes, insert values, visit fields, and other operation-specific settings
 func (b *Builder) ResetForSave() {
 	b.Changes = make(map[*Field]any)
 	b.InsertValues = make([][]any, 0)
@@ -245,21 +268,25 @@ func (b *Builder) ResetForSave() {
 	b.holders = make([]string, 0)
 }
 
+// IsJoinQuery checks if the query is a join query
 func (b *Builder) IsJoinQuery() bool {
 	return b.Type == model.SelectJoinQuery || b.Type == model.UpdateJoinQuery
 }
 
+// IsInsertQuery checks if the query is an insert query
 func (b *Builder) IsInsertQuery() bool {
 	return b.Type == model.InsertQuery || b.Type == model.InsertAllQuery
 }
 
-// SetTable sets the table for the query builder.
+// SetTable sets the table for the query builder
+// It delegates to the embedded DeleteBuilder to set the table
 func (b *Builder) SetTable(table TableInfo, driver model.Driver) *Builder {
 	b.DeleteBuilder.SetTable(table, driver)
 	return b
 }
 
-// BuildHead builds the SELECT, INSERT, UPDATE, or DELETE statement head (e.g., "SELECT * FROM table").
+// BuildHead builds the SQL statement head for SELECT, INSERT, UPDATE, or DELETE operations
+// It handles different query types and returns the initial query arguments
 func (b *Builder) BuildHead() []any {
 	var args []any
 	switch b.Type {
@@ -320,7 +347,8 @@ func (b *Builder) BuildHead() []any {
 	return args
 }
 
-// BuildDoing builds the SET clause for UPDATE or VALUES clause for INSERT.
+// BuildDoing builds the SET clause for UPDATE or VALUES clause for INSERT operations
+// It processes the changes or values and returns the query arguments
 func (b *Builder) BuildDoing() []any {
 	var args []any
 	switch b.Type {
@@ -377,7 +405,8 @@ func (b *Builder) BuildDoing() []any {
 	return args
 }
 
-// BuildTail builds the tail part of the query (GROUP BY, ORDER BY, LIMIT, OFFSET, RETURNING).
+// BuildTail builds the tail part of the query (GROUP BY, ORDER BY, LIMIT, OFFSET, RETURNING)
+// It handles the trailing clauses for different query types
 func (b *Builder) BuildTail() []any {
 	var args []any
 
@@ -425,7 +454,8 @@ func (b *Builder) BuildTail() []any {
 	return args
 }
 
-// BuildJoins builds the JOIN clauses for the query.
+// BuildJoins builds the JOIN clauses for the query
+// It processes all join tables and returns the query arguments
 func (b *Builder) BuildJoins() []any {
 	if len(b.Joins) == 0 {
 		return nil
@@ -453,7 +483,8 @@ func (b *Builder) BuildJoins() []any {
 	return args
 }
 
-// Build assembles the complete SQL query and returns it along with query arguments.
+// Build assembles the complete SQL query and returns it along with query arguments
+// It builds all parts of the query including head, doing, joins, where, and tail
 func (b *Builder) Build(destroy bool) (sql string, args []any) {
 	args = b.BuildHead()
 	if doArgs := b.BuildDoing(); len(doArgs) > 0 {
@@ -477,9 +508,9 @@ func (b *Builder) Build(destroy bool) (sql string, args []any) {
 	return
 }
 
-// CollectFields collects primary key and non-primary key fields from a struct value.
+// CollectFields collects primary key and non-primary key fields from a struct value
 // It sets the builder's returning information for auto-increment primary keys
-// and returns a map of primary key column names to their values.
+// and returns a map of primary key column names to their values
 func CollectFields[T any](builder *Builder, table *Table[T], valueOf reflect.Value, ignores []string) (Dict, int) {
 	pkFid, pkName, pkeys := table.TableInfo.GetPrimaryInfo()
 	primary := make(Dict)

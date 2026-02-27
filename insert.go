@@ -6,13 +6,15 @@ import (
 	"github.com/azhai/goent/model"
 )
 
-// StateInsert represents an INSERT query state for inserting new records into a table.
+// StateInsert represents an INSERT query state for inserting new records into a table
+// It provides methods for inserting single and multiple records
 type StateInsert[T any] struct {
-	table *Table[T]
-	*StateWhere
+	table       *Table[T] // The table to insert records into
+	*StateWhere           // Embedded StateWhere for query context
 }
 
-// One inserts a single record into the table.
+// One inserts a single record into the table
+// It handles auto-increment primary keys and returning values
 func (s *StateInsert[T]) One(obj *T) error {
 	s.builder.Type = model.InsertQuery
 	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
@@ -72,7 +74,8 @@ func (s *StateInsert[T]) queryLastInsertId() (int64, error) {
 	return id, nil
 }
 
-// All inserts multiple records into the table.
+// All inserts multiple records into the table
+// It handles batch insertion and optionally returns auto-increment primary keys
 func (s *StateInsert[T]) All(retPK bool, data []*T) error {
 	if len(data) == 0 {
 		return nil
@@ -153,16 +156,19 @@ func (s *StateInsert[T]) getLastInsertIds(data []*T, pkFid int) error {
 	return nil
 }
 
-// OnTransaction sets the transaction for the insert operation.
+// OnTransaction sets the transaction for the insert operation
+// It ensures the insert runs within the specified transaction
 func (s *StateInsert[T]) OnTransaction(tx model.Transaction) *StateInsert[T] {
 	s.StateWhere.conn = tx
 	return s
 }
 
-// StateSave represents a save state that intelligently inserts or updates records based on primary key presence.
+// StateSave represents a save state that intelligently inserts or updates records based on primary key presence
+// It automatically decides whether to insert a new record or update an existing one
+
 type StateSave[T any] struct {
-	table *Table[T]
-	*StateWhere
+	table       *Table[T] // The table to save records to
+	*StateWhere           // Embedded StateWhere for query context
 }
 
 func (s *StateSave[T]) getQuery(primary Dict) model.Query {
@@ -176,7 +182,8 @@ func (s *StateSave[T]) getQuery(primary Dict) model.Query {
 	return model.CreateQuery(s.builder.Build(true))
 }
 
-// One saves a record to the table, inserting if no primary key exists or updating if it does.
+// One saves a record to the table, inserting if no primary key exists or updating if it does
+// It automatically handles insert/update logic based on primary key presence
 func (s *StateSave[T]) One(obj *T) error {
 	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
 	s.builder.ResetForSave()
@@ -192,7 +199,8 @@ func (s *StateSave[T]) One(obj *T) error {
 	return qr.WrapExec(s.ctx, conn, cfg)
 }
 
-// Map saves records from a map, inserting or updating based on primary key presence.
+// Map saves records from a map, inserting or updating based on primary key presence
+// It extracts primary keys from the map to determine insert/update logic
 func (s *StateSave[T]) Map(value Dict) error {
 	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
 	s.builder.ResetForSave()
@@ -215,19 +223,22 @@ func (s *StateSave[T]) Map(value Dict) error {
 	return qr.WrapExec(s.ctx, conn, cfg)
 }
 
-// OnTransaction sets the transaction for the save operation.
+// OnTransaction sets the transaction for the save operation
+// It ensures the save runs within the specified transaction
 func (s *StateSave[T]) OnTransaction(tx model.Transaction) *StateSave[T] {
 	s.StateWhere.conn = tx
 	return s
 }
 
-// Match sets the WHERE conditions based on the non-zero fields of the given object.
+// Match sets the WHERE conditions based on the non-zero fields of the given object
+// It automatically generates conditions for fields with non-zero values
 func (s *StateSave[T]) Match(obj T) *StateSave[T] {
 	s.StateWhere = MatchWhere(s.StateWhere, s.table, obj)
 	return s
 }
 
-// Take takes i elements
+// Take limits the number of rows affected by the save operation
+// Note: PostgreSQL does not support LIMIT in UPDATE statements
 func (s *StateSave[T]) Take(i int) *StateSave[T] {
 	if s.table.db.DriverName() == "PostgreSQL" {
 		return s // PostgreSQL does not support LIMIT in UPDATE

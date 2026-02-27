@@ -17,8 +17,8 @@ var (
 	tableRegLock   sync.RWMutex
 )
 
-// ResetRegistry clears all registered schemas and tables.
-// This is useful for testing purposes.
+// ResetRegistry clears all registered schemas and tables
+// This is useful for testing purposes
 func ResetRegistry() {
 	tableRegLock.Lock()
 	defer tableRegLock.Unlock()
@@ -26,7 +26,8 @@ func ResetRegistry() {
 	tableRegistry = make(map[uintptr]*TableInfo)
 }
 
-// GetTableInfo returns the table info for a given table address.
+// GetTableInfo returns the table info for a given table address
+// It looks up the table information from the registry
 func GetTableInfo(addr uintptr) *TableInfo {
 	if addr == 0 {
 		return nil
@@ -39,7 +40,8 @@ func GetTableInfo(addr uintptr) *TableInfo {
 	return nil
 }
 
-// GetTableColumn returns the column info for a given table address and column name.
+// GetTableColumn returns the column info for a given table address and column name
+// It looks up the column information from the table registry
 func GetTableColumn(addr uintptr, name string) *Column {
 	if info := GetTableInfo(addr); info != nil {
 		return info.ColumnInfo(name)
@@ -47,8 +49,8 @@ func GetTableColumn(addr uintptr, name string) *Column {
 	return nil
 }
 
-// GetFieldName returns the qualified field name (table.column) for a given table address and column name.
-// If the address is 0, it returns just the column name.
+// GetFieldName returns the qualified field name (table.column) for a given table address and column name
+// If the address is 0, it returns just the column name
 func GetFieldName(addr uintptr, name string) (string, error) {
 	if addr == 0 {
 		return name, nil
@@ -61,27 +63,32 @@ func GetFieldName(addr uintptr, name string) (string, error) {
 	return "", model.NewFieldNotFoundError(name)
 }
 
-// DB represents a database connection with its driver.
+// DB represents a database connection with its driver
+// It provides methods for executing queries and managing transactions
 type DB struct {
-	driver model.Driver
+	driver model.Driver // Database driver implementation
 }
 
-// SetDriver sets the database driver.
+// SetDriver sets the database driver
+// It replaces the current driver with the provided one
 func (db *DB) SetDriver(driver model.Driver) {
 	db.driver = driver
 }
 
-// DriverName returns the database name (SQLite, PostgreSQL, etc.).
+// DriverName returns the database name (SQLite, PostgreSQL, etc.)
+// It returns the name of the underlying driver
 func (db *DB) DriverName() string {
 	return db.driver.Name()
 }
 
-// Stats returns the database stats as [sql.DBStats].
+// Stats returns the database stats as [sql.DBStats]
+// It returns statistics about the underlying database connection
 func (db *DB) Stats() sql.DBStats {
 	return db.driver.Stats()
 }
 
-// RawExecContext executes a raw SQL statement without returning rows.
+// RawExecContext executes a raw SQL statement without returning rows
+// It executes the provided SQL with the given arguments
 //
 // Example:
 //
@@ -93,7 +100,8 @@ func (db *DB) RawExecContext(ctx context.Context, rawSql string, args ...any) er
 	return qr.WrapExec(ctx, conn, dc)
 }
 
-// RawQueryContext executes a raw SQL query and returns rows.
+// RawQueryContext executes a raw SQL query and returns rows
+// It executes the provided SQL with the given arguments and returns the result set
 //
 // Example:
 //
@@ -112,15 +120,15 @@ func (db *DB) RawQueryContext(ctx context.Context, rawSql string, args ...any) (
 	return qr.WrapQuery(ctx, conn, dc)
 }
 
-// NewTransaction creates a new Transaction on the database using the default level.
-//
-// NewTransaction uses [context.Background] internally;
-// to specify the context and the isolation level, use [NewTransactionContext].
+// NewTransaction creates a new Transaction on the database using the default level
+// It uses [context.Background] internally
+// To specify the context and the isolation level, use [NewTransactionContext]
 func (db *DB) NewTransaction() (model.Transaction, error) {
 	return db.NewTransactionContext(context.Background(), sql.LevelDefault)
 }
 
-// NewTransactionContext creates a new Transaction with the specified context and isolation level.
+// NewTransactionContext creates a new Transaction with the specified context and isolation level
+// It returns a transaction object that can be used for atomic operations
 func (db *DB) NewTransactionContext(ctx context.Context, isolation sql.IsolationLevel) (model.Transaction, error) {
 	t, err := db.driver.NewTransaction(ctx, &sql.TxOptions{Isolation: isolation})
 	if err != nil {
@@ -130,11 +138,10 @@ func (db *DB) NewTransactionContext(ctx context.Context, isolation sql.Isolation
 	return t, nil
 }
 
-// BeginTransaction begins a Transaction with the database default level.
-// Any panic or error will trigger a rollback.
-//
-// BeginTransaction uses [context.Background] internally;
-// to specify the context and the isolation level, use [BeginTransactionContext].
+// BeginTransaction begins a Transaction with the database default level
+// Any panic or error will trigger a rollback
+// It uses [context.Background] internally
+// To specify the context and the isolation level, use [BeginTransactionContext]
 //
 // Example:
 //
@@ -154,8 +161,8 @@ func (db *DB) BeginTransaction(txFunc func(Transaction) error) error {
 	return db.BeginTransactionContext(context.Background(), sql.LevelDefault, txFunc)
 }
 
-// BeginTransactionContext begins a Transaction with the specified context and isolation level.
-// Any panic or error will trigger a rollback.
+// BeginTransactionContext begins a Transaction with the specified context and isolation level
+// Any panic or error will trigger a rollback
 //
 // Example:
 //
@@ -188,6 +195,9 @@ func (db *DB) BeginTransactionContext(ctx context.Context, isolation sql.Isolati
 	return t.Commit()
 }
 
+// DropTables drops all registered tables from the database
+// It generates and executes DROP TABLE statements for all registered tables
+// For PostgreSQL, it adds CASCADE to the DROP TABLE statement
 func (db *DB) DropTables() error {
 	var tables []string
 	tableRegLock.RLock()
@@ -206,7 +216,8 @@ func (db *DB) DropTables() error {
 	return db.RawExecContext(context.Background(), sql)
 }
 
-// Close closes the database connection and cleans up the table registry.
+// Close closes the database connection and cleans up the table registry
+// It closes the underlying driver connection and resets the registry
 func Close(ent any) error {
 	goeDb := getDatabase(ent)
 	err := goeDb.driver.Close()

@@ -4,7 +4,8 @@ import (
 	"reflect"
 )
 
-// Column represents a database column with its metadata and field information.
+// Column represents a database column with its metadata and field information
+// It contains information about the column's properties and mapping to Go struct fields
 type Column struct {
 	FieldName    string  // Go struct field name
 	FieldId      int     // Index of the field in the struct
@@ -18,8 +19,9 @@ type Column struct {
 	isAutoIncr   bool    // Whether the column is auto-increment
 }
 
-// GetInt64 returns the int64 value of the column from the given object.
-// Returns (0, false) if the column is not an int type.
+// GetInt64 returns the int64 value of the column from the given object
+// It checks if the column is an int type before retrieving the value
+// Returns (0, false) if the column is not an int type
 func (c *Column) GetInt64(obj any) (int64, bool) {
 	if c.ColumnType != "int" && c.ColumnType != "int64" {
 		return 0, false
@@ -28,8 +30,9 @@ func (c *Column) GetInt64(obj any) (int64, bool) {
 	return valueOf.Field(c.FieldId).Int(), true
 }
 
-// GetString returns the string value of the column from the given object.
-// Returns ("", false) if the column is not a string type.
+// GetString returns the string value of the column from the given object
+// It checks if the column is a string type before retrieving the value
+// Returns ("", false) if the column is not a string type
 func (c *Column) GetString(obj any) (string, bool) {
 	if c.ColumnType != "string" && c.ColumnType != "[]byte" {
 		return "", false
@@ -38,14 +41,16 @@ func (c *Column) GetString(obj any) (string, bool) {
 	return valueOf.Field(c.FieldId).String(), true
 }
 
-// Index represents a database index with uniqueness and auto-increment flags.
+// Index represents a database index with uniqueness and auto-increment flags
+// It extends Column with index-specific properties
 type Index struct {
 	IsUnique   bool // Whether the index is unique
 	IsAutoIncr bool // Whether the column is auto-increment
 	*Column         // Embedded column information
 }
 
-// ResultFunc holds the result of a function query.
+// ResultFunc holds the result of a function query
+// It is used to return single values from aggregate functions or scalar queries
 // Example: ResultStr = ResultFunc[string]
 type ResultFunc[T any] struct {
 	Value T // The result value
@@ -56,7 +61,8 @@ type ResultInt = ResultFunc[int]       // Int result type
 type ResultLong = ResultFunc[int64]    // Int64 result type
 type ResultFloat = ResultFunc[float64] // Float64 result type
 
-// FetchSingleResult executes a single-row query and returns the result.
+// FetchSingleResult executes a single-row query and returns the result
+// It fetches a single value from the query result
 // Example: count, err := FetchSingleResult[int64](query)
 func FetchSingleResult[T, V any](query *StateSelect[T, ResultFunc[V]]) (V, error) {
 	obj, err := query.FetchRow(FetchValue)
@@ -66,7 +72,8 @@ func FetchSingleResult[T, V any](query *StateSelect[T, ResultFunc[V]]) (V, error
 	return obj.Value, err
 }
 
-// FetchArrayResult executes a multi-row query and returns the result array.
+// FetchArrayResult executes a multi-row query and returns the result array
+// It fetches multiple values from the query result
 // Example: names, err := FetchArrayResult[string](query)
 func FetchArrayResult[T, V any](query *StateSelect[T, ResultFunc[V]]) ([]V, error) {
 	var res []V
