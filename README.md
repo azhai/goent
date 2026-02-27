@@ -823,7 +823,7 @@ animals, err = db.Animal.Select().Match(Animal{Name: "%Cat%"}).All()
 
 Iterate over the rows
 ```go
-for row, err := range db.Animal.Select().IterRows() {
+for row, err := range db.Animal.Select().IterRows(nil) {
 	// iterator rows
  }
 ```
@@ -846,7 +846,7 @@ for row, err := range goent.Select[struct {
 	}](db.User.Field("Name"), db.Role.Field("Name"), db.UserRole.Field("EndDate")).
 	Join(goent.InnerJoin, db.UserRole.Table(), EqualsField(db.User.Field("id"), db.UserRole.Field("user_id"))).
 	Join(goent.InnerJoin, db.Role.Table(), EqualsField(db.UserRole.Field("role_id"), db.Role.Field("id"))).
-	OrderBy("id").IterRows() {
+	OrderBy("id").IterRows(nil) {
 
 	if err != nil {
 		//handler error
@@ -1513,7 +1513,13 @@ Generated code is **15-27x faster** than reflection with **zero memory allocatio
 
 ```go
 // Use generated FetchFunc with Select
-users, err := db.User.Select().QueryRows(models.FetchUser())
+query := db.User.Select()
+for user, err := range query.IterRows(models.FetchUser()) {
+	if err != nil {
+		// handler error
+	}
+	fmt.Printf("%+v\n", user)
+}
 
 // Or use ScanFields directly
 user := models.NewUser()
@@ -1534,23 +1540,23 @@ go run main.go -operation all --format both
 ### Benchmark on MacMini M4
 | Operation       | Package |    N    | Avg ns/op |  Avg B/op | Avg allocs/op |  percent  |
 |-----------------|---------|--------:|----------:|----------:|--------------:|----------:|
-| **insert**      | raw     |   14362 |     85111 |       624 |            12 |         = |
-|                 | goent   |   14575 |     84363 |      3109 |            55 |     -0.9% |
-|                 | goe     |   13284 |     87421 |      2644 |            31 |      2.7% |
-| **insert-bulk** | raw     |     163 |   8986475 |   6054601 |         39832 |         = |
-|                 | goent   |     170 |   8896656 |   6810529 |         44053 |     -1.0% |
-|                 | goe     |     144 |   7593718 |   5202189 |         28013 |    -15.5% |
-| **update**      | raw     |   15292 |     83109 |       696 |            14 |         = |
-|                 | goent   |   12223 |    113529 |      3124 |            51 |     36.6% |
-|                 | goe     |   13567 |     88782 |      2594 |            27 |      6.8% |
-| **delete**      | raw     |   14215 |     83947 |       256 |             8 |         = |
-|                 | goent   |  463647 |      2769 |      3287 |            23 |    -96.8% |
-|                 | goe     |   47083 |     25059 |      1051 |            15 |    -70.2% |
-| **select-one**  | raw     |   48279 |     24780 |      1760 |            49 |         = |
-|                 | goent   |   40588 |     28547 |      2685 |            53 |     15.2% |
-|                 | goe     |   42543 |     28248 |      3508 |            54 |     13.9% |
-| **select-page** | raw     |    3039 |    386851 |     57840 |          1350 |         = |
-|                 | goent   |    3520 |    333892 |     59778 |          1090 |    -13.7% |
-|                 | goe     |    3687 |    324555 |     55400 |           870 |    -16.2% |
+| **insert**      | raw     |   13765 |     88704 |       624 |            12 |         = |
+|                 | goent   |   17432 |     76612 |      3127 |            55 |    -13.7% |
+|                 | goe     |   13497 |    101881 |      2643 |            31 |     14.8% |
+| **insert-bulk** | raw     |     136 |   9350581 |   6054818 |         39833 |         = |
+|                 | goent   |     100 |  10389264 |   6809070 |         44052 |     11.1% |
+|                 | goe     |     123 |   9511185 |   5202196 |         28013 |      1.7% |
+| **update**      | raw     |   13556 |     89232 |       696 |            14 |         = |
+|                 | goent   |   13425 |     91718 |      3075 |            49 |      2.7% |
+|                 | goe     |   13413 |    103288 |      2594 |            27 |     15.7% |
+| **delete**      | raw     |   13658 |     85000 |       256 |             8 |         = |
+|                 | goent   |  406078 |      3435 |      3301 |            23 |    -96.0% |
+|                 | goe     |    3054 |    697383 |      1066 |            17 |    720.4% |
+| **select-one**  | raw     |   48766 |     24801 |      1760 |            49 |         = |
+|                 | goent   |   42130 |     27807 |      2366 |            43 |     12.1% |
+|                 | goe     |   41710 |     28711 |      3508 |            54 |     15.7% |
+| **select-page** | raw     |    3020 |    389815 |     57840 |          1350 |         = |
+|                 | goent   |    3565 |    333716 |     59001 |          1080 |    -14.4% |
+|                 | goe     |    2089 |    556273 |     55399 |           870 |     42.7% |
 
 [Back to Contents](#content)

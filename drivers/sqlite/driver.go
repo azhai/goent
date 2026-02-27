@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/azhai/goent"
 	"github.com/azhai/goent/model"
 	"modernc.org/sqlite"
 )
@@ -113,8 +112,8 @@ func (dr *Driver) Init() error {
 
 func (dr *Driver) setHooks() {
 	sqlite.RegisterConnectionHook(func(conn sqlite.ExecQuerierContext, dsn string) error {
-		conn.ExecContext(context.Background(), "PRAGMA foreign_keys = ON;", nil)
-		conn.ExecContext(context.Background(), "PRAGMA busy_timeout = 5000;", nil)
+		initSql := "PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;"
+		_, _ = conn.ExecContext(context.Background(), initSql, nil)
 		return nil
 	})
 	if dr.ConnectionHook != nil {
@@ -153,9 +152,9 @@ func (dr *Driver) Close() error {
 }
 
 var errMap = map[int][]error{
-	1555: {goent.ErrBadRequest, goent.ErrUniqueValue},
-	2067: {goent.ErrBadRequest, goent.ErrUniqueValue},
-	787:  {goent.ErrBadRequest, goent.ErrForeignKey},
+	1555: {model.ErrBadRequest, model.ErrUniqueValue},
+	2067: {model.ErrBadRequest, model.ErrUniqueValue},
+	787:  {model.ErrBadRequest, model.ErrForeignKey},
 }
 
 type wrapErrors struct {

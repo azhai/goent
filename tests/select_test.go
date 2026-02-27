@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/azhai/goent"
+	"github.com/azhai/goent/model"
 	"github.com/google/uuid"
 )
 
@@ -174,7 +175,7 @@ func TestSelect(t *testing.T) {
 		{
 			desc: "Select",
 			testCase: func(t *testing.T) {
-				a := runSelect(t, db.Animal.Select().IterRows())
+				a := runSelect(t, db.Animal.Select().IterRows(nil))
 				if len(a) != len(animals) {
 					t.Errorf("Expected %v animals, got %v", len(animals), len(a))
 				}
@@ -244,8 +245,8 @@ func TestSelect(t *testing.T) {
 			desc: "Select_Match_Multiple_Fields_Not_Found",
 			testCase: func(t *testing.T) {
 				_, err := db.Animal.Select().Match(Animal{Name: "Cat", Id: 99999}).One()
-				if !errors.Is(err, goent.ErrNotFound) {
-					t.Fatalf("Expected ErrNotFound, got: %v", err)
+				if !errors.Is(err, model.ErrNoRows) {
+					t.Fatalf("Expected ErrNoRows, got: %v", err)
 				}
 			},
 		},

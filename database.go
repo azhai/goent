@@ -58,7 +58,7 @@ func GetFieldName(addr uintptr, name string) (string, error) {
 			return fmt.Sprintf("%s.%s", info.String(), name), nil
 		}
 	}
-	return "", NewFieldNotFoundError(name)
+	return "", model.NewFieldNotFoundError(name)
 }
 
 // DB represents a database connection with its driver.
@@ -81,6 +81,18 @@ func (db *DB) Stats() sql.DBStats {
 	return db.driver.Stats()
 }
 
+// RawExecContext executes a raw SQL statement without returning rows.
+//
+// Example:
+//
+//	err := db.RawExecContext(ctx, "UPDATE users SET name = ? WHERE id = ?", "John", 1)
+func (db *DB) RawExecContext(ctx context.Context, rawSql string, args ...any) error {
+	conn := db.driver.NewConnection()
+	dc := db.driver.GetDatabaseConfig()
+	qr := model.CreateQuery(rawSql, args)
+	return qr.WrapExec(ctx, conn, dc)
+}
+
 // RawQueryContext executes a raw SQL query and returns rows.
 //
 // Example:
@@ -95,23 +107,9 @@ func (db *DB) Stats() sql.DBStats {
 //	}
 func (db *DB) RawQueryContext(ctx context.Context, rawSql string, args ...any) (model.Rows, error) {
 	conn := db.driver.NewConnection()
-	cfg := db.driver.GetDatabaseConfig()
-	hd := NewHandler(ctx, conn, cfg)
+	dc := db.driver.GetDatabaseConfig()
 	qr := model.CreateQuery(rawSql, args)
-	return hd.QueryResult(qr)
-}
-
-// RawExecContext executes a raw SQL statement without returning rows.
-//
-// Example:
-//
-//	err := db.RawExecContext(ctx, "UPDATE users SET name = ? WHERE id = ?", "John", 1)
-func (db *DB) RawExecContext(ctx context.Context, rawSql string, args ...any) error {
-	conn := db.driver.NewConnection()
-	cfg := db.driver.GetDatabaseConfig()
-	hd := NewHandler(ctx, conn, cfg)
-	qr := model.CreateQuery(rawSql, args)
-	return hd.ExecuteNoReturn(qr)
+	return qr.WrapQuery(ctx, conn, dc)
 }
 
 // NewTransaction creates a new Transaction on the database using the default level.

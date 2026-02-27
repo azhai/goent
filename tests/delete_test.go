@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/azhai/goent"
+	"github.com/azhai/goent/model"
 )
 
 func TestDelete(t *testing.T) {
@@ -37,8 +38,8 @@ func TestDelete(t *testing.T) {
 				}
 
 				_, err = db.Animal.Select().Match(a).One()
-				if !errors.Is(err, goent.ErrNotFound) {
-					t.Fatalf("Expected a goent.ErrNotFound, got error: %v", err)
+				if !errors.Is(err, model.ErrNoRows) {
+					t.Fatalf("Expected a goent.ErrNoRows, got error: %v", err)
 				}
 			},
 		},
@@ -65,8 +66,8 @@ func TestDelete(t *testing.T) {
 				}
 
 				_, err = db.Animal.Select().OnTransaction(tx).Match(a).One()
-				if !errors.Is(err, goent.ErrNotFound) {
-					t.Fatalf("Expected a goent.ErrNotFound, got error: %v", err)
+				if !errors.Is(err, model.ErrNoRows) {
+					t.Fatalf("Expected a goent.ErrNoRows, got error: %v", err)
 				}
 
 				err = tx.Commit()
@@ -75,8 +76,8 @@ func TestDelete(t *testing.T) {
 				}
 
 				_, err = db.Animal.Select().Match(a).One()
-				if !errors.Is(err, goent.ErrNotFound) {
-					t.Fatalf("Expected a goent.ErrNotFound, got error: %v", err)
+				if !errors.Is(err, model.ErrNoRows) {
+					t.Fatalf("Expected a goent.ErrNoRows, got error: %v", err)
 				}
 			},
 		},
@@ -205,7 +206,7 @@ func TestDelete(t *testing.T) {
 				for row, err := range db.Person.Select().OnTransaction(tx).
 					LeftJoin("id", db.PersonJobTitle.Field("person_id")).
 					LeftJoin("job_title_id", db.JobTitle.Field("id")).
-					Filter(goent.Equals(db.JobTitle.Field("id"), jobs[0].Id)).IterRows() {
+					Filter(goent.Equals(db.JobTitle.Field("id"), jobs[0].Id)).IterRows(nil) {
 
 					if err != nil {
 						t.Fatalf("Expected a select, got error: %v", err)

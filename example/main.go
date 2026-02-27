@@ -140,7 +140,7 @@ func seedData(db *Database) error {
 
 func createOrder(db *Database, orderNo string) (*models.Order, error) {
 	obj, err := db.Order.Select("id", "status", "total").Match(models.Order{OrderNo: orderNo}).One()
-	if err != nil && err != goent.ErrNotFound || obj != nil && obj.ID > 0 {
+	if err != nil && err != model.ErrNoRows || obj != nil && obj.ID > 0 {
 		return nil, err
 	}
 	order := models.DataOrder(orderNo)

@@ -1,12 +1,15 @@
-package goent
+package model
 
-import "errors"
+import (
+	"database/sql"
+	"errors"
+)
 
 var (
+	ErrNoRows      = sql.ErrNoRows
 	ErrUniqueValue = errors.New("goent: unique constraint violation")
 	ErrForeignKey  = errors.New("goent: foreign key constraint violation")
 	ErrBadRequest  = errors.New("goent: bad request")
-	ErrNotFound    = errors.New("goent: not found any element on result set")
 
 	ErrInvalidDatabase    = errors.New("goent: invalid database, the target needs to be a struct")
 	ErrInvalidDBField     = errors.New("goent: invalid database, last struct field needs to be goent.DB")

@@ -33,11 +33,11 @@ func Open[T any](drv model.Driver, logFile string) (*T, error) {
 	ent := new(T)
 	valueOf := reflect.ValueOf(ent).Elem()
 	if valueOf.Kind() != reflect.Struct {
-		return nil, ErrInvalidDatabase
+		return nil, model.ErrInvalidDatabase
 	}
 	dbId := valueOf.NumField() - 1
 	if valueOf.Field(dbId).Type().Elem().Name() != "DB" {
-		return nil, ErrInvalidDBField
+		return nil, model.ErrInvalidDBField
 	}
 
 	db, schemas := new(DB), make([]string, 0)
@@ -315,7 +315,7 @@ func getPk(db *DB, schema *string, valueOf reflect.Value, tableId int, driver mo
 		}
 	}
 	if len(fields) == 0 {
-		return nil, nil, NewNoPrimaryKeyError(typeOf.Name())
+		return nil, nil, model.NewNoPrimaryKeyError(typeOf.Name())
 	}
 
 	table := utils.ParseTableNameByValue(valueOf)

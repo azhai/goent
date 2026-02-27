@@ -339,7 +339,7 @@ func migratePk(typeOf reflect.Type, driver model.Driver) ([]*model.PrimaryKeyMig
 	}
 
 	if typeOf.Kind() == reflect.Slice {
-		return nil, nil, ErrSliceTypeMigration
+		return nil, nil, model.ErrSliceTypeMigration
 	}
 
 	if strings.HasPrefix(typeOf.Name(), "Table[") && strings.HasSuffix(typeOf.Name(), "]") {
@@ -357,11 +357,11 @@ func migratePk(typeOf reflect.Type, driver model.Driver) ([]*model.PrimaryKeyMig
 
 	fields := getPksFromType(typeOf)
 	if len(fields) == 0 {
-		return nil, nil, NewNoPrimaryKeyError(typeOf.Name())
+		return nil, nil, model.NewNoPrimaryKeyError(typeOf.Name())
 	}
 
 	if typeOf.Name() == "" {
-		return nil, nil, NewNoPrimaryKeyError(typeOf.String())
+		return nil, nil, model.NewNoPrimaryKeyError(typeOf.String())
 	}
 
 	pks := make([]*model.PrimaryKeyMigrate, len(fields))
@@ -649,7 +649,7 @@ func checkIndex(b body, at model.AttributeMigrate, skipUnique bool) error {
 				if c := slices.IndexFunc(migTable.Indexes, func(i model.IndexMigrate) bool {
 					return i.Name == in.Name && (i.Unique != in.Unique || i.Func != in.Func)
 				}); c != -1 {
-					return NewDuplicateIndexError(migTable.Name, in.Name)
+					return model.NewDuplicateIndexError(migTable.Name, in.Name)
 				}
 
 				migTable.Indexes = append(migTable.Indexes, in)

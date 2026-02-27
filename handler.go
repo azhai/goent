@@ -4,7 +4,6 @@ import (
 	"context"
 	"iter"
 	"reflect"
-	"time"
 
 	"github.com/azhai/goent/model"
 )
@@ -12,6 +11,47 @@ import (
 // GenScanFields is an interface for Model which is modifiable by goent-gen.
 type GenScanFields interface {
 	ScanFields() []any
+}
+
+// FetchFunc is a function type that returns a slice of pointers to struct fields for scanning.
+type FetchFunc func(target any) []any
+
+// FetchValue returns a slice of pointers to the first field of the target struct.
+func FetchValue(target any) []any {
+	valueOf := reflect.ValueOf(target).Elem()
+	return []any{valueOf.Field(0).Addr().Interface()}
+}
+
+// FetchCreator is a function type that creates a FetchFunc based on table info, fields, and foreign.
+type FetchCreator func(TableInfo, []*Field, []*Foreign) FetchFunc
+
+// CreateFetchFunc creates a FetchFunc based on the specified fields and foreign relationships.
+// It handles both aggregate function results and regular table field scanning.
+func CreateFetchFunc(tblInfo TableInfo, fields []*Field, foreigns []*Foreign) FetchFunc {
+	ctx := &fetchContext{
+		tblInfo:  tblInfo,
+		fields:   fields,
+		foreigns: foreigns,
+	}
+	if len(fields) > 0 {
+		ctx.destSize = len(fields)
+	} else {
+		ctx.destSize = len(tblInfo.GetSortedFields())
+	}
+	return func(target any) []any {
+		valueOf := reflect.ValueOf(target).Elem()
+		if len(fields) > 0 && fields[0].Function != "" {
+			return FlattenDest(valueOf)
+		}
+		if len(fields) > 0 {
+			return ctx.buildDest(valueOf)
+		}
+		dest := AppendDestTable(tblInfo, valueOf)
+		for _, foreign := range foreigns {
+			dest = append(dest, CreateForeignDest(valueOf, foreign)...)
+		}
+		return dest
+	}
 }
 
 // Handler handles database query execution and result processing.
@@ -26,36 +66,6 @@ func NewHandler(ctx context.Context, conn model.Connection, cfg *model.DatabaseC
 	return &Handler{ctx: ctx, conn: conn, cfg: cfg}
 }
 
-// InfoHandler logs the query information using the configured info handler.
-func (h *Handler) InfoHandler(query model.Query) {
-	h.cfg.InfoHandler(h.ctx, query)
-}
-
-// ErrHandler handles query errors using the configured error handler.
-func (h *Handler) ErrHandler(query model.Query) error {
-	return h.cfg.ErrorQueryHandler(h.ctx, query)
-}
-
-// ExecuteNoReturn executes a query that does not return any rows (INSERT, UPDATE, DELETE).
-// It logs the query execution time and handles any errors.
-//
-// Example:
-//
-//	err := hd.ExecuteNoReturn(query)
-//	if err != nil {
-//		return err
-//	}
-func (h *Handler) ExecuteNoReturn(query model.Query) error {
-	startTime := time.Now()
-	query.Err = h.conn.ExecContext(h.ctx, &query)
-	query.QueryDuration = time.Since(startTime)
-	if query.Err != nil {
-		return h.ErrHandler(query)
-	}
-	h.InfoHandler(query)
-	return nil
-}
-
 // ExecuteReturning executes a query with RETURNING clause and scans the result into the specified field.
 // It is used for INSERT statements that return auto-generated values like IDs.
 //
@@ -67,14 +77,14 @@ func (h *Handler) ExecuteNoReturn(query model.Query) error {
 //	}
 //	fmt.Println(valueOf.Field(returnFid).Int()) // printed generated ID
 func (h *Handler) ExecuteReturning(query model.Query, valueOf reflect.Value, returnFid int) error {
-	row, err := h.QueryOneRow(query)
+	row, err := query.WrapQueryRow(h.ctx, h.conn, h.cfg)
 	if err != nil {
 		return err
 	}
 	fieldOf := valueOf.Field(returnFid)
 	query.Err = row.Scan(fieldOf.Addr().Interface())
 	if query.Err != nil {
-		return h.ErrHandler(query)
+		return h.cfg.ErrorQueryHandler(h.ctx, query)
 	}
 	return nil
 }
@@ -90,15 +100,11 @@ func (h *Handler) ExecuteReturning(query model.Query, valueOf reflect.Value, ret
 //	}
 //	fmt.Println(valueOf.Len()) // number of inserted records
 func (h *Handler) BatchReturning(query model.Query, valueOf reflect.Value, returnFid int) error {
-	var rows model.Rows
-	startTime := time.Now()
-	rows, query.Err = h.conn.QueryContext(h.ctx, &query)
-	query.QueryDuration = time.Since(startTime)
-	if query.Err != nil {
-		return h.ErrHandler(query)
+	rows, err := query.WrapQuery(h.ctx, h.conn, h.cfg)
+	if err != nil {
+		return err
 	}
 	defer rows.Close()
-	h.InfoHandler(query)
 
 	i := 0
 	for rows.Next() {
@@ -109,59 +115,12 @@ func (h *Handler) BatchReturning(query model.Query, valueOf reflect.Value, retur
 		fieldOf := elem.Field(returnFid)
 		query.Err = rows.Scan(fieldOf.Addr().Interface())
 		if query.Err != nil {
-			return h.ErrHandler(query)
+			return h.cfg.ErrorQueryHandler(h.ctx, query)
 		}
 		i++
 	}
 	return nil
 }
-
-// QueryOneRow executes a query that returns a single row (SELECT).
-// It logs the query execution time and handles any errors.
-func (h *Handler) QueryOneRow(query model.Query) (model.Row, error) {
-	var row model.Row
-	startTime := time.Now()
-	row = h.conn.QueryRowContext(h.ctx, &query)
-	query.QueryDuration = time.Since(startTime)
-	if row == nil {
-		query.Err = ErrNotFound
-		return nil, h.ErrHandler(query)
-	}
-	h.InfoHandler(query)
-	return row, nil
-}
-
-// QueryResult executes a query that returns rows (SELECT).
-// It returns the rows iterator and any error encountered.
-//
-// Example:
-//
-//	rows, err := hd.QueryResult(query)
-//	if err != nil {
-//		return nil, err
-//	}
-//	defer rows.Close()
-//	for rows.Next() {
-//		// scan rows
-//	}
-func (h *Handler) QueryResult(query model.Query) (model.Rows, error) {
-	var rows model.Rows
-	startTime := time.Now()
-	rows, query.Err = h.conn.QueryContext(h.ctx, &query)
-	query.QueryDuration = time.Since(startTime)
-	if query.Err != nil {
-		err := h.ErrHandler(query)
-		return rows, err
-	}
-	h.InfoHandler(query)
-	return rows, nil
-}
-
-// FetchFunc is a function type that returns a slice of pointers to struct fields for scanning.
-type FetchFunc func(target any) []any
-
-// FetchCreator is a function type that creates a FetchFunc based on table info, fields, and foreign.
-type FetchCreator func(TableInfo, []*Field, []*Foreign) FetchFunc
 
 // Fetcher handles fetching query results into typed structs.
 type Fetcher[R any] struct {
@@ -183,36 +142,6 @@ func NewFetcher[R any](hd *Handler, newTarget func() *R) *Fetcher[R] {
 	return fet
 }
 
-// FetchRows fetches all rows from the result set into a slice of typed pointers.
-// It closes the rows and returns the slice of results.
-//
-// Example:
-//
-//	users, err := fetcher.FetchRows(rows, err, 100)
-//	if err != nil {
-//		return nil, err
-//	}
-//	fmt.Println(len(users)) // number of fetched records
-func (f *Fetcher[R]) FetchRows(rows model.Rows, err error, limit int) ([]*R, error) {
-	if err != nil {
-		return nil, err
-	}
-	objs := make([]*R, 0, limit)
-	defer rows.Close()
-	for rows.Next() {
-		target := f.NewTarget()
-		err = rows.Scan(f.FetchTo(target)...)
-		if err != nil {
-			return nil, err
-		}
-		objs = append(objs, target)
-		if limit > 0 && len(objs) >= limit {
-			break
-		}
-	}
-	return objs, nil
-}
-
 // FetchResult returns an iterator that yields typed results from the query result set.
 // This is memory-efficient for processing large result sets.
 //
@@ -225,7 +154,7 @@ func (f *Fetcher[R]) FetchRows(rows model.Rows, err error, limit int) ([]*R, err
 //		fmt.Println(user.Name)
 //	}
 func (f *Fetcher[R]) FetchResult(query model.Query) iter.Seq2[*R, error] {
-	rows, err := f.QueryResult(query)
+	rows, err := query.WrapQuery(f.ctx, f.conn, f.cfg)
 	if err != nil {
 		return func(yield func(*R, error) bool) {
 			yield(nil, err)
@@ -238,22 +167,13 @@ func (f *Fetcher[R]) FetchResult(query model.Query) iter.Seq2[*R, error] {
 			target := f.NewTarget()
 			query.Err = rows.Scan(f.FetchTo(target)...)
 			if query.Err != nil {
-				yield(target, f.ErrHandler(query))
+				yield(target, f.cfg.ErrorQueryHandler(f.ctx, query))
 				return
 			}
 			if !yield(target, nil) {
 				return
 			}
 		}
-	}
-}
-
-// CreateFetchOne creates a FetchFunc that scans a single row into the first field of the target struct.
-// This is used for queries that return a single result.
-func CreateFetchOne(tblInfo TableInfo, fields []*Field, foreigns []*Foreign) FetchFunc {
-	return func(target any) []any {
-		valueOf := reflect.ValueOf(target).Elem()
-		return []any{valueOf.Field(0).Addr().Interface()}
 	}
 }
 
@@ -312,35 +232,6 @@ func (ctx *fetchContext) buildDest(valueOf reflect.Value) []any {
 	return dest
 }
 
-// CreateFetchFunc creates a FetchFunc based on the specified fields and foreign relationships.
-// It handles both aggregate function results and regular table field scanning.
-func CreateFetchFunc(tblInfo TableInfo, fields []*Field, foreigns []*Foreign) FetchFunc {
-	ctx := &fetchContext{
-		tblInfo:  tblInfo,
-		fields:   fields,
-		foreigns: foreigns,
-	}
-	if len(fields) > 0 {
-		ctx.destSize = len(fields)
-	} else {
-		ctx.destSize = len(tblInfo.GetSortedFields())
-	}
-	return func(target any) []any {
-		valueOf := reflect.ValueOf(target).Elem()
-		if len(fields) > 0 && fields[0].Function != "" {
-			return FlattenDest(valueOf)
-		}
-		if len(fields) > 0 {
-			return ctx.buildDest(valueOf)
-		}
-		dest := AppendDestTable(tblInfo, valueOf)
-		for _, foreign := range foreigns {
-			dest = append(dest, CreateForeignDest(valueOf, foreign)...)
-		}
-		return dest
-	}
-}
-
 // CreateForeignDest creates destination pointers for foreign key relationship fields.
 // It initializes the related struct field and returns pointers to its columns for scanning.
 func CreateForeignDest(valueOf reflect.Value, foreign *Foreign) []any {
@@ -351,54 +242,6 @@ func CreateForeignDest(valueOf reflect.Value, foreign *Foreign) []any {
 		return AppendDestTable(*frnInfo, fieldOf.Elem())
 	}
 	return nil
-}
-
-// AppendDestFields returns a slice of pointers to the fields of a struct for database scanning.
-// It handles both regular fields and wildcard (*) fields that expand to all table columns.
-//
-// Example:
-//
-//	dest := AppendDestFields(valueOf, fields, nil)
-//	rows.Scan(dest...) // scan into struct fields
-func AppendDestFields(valueOf reflect.Value, fields []*Field, foreigns []*Foreign) []any {
-	var dest []any
-	foreignValues := make(map[uintptr]reflect.Value)
-	var mainTableAddr uintptr
-	if len(fields) > 0 {
-		mainTableAddr = fields[0].TableAddr
-	}
-	for _, foreign := range foreigns {
-		if typeOf, ok := valueOf.Type().FieldByName(foreign.MountField); ok {
-			if typeOf.Type.Kind() == reflect.Slice {
-				continue
-			}
-			foreignValue := reflect.New(typeOf.Type.Elem())
-			valueOf.FieldByName(foreign.MountField).Set(foreignValue)
-			frnInfo := GetTableInfo(foreign.Reference.TableAddr)
-			if frnInfo != nil {
-				foreignValues[frnInfo.TableAddr] = foreignValue
-			}
-		}
-	}
-	var dummy any
-	for _, fld := range fields {
-		if fld.ColumnName == "*" {
-			if info := GetTableInfo(fld.TableAddr); info != nil {
-				dest = append(dest, AppendDestTable(*info, valueOf)...)
-			}
-		} else if fld.TableAddr != mainTableAddr && fld.TableAddr != 0 {
-			if fv, ok := foreignValues[fld.TableAddr]; ok {
-				fieldOf := fv.Elem().Field(fld.FieldId)
-				dest = append(dest, fieldOf.Addr().Interface())
-			} else {
-				dest = append(dest, &dummy)
-			}
-		} else if fld.TableAddr == mainTableAddr {
-			fieldOf := valueOf.Field(fld.FieldId)
-			dest = append(dest, fieldOf.Addr().Interface())
-		}
-	}
-	return dest
 }
 
 // AppendDestTable returns a slice of pointers to the fields of a struct
@@ -434,3 +277,51 @@ func FlattenDest(valueOf reflect.Value) []any {
 	}
 	return dest
 }
+
+// AppendDestFields returns a slice of pointers to the fields of a struct for database scanning.
+// It handles both regular fields and wildcard (*) fields that expand to all table columns.
+//
+// Example:
+//
+//	dest := AppendDestFields(valueOf, fields, nil)
+//	rows.Scan(dest...) // scan into struct fields
+// func AppendDestFields(valueOf reflect.Value, fields []*Field, foreigns []*Foreign) []any {
+// 	var dest []any
+// 	foreignValues := make(map[uintptr]reflect.Value)
+// 	var mainTableAddr uintptr
+// 	if len(fields) > 0 {
+// 		mainTableAddr = fields[0].TableAddr
+// 	}
+// 	for _, foreign := range foreigns {
+// 		if typeOf, ok := valueOf.Type().FieldByName(foreign.MountField); ok {
+// 			if typeOf.Type.Kind() == reflect.Slice {
+// 				continue
+// 			}
+// 			foreignValue := reflect.New(typeOf.Type.Elem())
+// 			valueOf.FieldByName(foreign.MountField).Set(foreignValue)
+// 			frnInfo := GetTableInfo(foreign.Reference.TableAddr)
+// 			if frnInfo != nil {
+// 				foreignValues[frnInfo.TableAddr] = foreignValue
+// 			}
+// 		}
+// 	}
+// 	var dummy any
+// 	for _, fld := range fields {
+// 		if fld.ColumnName == "*" {
+// 			if info := GetTableInfo(fld.TableAddr); info != nil {
+// 				dest = append(dest, AppendDestTable(*info, valueOf)...)
+// 			}
+// 		} else if fld.TableAddr != mainTableAddr && fld.TableAddr != 0 {
+// 			if fv, ok := foreignValues[fld.TableAddr]; ok {
+// 				fieldOf := fv.Elem().Field(fld.FieldId)
+// 				dest = append(dest, fieldOf.Addr().Interface())
+// 			} else {
+// 				dest = append(dest, &dummy)
+// 			}
+// 		} else if fld.TableAddr == mainTableAddr {
+// 			fieldOf := valueOf.Field(fld.FieldId)
+// 			dest = append(dest, fieldOf.Addr().Interface())
+// 		}
+// 	}
+// 	return dest
+// }

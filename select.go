@@ -67,97 +67,90 @@ func (s *StateSelect[T, R]) Select(fields ...any) *StateSelect[T, R] {
 	return s
 }
 
-// Query returns a Fetcher and a Query.
-func (s *StateSelect[T, R]) Query(creator FetchCreator) (*Fetcher[R], model.Query) {
-	var to FetchFunc
+// getFetchFunc returns a FetchFunc for the query.
+func (s *StateSelect[T, R]) getFetchFunc() FetchFunc {
 	if s.sameModel && len(s.builder.Joins) == 0 {
 		if obj, ok := any(new(R)).(GenScanFields); ok {
-			to = func(_ any) []any { return obj.ScanFields() }
+			return func(_ any) []any { return obj.ScanFields() }
 		}
 	}
-	if to == nil {
-		info, fields := s.table.TableInfo, slices.Clone(s.builder.VisitFields)
-		to = creator(info, fields, s.GetJoinForeigns())
-	}
-	return s.QueryFetch(to)
+	info, fields := s.table.TableInfo, slices.Clone(s.builder.VisitFields)
+	return CreateFetchFunc(info, fields, s.GetJoinForeigns())
 }
 
-// QueryFetch returns a Fetcher and a Query.
-func (s *StateSelect[T, R]) QueryFetch(to FetchFunc) (*Fetcher[R], model.Query) {
+// FetchRow
+func (s *StateSelect[T, R]) FetchRow(to FetchFunc) (*R, error) {
+	if to == nil {
+		to = s.getFetchFunc()
+	}
 	qr := model.CreateQuery(s.builder.Build(false))
 	// defer PutBuilder(s.builder)
-	fet := &Fetcher[R]{
-		Handler:   s.Prepare(s.table.db.driver),
-		NewTarget: func() *R { return new(R) },
-		FetchTo:   to,
+	conn, cfg := s.Prepare(s.table.db.driver)
+	row, err := qr.WrapQueryRow(s.ctx, conn, cfg)
+	if err != nil || row == nil {
+		return nil, err
 	}
-	return fet, qr
+	target := new(R)
+	err = row.Scan(to(target)...)
+	return target, err
 }
 
-// QueryRows executes the query and returns all rows as a slice.
-func (s *StateSelect[T, R]) QueryRows(to FetchFunc) (data []*R, err error) {
-	var rows model.Rows
-	limit := s.builder.Limit
-	fet, qr := s.QueryFetch(to)
-	if rows, err = fet.QueryResult(qr); err != nil {
-		return
+// One executes the query and returns the first row as a single result.
+func (s *StateSelect[T, R]) One() (obj *R, err error) {
+	if s.sameModel {
+		s = s.Take(1)
 	}
-	data, qr.Err = fet.FetchRows(rows, err, limit)
-	if qr.Err != nil {
-		err = fet.ErrHandler(qr)
+	obj, err = s.FetchRow(nil)
+	if s.sameModel && err == nil {
+		s.table.CacheOne(obj)
 	}
 	return
 }
 
 // IterRows return a iterator on rows.
-func (s *StateSelect[T, R]) IterRows() iter.Seq2[*R, error] {
-	fet, qr := s.Query(CreateFetchFunc)
+func (s *StateSelect[T, R]) IterRows(to FetchFunc) iter.Seq2[*R, error] {
+	if to == nil {
+		to = s.getFetchFunc()
+	}
+	qr := model.CreateQuery(s.builder.Build(false))
+	// defer PutBuilder(s.builder)
+	conn, cfg := s.Prepare(s.table.db.driver)
+	fet := &Fetcher[R]{
+		Handler:   NewHandler(s.ctx, conn, cfg),
+		NewTarget: func() *R { return new(R) },
+		FetchTo:   to,
+	}
 	return fet.FetchResult(qr)
 }
 
-// One executes the query and returns the first row as a single result.
-func (s *StateSelect[T, R]) One() (*R, error) {
-	limit := TakeNoLimit
-	if s.sameModel {
-		limit = 1
-	}
-	for row, err := range s.Take(limit).IterRows() {
-		if s.sameModel && row != nil {
-			s.table.CacheOne(row)
-		}
-		return row, err
-	}
-	return nil, ErrNotFound
-}
-
 // All executes the query and returns all rows as a slice.
-func (s *StateSelect[T, R]) All() ([]*R, error) {
-	var rows []*R
+func (s *StateSelect[T, R]) All() (res []*R, err error) {
 	if s.builder.Limit > 0 {
-		rows = make([]*R, 0, s.builder.Limit)
+		res = make([]*R, 0, s.builder.Limit)
 	} else {
-		rows = make([]*R, 0)
+		res = make([]*R, 0)
 	}
-	for row, err := range s.IterRows() {
+	var obj *R
+	for obj, err = range s.IterRows(nil) {
 		if err != nil {
-			return rows, err
+			return
 		}
-		if row != nil && s.sameModel {
-			s.table.CacheOne(row)
+		if obj != nil && s.sameModel {
+			s.table.CacheOne(obj)
 		}
-		rows = append(rows, row)
+		res = append(res, obj)
 	}
-	return rows, nil
+	return
 }
 
 // Map executes the query and returns results as a map keyed by the specified column.
 func (s *StateSelect[T, R]) Map(key string) (map[int64]*R, error) {
 	var col *Column
 	if col = s.table.ColumnInfo(key); col == nil {
-		return nil, NewColumnNotFoundError(key)
+		return nil, model.NewColumnNotFoundError(key)
 	}
 	res := make(map[int64]*R)
-	for row, err := range s.IterRows() {
+	for row, err := range s.IterRows(nil) {
 		if err != nil {
 			return nil, err
 		}
@@ -175,10 +168,10 @@ func (s *StateSelect[T, R]) Map(key string) (map[int64]*R, error) {
 func (s *StateSelect[T, R]) Rank(key string) (map[int64][]*R, error) {
 	var col *Column
 	if col = s.table.ColumnInfo(key); col == nil {
-		return nil, NewColumnNotFoundError(key)
+		return nil, model.NewColumnNotFoundError(key)
 	}
 	res := make(map[int64][]*R)
-	for row, err := range s.IterRows() {
+	for row, err := range s.IterRows(nil) {
 		if err != nil {
 			return nil, err
 		}

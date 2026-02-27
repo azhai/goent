@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/azhai/goent"
+	"github.com/azhai/goent/model"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 )
@@ -179,7 +180,7 @@ func TestInsert(t *testing.T) {
 				}
 
 				_, err = db.Animal.Select().Match(Animal{Id: a.Id}).One()
-				if !errors.Is(err, goent.ErrNotFound) {
+				if !errors.Is(err, model.ErrNoRows) {
 					tx.Rollback()
 					t.Fatalf("Expected a Id value, got : %v", a.Id)
 				}
@@ -227,8 +228,8 @@ func TestInsert(t *testing.T) {
 				}
 
 				_, err = db.Animal.Select().Match(Animal{Id: a.Id}).One()
-				if !errors.Is(err, goent.ErrNotFound) {
-					t.Fatalf("Expected a goent.ErrNotFound, got : %v", err)
+				if !errors.Is(err, model.ErrNoRows) {
+					t.Fatalf("Expected a goent.ErrNoRows, got : %v", err)
 				}
 			},
 		},
@@ -317,11 +318,11 @@ func TestInsert(t *testing.T) {
 				}
 
 				err = db.User.Insert().One(&u)
-				if !errors.Is(err, goent.ErrUniqueValue) {
+				if !errors.Is(err, model.ErrUniqueValue) {
 					t.Fatalf("Expected goent.ErrUniqueValue, got error: %v", err)
 				}
 
-				if !errors.Is(err, goent.ErrBadRequest) {
+				if !errors.Is(err, model.ErrBadRequest) {
 					t.Fatalf("Expected goent.ErrBadRequest, got error: %v", err)
 				}
 			},
@@ -339,11 +340,11 @@ func TestInsert(t *testing.T) {
 				}
 
 				err = db.Food.Insert().One(&f)
-				if !errors.Is(err, goent.ErrUniqueValue) {
+				if !errors.Is(err, model.ErrUniqueValue) {
 					t.Fatalf("Expected goent.ErrUniqueValue, got error: %v", err)
 				}
 
-				if !errors.Is(err, goent.ErrBadRequest) {
+				if !errors.Is(err, model.ErrBadRequest) {
 					t.Fatalf("Expected goent.ErrBadRequest, got error: %v", err)
 				}
 			},
@@ -356,11 +357,11 @@ func TestInsert(t *testing.T) {
 					defer db.RawExecContext(context.Background(), "PRAGMA foreign_keys = OFF;")
 				}
 				err = db.UserRole.Insert().One(&UserRole{})
-				if !errors.Is(err, goent.ErrForeignKey) {
+				if !errors.Is(err, model.ErrForeignKey) {
 					t.Fatalf("Expected goent.ErrForeignKey, got error: %v", err)
 				}
 
-				if !errors.Is(err, goent.ErrBadRequest) {
+				if !errors.Is(err, model.ErrBadRequest) {
 					t.Fatalf("Expected goent.ErrBadRequest, got error: %v", err)
 				}
 			},

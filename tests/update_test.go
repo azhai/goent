@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/azhai/goent"
+	"github.com/azhai/goent/model"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 )
@@ -339,8 +340,8 @@ func TestUpdate(t *testing.T) {
 					t.Fatalf("Expected Rollback SavePoint, got error: %v", err)
 				}
 				_, err = db.Animal.Select().OnTransaction(tx).Match(as).One()
-				if !errors.Is(err, goent.ErrNotFound) {
-					t.Fatalf("Expected a goent.ErrNotFound, got: %v", err)
+				if !errors.Is(err, model.ErrNoRows) {
+					t.Fatalf("Expected a goent.ErrNoRows, got: %v", err)
 				}
 
 				w := Weather{
@@ -369,8 +370,8 @@ func TestUpdate(t *testing.T) {
 				}
 
 				_, err = db.Animal.Select().Match(Animal{Id: a.Id}).One()
-				if !errors.Is(err, goent.ErrNotFound) {
-					t.Fatalf("Expected a goent.ErrNotFound, got error: %v", err)
+				if !errors.Is(err, model.ErrNoRows) {
+					t.Fatalf("Expected a goent.ErrNoRows, got error: %v", err)
 				}
 
 				err = tx.Commit()
@@ -441,7 +442,7 @@ func TestUpdate(t *testing.T) {
 				for row, err := range db.Person.Select().OnTransaction(tx).
 					LeftJoin("id", db.PersonJobTitle.Field("person_id")).
 					LeftJoin("job_title_id", db.JobTitle.Field("id")).
-					Filter(goent.Equals(db.JobTitle.Field("id"), jobs[0].Id)).IterRows() {
+					Filter(goent.Equals(db.JobTitle.Field("id"), jobs[0].Id)).IterRows(nil) {
 
 					if err != nil {
 						t.Fatalf("Expected a select, got error: %v", err)
@@ -472,7 +473,7 @@ func TestUpdate(t *testing.T) {
 				for row, err := range db.Person.Select().OnTransaction(tx).
 					LeftJoin("id", db.PersonJobTitle.Field("person_id")).
 					LeftJoin("job_title_id", db.JobTitle.Field("id")).
-					Filter(goent.Equals(db.JobTitle.Field("id"), jobs[0].Id)).IterRows() {
+					Filter(goent.Equals(db.JobTitle.Field("id"), jobs[0].Id)).IterRows(nil) {
 
 					if err != nil {
 						t.Fatalf("Expected a select, got error: %v", err)
@@ -496,7 +497,7 @@ func TestUpdate(t *testing.T) {
 				for row, err := range db.Person.Select().
 					LeftJoin("id", db.PersonJobTitle.Field("person_id")).
 					LeftJoin("job_title_id", db.JobTitle.Field("id")).
-					Filter(goent.Equals(db.JobTitle.Field("id"), jobs[0].Id)).IterRows() {
+					Filter(goent.Equals(db.JobTitle.Field("id"), jobs[0].Id)).IterRows(nil) {
 
 					if err != nil {
 						t.Fatalf("Expected a select, got error: %v", err)
@@ -542,8 +543,8 @@ func TestUpdate(t *testing.T) {
 						}
 						return errors.New("")
 					})
-					if _, err = db.Animal.Select().OnTransaction(tx).Match(as).One(); !errors.Is(err, goent.ErrNotFound) {
-						t.Fatalf("Expected a goent.ErrNotFound, got: %v", err)
+					if _, err = db.Animal.Select().OnTransaction(tx).Match(as).One(); !errors.Is(err, model.ErrNoRows) {
+						t.Fatalf("Expected a goent.ErrNoRows, got: %v", err)
 					}
 
 					tx.BeginTransaction(func(tx3 goent.Transaction) error {
@@ -579,8 +580,8 @@ func TestUpdate(t *testing.T) {
 					}
 
 					_, err = db.Animal.Select().Match(Animal{Id: a.Id}).One()
-					if !errors.Is(err, goent.ErrNotFound) {
-						t.Fatalf("Expected a goent.ErrNotFound, got error: %v", err)
+					if !errors.Is(err, model.ErrNoRows) {
+						t.Fatalf("Expected a goent.ErrNoRows, got error: %v", err)
 					}
 
 					return nil
@@ -643,7 +644,7 @@ func TestUpdate(t *testing.T) {
 				for row, err := range db.Person.Select().
 					LeftJoin("id", db.PersonJobTitle.Field("person_id")).
 					LeftJoin("job_title_id", db.JobTitle.Field("id")).
-					Filter(goent.Equals(db.JobTitle.Field("id"), jobs[0].Id)).IterRows() {
+					Filter(goent.Equals(db.JobTitle.Field("id"), jobs[0].Id)).IterRows(nil) {
 
 					if err != nil {
 						t.Fatalf("Expected a select, got error: %v", err)
@@ -668,7 +669,7 @@ func TestUpdate(t *testing.T) {
 				for row, err := range db.Person.Select().
 					LeftJoin("id", db.PersonJobTitle.Field("person_id")).
 					LeftJoin("job_title_id", db.JobTitle.Field("id")).
-					Filter(goent.Equals(db.JobTitle.Field("id"), jobs[0].Id)).IterRows() {
+					Filter(goent.Equals(db.JobTitle.Field("id"), jobs[0].Id)).IterRows(nil) {
 
 					if err != nil {
 						t.Fatalf("Expected a select, got error: %v", err)

@@ -178,8 +178,13 @@ func (o *GoentBenchmark) FindPage(b *testing.B) {
 		for s := int64(0); s < tools.BulkInsertPageNumber; s = s + tools.PageSize {
 			filter := goent.Greater(o.db.Book.Field("id"), s)
 			query := o.db.Book.Select().Filter(filter).Take(tools.PageSize)
-			// _, err = query.QueryRows(fetchTo)
 			_, err = query.All()
+
+			// for _, err = range query.IterRows(fetchTo) {
+			// 	if err != nil {
+			// 		b.Error(err)
+			// 	}
+			// }
 
 			b.StopTimer()
 			if err != nil {

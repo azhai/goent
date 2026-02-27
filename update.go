@@ -20,8 +20,8 @@ type StateUpdate[T any] struct {
 func (s *StateUpdate[T]) Exec() error {
 	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
 	qr := model.CreateQuery(s.builder.Build(true))
-	hd := s.Prepare(s.table.db.driver)
-	return hd.ExecuteNoReturn(qr)
+	conn, cfg := s.Prepare(s.table.db.driver)
+	return qr.WrapExec(s.ctx, conn, cfg)
 }
 
 // OnTransaction executes the UPDATE query within a transaction.

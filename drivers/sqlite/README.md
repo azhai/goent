@@ -44,6 +44,10 @@ func main() {
 package main
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+
 	"github.com/azhai/goent"
 	"github.com/azhai/goent/drivers/sqlite"
 )
@@ -63,8 +67,9 @@ func main() {
 	db, err := goent.Open[Database](sqlite.Open(filepath.Join(os.TempDir(), "goent.db"), sqlite.NewConfig(
 		sqlite.Config{
 			ConnectionHook: func(conn sqlite.ExecQuerierContext, dsn string) error {
-				conn.ExecContext(context.Background(), "PRAGMA foreign_keys = OFF;", nil)
-				return nil
+                initSql := "PRAGMA foreign_keys = ON;"
+                _, _ = conn.ExecContext(context.Background(), initSql, nil)
+                return nil
 			},
 		},
 	)))

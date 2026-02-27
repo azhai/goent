@@ -59,26 +59,18 @@ type ResultFloat = ResultFunc[float64] // Float64 result type
 // FetchSingleResult executes a single-row query and returns the result.
 // Example: count, err := FetchSingleResult[int64](query)
 func FetchSingleResult[T, V any](query *StateSelect[T, ResultFunc[V]]) (V, error) {
-	var (
-		row *ResultFunc[V]
-		err error
-	)
-	fet, qr := query.Query(CreateFetchOne)
-	for row, err = range fet.FetchResult(qr) {
-		break
+	obj, err := query.FetchRow(FetchValue)
+	if obj == nil {
+		obj = new(ResultFunc[V])
 	}
-	if row == nil {
-		row = new(ResultFunc[V])
-	}
-	return row.Value, err
+	return obj.Value, err
 }
 
 // FetchArrayResult executes a multi-row query and returns the result array.
 // Example: names, err := FetchArrayResult[string](query)
 func FetchArrayResult[T, V any](query *StateSelect[T, ResultFunc[V]]) ([]V, error) {
 	var res []V
-	fet, qr := query.Query(CreateFetchOne)
-	for row, err := range fet.FetchResult(qr) {
+	for row, err := range query.IterRows(FetchValue) {
 		if err != nil {
 			return nil, err
 		}

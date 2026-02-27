@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/azhai/goent"
 	"github.com/azhai/goent/model"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -137,8 +136,8 @@ func (dr *Driver) Close() error {
 }
 
 var errMap = map[string][]error{
-	"23505": {goent.ErrBadRequest, goent.ErrUniqueValue},
-	"23503": {goent.ErrBadRequest, goent.ErrForeignKey},
+	"23505": {model.ErrBadRequest, model.ErrUniqueValue},
+	"23503": {model.ErrBadRequest, model.ErrForeignKey},
 }
 
 type wrapErrors struct {

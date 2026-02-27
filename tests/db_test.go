@@ -340,7 +340,8 @@ func SetupSqlite(dbDSN, logFile string) (*Database, error) {
 
 	cfg := sqlite.Config{
 		ConnectionHook: func(conn sqlite.ExecQuerierContext, dsn string) error {
-			conn.ExecContext(context.Background(), "PRAGMA foreign_keys = OFF;", nil)
+			initSql := "PRAGMA foreign_keys = ON;"
+			_, _ = conn.ExecContext(context.Background(), initSql, nil)
 			return nil
 		},
 	}

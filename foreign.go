@@ -113,7 +113,7 @@ func QueryForeign[T, R any](table *Table[T], refer *Table[R]) error {
 func QuerySome2One[T, R any](foreign *Foreign, table *Table[T], refer *Table[R]) (map[int64]*R, error) {
 	col := table.ColumnInfo(foreign.ForeignKey)
 	if col == nil {
-		return nil, NewForeignKeyNotFoundError(foreign.ForeignKey)
+		return nil, model.NewForeignKeyNotFoundError(foreign.ForeignKey)
 	}
 	if table.Cache == nil || table.Cache.Size() == 0 {
 		return nil, nil
@@ -202,7 +202,7 @@ func QueryOne2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R])
 //	}
 func QueryMany2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R]) (map[int64]*R, error) {
 	if foreign.Middle == nil {
-		return nil, ErrMiddleTableNotSet
+		return nil, model.ErrMiddleTableNotSet
 	}
 	if table.Cache == nil || table.Cache.Size() == 0 {
 		return nil, nil
@@ -267,7 +267,7 @@ func QueryMany2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R]
 //	}
 func QueryMiddleTable[T any](foreign *Foreign, table *Table[T], leftCol, rightCol string) (map[int64][]int64, error) {
 	if foreign.Middle == nil {
-		return nil, ErrMiddleTableNotSet
+		return nil, model.ErrMiddleTableNotSet
 	}
 
 	pkIds := make([]int64, 0)

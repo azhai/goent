@@ -24,6 +24,40 @@ func CreateQuery(rawSql string, args []any) Query {
 	return Query{RawSql: rawSql, Arguments: args}
 }
 
+func (q *Query) Finish(ctx context.Context, dc *DatabaseConfig, start time.Time) error {
+	q.QueryDuration = time.Since(start)
+	if q.Err != nil {
+		return dc.ErrorQueryHandler(ctx, *q)
+	}
+	dc.InfoHandler(ctx, *q)
+	return nil
+}
+
+func (q *Query) WrapExec(ctx context.Context, conn Connection, dc *DatabaseConfig) error {
+	startTime := time.Now()
+	q.Err = conn.ExecContext(ctx, q)
+	err := q.Finish(ctx, dc, startTime)
+	return err
+}
+
+func (q *Query) WrapQuery(ctx context.Context, conn Connection, dc *DatabaseConfig) (Rows, error) {
+	var rows Rows
+	startTime := time.Now()
+	rows, q.Err = conn.QueryContext(ctx, q)
+	err := q.Finish(ctx, dc, startTime)
+	return rows, err
+}
+
+func (q *Query) WrapQueryRow(ctx context.Context, conn Connection, dc *DatabaseConfig) (Row, error) {
+	startTime := time.Now()
+	row := conn.QueryRowContext(ctx, q)
+	if row == nil {
+		q.Err = ErrNoRows
+	}
+	err := q.Finish(ctx, dc, startTime)
+	return row, err
+}
+
 // Table represents a database table with its schema and name.
 type Table struct {
 	Schema *string
@@ -170,17 +204,17 @@ func (c *DatabaseConfig) InfoHandler(ctx context.Context, query Query) {
 	if c.Logger == nil {
 		return
 	}
-	qr := query.QueryDuration
+	dur := query.QueryDuration
 
 	logs := make([]any, 0)
 	logs = append(logs, "database", c.databaseName)
-	logs = append(logs, "query_duration", qr.String())
+	logs = append(logs, "query_duration", dur.String())
 	logs = append(logs, "sql", query.RawSql)
 	if c.IncludeArguments {
 		logs = append(logs, "arguments", query.Arguments)
 	}
 
-	if c.QueryThreshold != 0 && qr > c.QueryThreshold {
+	if c.QueryThreshold != 0 && dur > c.QueryThreshold {
 		c.Logger.WarnContext(ctx, "query_threshold", logs...)
 		return
 	}

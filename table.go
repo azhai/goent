@@ -431,7 +431,7 @@ func (t *Table[T]) Drop() error {
 	if t.db != nil {
 		return Migrate(t.db).OnTable(t.TableName).DropTable()
 	}
-	return ErrDBNotFound
+	return model.ErrDBNotFound
 }
 
 // ------------------------------

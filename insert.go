@@ -26,11 +26,12 @@ func (s *StateInsert[T]) One(obj *T) error {
 
 	returning := s.builder.Returning
 	qr := model.CreateQuery(s.builder.Build(true))
-	hd := s.Prepare(s.table.db.driver)
+	conn, cfg := s.Prepare(s.table.db.driver)
 	if retFid >= 0 && returning != "" && s.table.db.driver.SupportsReturning() {
+		hd := NewHandler(s.ctx, conn, cfg)
 		return hd.ExecuteReturning(qr, valueOf, retFid)
 	}
-	err := hd.ExecuteNoReturn(qr)
+	err := qr.WrapExec(s.ctx, conn, cfg)
 	if err != nil {
 		return err
 	}
@@ -42,23 +43,23 @@ func (s *StateInsert[T]) One(obj *T) error {
 
 func (s *StateInsert[T]) getLastInsertId(valueOf reflect.Value, retFid int) error {
 	qr := model.CreateQuery("SELECT last_insert_rowid()", nil)
-	hd := s.Prepare(s.table.db.driver)
-	row, err := hd.QueryOneRow(qr)
+	conn, cfg := s.Prepare(s.table.db.driver)
+	row, err := qr.WrapQueryRow(s.ctx, conn, cfg)
 	if err != nil {
 		return err
 	}
 	fieldOf := valueOf.Field(retFid)
 	qr.Err = row.Scan(fieldOf.Addr().Interface())
 	if qr.Err != nil {
-		return hd.ErrHandler(qr)
+		return cfg.ErrorQueryHandler(s.ctx, qr)
 	}
 	return nil
 }
 
 func (s *StateInsert[T]) queryLastInsertId() (int64, error) {
 	qr := model.CreateQuery("SELECT last_insert_rowid()", nil)
-	hd := s.Prepare(s.table.db.driver)
-	row, err := hd.QueryOneRow(qr)
+	conn, cfg := s.Prepare(s.table.db.driver)
+	row, err := qr.WrapQueryRow(s.ctx, conn, cfg)
 	if err != nil {
 		return 0, err
 	}
@@ -66,7 +67,7 @@ func (s *StateInsert[T]) queryLastInsertId() (int64, error) {
 	var id int64
 	qr.Err = row.Scan(&id)
 	if qr.Err != nil {
-		return 0, hd.ErrHandler(qr)
+		return 0, cfg.ErrorQueryHandler(s.ctx, qr)
 	}
 	return id, nil
 }
@@ -117,12 +118,13 @@ func (s *StateInsert[T]) All(retPK bool, data []*T) error {
 
 	returning := s.builder.Returning
 	qr := model.CreateQuery(s.builder.Build(true))
-	hd := s.Prepare(s.table.db.driver)
+	conn, cfg := s.Prepare(s.table.db.driver)
 	if pkFid >= 0 && returning != "" && isAutoIncr && s.table.db.driver.SupportsReturning() {
 		valueOf := reflect.ValueOf(data)
+		hd := NewHandler(s.ctx, conn, cfg)
 		return hd.BatchReturning(qr, valueOf, pkFid)
 	}
-	err := hd.ExecuteNoReturn(qr)
+	err := qr.WrapExec(s.ctx, conn, cfg)
 	if err != nil {
 		return err
 	}
@@ -182,11 +184,12 @@ func (s *StateSave[T]) One(obj *T) error {
 	valueOf := reflect.ValueOf(obj).Elem()
 	primary, retFid := CollectFields(s.builder, s.table, valueOf, s.table.Ignores)
 	qr := s.Take(1).getQuery(primary)
-	hd := s.Prepare(s.table.db.driver)
+	conn, cfg := s.Prepare(s.table.db.driver)
 	if s.builder.Returning != "" {
+		hd := NewHandler(s.ctx, conn, cfg)
 		return hd.ExecuteReturning(qr, valueOf, retFid)
 	}
-	return hd.ExecuteNoReturn(qr)
+	return qr.WrapExec(s.ctx, conn, cfg)
 }
 
 // Map saves records from a map, inserting or updating based on primary key presence.
@@ -208,8 +211,8 @@ func (s *StateSave[T]) Map(value Dict) error {
 	}
 
 	qr := s.getQuery(primary)
-	hd := s.Prepare(s.table.db.driver)
-	return hd.ExecuteNoReturn(qr)
+	conn, cfg := s.Prepare(s.table.db.driver)
+	return qr.WrapExec(s.ctx, conn, cfg)
 }
 
 // OnTransaction sets the transaction for the save operation.
@@ -226,6 +229,9 @@ func (s *StateSave[T]) Match(obj T) *StateSave[T] {
 
 // Take takes i elements
 func (s *StateSave[T]) Take(i int) *StateSave[T] {
+	if s.table.db.DriverName() == "PostgreSQL" {
+		return s // PostgreSQL does not support LIMIT in UPDATE
+	}
 	if i >= TakeNoLimit {
 		s.builder.Limit = i
 	}

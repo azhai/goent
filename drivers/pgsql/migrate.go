@@ -99,12 +99,7 @@ func getSchemas(conn *pgxpool.Pool) ([]string, error) {
 func (dr *Driver) rawExecContext(ctx context.Context, rawSql string, args ...any) error {
 	if dr.config.MigratePath == "" {
 		query := model.CreateQuery(rawSql, args)
-		query.Err = wrapperExec(ctx, dr.NewConnection(), &query)
-		if query.Err != nil {
-			return dr.GetDatabaseConfig().ErrorQueryHandler(ctx, query)
-		}
-		dr.GetDatabaseConfig().InfoHandler(ctx, query)
-		return nil
+		return query.WrapExec(ctx, dr.NewConnection(), dr.GetDatabaseConfig())
 	}
 	root, err := os.OpenRoot(dr.config.MigratePath)
 	if err != nil {
@@ -112,7 +107,8 @@ func (dr *Driver) rawExecContext(ctx context.Context, rawSql string, args ...any
 	}
 	defer root.Close()
 
-	file, err := root.OpenFile(dr.Name()+"_"+strconv.FormatInt(time.Now().Unix(), 10)+".sql", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
+	filename := dr.Name() + "_" + strconv.FormatInt(time.Now().Unix(), 10) + ".sql"
+	file, err := root.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		return err
 	}
@@ -120,12 +116,6 @@ func (dr *Driver) rawExecContext(ctx context.Context, rawSql string, args ...any
 
 	_, err = file.WriteString(rawSql)
 	return err
-}
-
-func wrapperExec(ctx context.Context, conn model.Connection, query *model.Query) error {
-	queryStart := time.Now()
-	defer func() { query.QueryDuration = time.Since(queryStart) }()
-	return conn.ExecContext(ctx, query)
 }
 
 func (dr *Driver) DropTable(schema, table string) error {
