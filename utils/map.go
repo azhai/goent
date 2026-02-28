@@ -17,8 +17,14 @@ type CoMap[K int | int64 | string, V any] struct {
 // NewCoMap creates a new thread-safe concurrent map
 // It initializes the map with the specified key and value types
 func NewCoMap[K int | int64 | string, V any]() *CoMap[K, V] {
+	return NewCoMapSize[K, V](0)
+}
+
+// NewCoMapSize creates a new thread-safe concurrent map
+// It initializes the map with the specified key and value types
+func NewCoMapSize[K int | int64 | string, V any](capSize int) *CoMap[K, V] {
 	return &CoMap[K, V]{
-		data: make(map[K]*V),
+		data: make(map[K]*V, capSize),
 	}
 }
 

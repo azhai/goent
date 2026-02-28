@@ -125,8 +125,8 @@ type Database struct {
 }
 
 dsn := "postgres://dba:pass@127.0.0.1:5432/test?sslmode=disable"
-db, err := goent.Open[Database](pgsql.Open(dsn), "stdout")
-// db, err := goent.Open[Database](sqlite.Open("goent.db"), "stdout")
+db, err := goent.Open[Database](pgsql.OpenDSN(dsn), "stdout")
+// db, err := goent.Open[Database](sqlite.OpenDSN("goent.db"), "stdout")
 ```
 
 ## Quick Start
@@ -1534,7 +1534,7 @@ rows.Scan(user.ScanFields()...)
 
 ## Benchmarks
 
- Insprire from [lauro-santana/go-orm-benchmarks](https://github.com/lauro-santana/go-orm-benchmarks). 
+ Inspirit from [lauro-santana/go-orm-benchmarks](https://github.com/lauro-santana/go-orm-benchmarks). 
 
 ```bash
 cd tests/benchmark/run/

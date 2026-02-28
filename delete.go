@@ -30,6 +30,7 @@ func (s *StateDelete[T]) Match(obj T) *StateDelete[T] {
 func (s *StateDelete[T]) Exec() error {
 	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
 	qr := model.CreateQuery(s.builder.Build())
+	defer PutDeleteBuilder(s.builder)
 	conn, cfg := s.Prepare(s.table.db.driver)
 	return qr.WrapExec(s.ctx, conn, cfg)
 }
@@ -83,7 +84,7 @@ type StateDeleteWhere struct {
 // NewStateDeleteWhere creates a new StateDeleteWhere with the given context
 // It initializes the delete query builder and sets up the context
 func NewStateDeleteWhere(ctx context.Context) *StateDeleteWhere {
-	return &StateDeleteWhere{ctx: ctx, builder: NewDeleteBuilder()}
+	return &StateDeleteWhere{ctx: ctx, builder: GetDeleteBuilder()}
 }
 
 // MatchDeleteWhere creates a StateDeleteWhere with conditions matching the non-zero fields of the given object
@@ -136,7 +137,7 @@ type StateWhere struct {
 // NewStateWhere creates a new StateWhere with the given context
 // It initializes the query builder and sets up the context
 func NewStateWhere(ctx context.Context) *StateWhere {
-	return &StateWhere{ctx: ctx, builder: NewBuilder()}
+	return &StateWhere{ctx: ctx, builder: GetBuilder()}
 }
 
 // MatchWhere creates a StateWhere with conditions matching the non-zero fields of the given object
@@ -181,7 +182,7 @@ func (s *StateWhere) Prepare(drv model.Driver) (model.Connection, *model.Databas
 // MatchData matches the non-zero fields of the given object to a dictionary of column names and values
 // Nil pointer fields are skipped (not included in the result)
 func MatchData[T any](table *Table[T], obj T) Dict {
-	data := make(Dict)
+	data := make(Dict, len(table.Columns))
 	valueOf := reflect.Indirect(reflect.ValueOf(obj))
 	for _, col := range table.Columns {
 		fieldOf := valueOf.FieldByName(col.FieldName)

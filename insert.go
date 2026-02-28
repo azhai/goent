@@ -97,7 +97,7 @@ func (s *StateInsert[T]) All(retPK bool, data []*T) error {
 		pkFid = -1
 	}
 
-	s.builder.VisitFields = make([]*Field, 0)
+	s.builder.VisitFields = make([]*Field, 0, len(s.table.ColumnNames))
 	for _, name := range s.table.ColumnNames {
 		col := s.table.Columns[name]
 		if col.ColumnName == pkName && isAutoIncr {
@@ -205,7 +205,7 @@ func (s *StateSave[T]) Map(value Dict) error {
 	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
 	s.builder.ResetForSave()
 
-	primary := make(Dict)
+	primary := make(Dict, len(s.table.PrimaryKeys))
 	for _, pkey := range s.table.PrimaryKeys {
 		name := pkey.ColumnName
 		if val, ok := value[name]; ok {

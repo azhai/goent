@@ -68,36 +68,6 @@ func main() {
 	fmt.Printf("%+v\n", order)
 }
 
-func addForeignKeys(db *Database) {
-	db.Product.Foreigns = map[string]*goent.Foreign{
-		"t_category": {
-			Type:       goent.M2O,
-			MountField: "Category",
-			ForeignKey: "category_id",
-			Reference:  db.Category.Field("id"),
-			Middle:     nil,
-		},
-	}
-	db.Order.Foreigns = map[string]*goent.Foreign{
-		"t_order_detail": {
-			Type:       goent.O2M,
-			MountField: "Details",
-			ForeignKey: "id",
-			Reference:  db.OrderDetail.Field("order_id"),
-			Middle:     nil,
-		},
-	}
-	db.OrderDetail.Foreigns = map[string]*goent.Foreign{
-		"t_product": {
-			Type:       goent.O2O,
-			MountField: "Product",
-			ForeignKey: "product_id",
-			Reference:  db.Product.Field("id"),
-			Middle:     nil,
-		},
-	}
-}
-
 func connect(dbType, dbDSN, logFile string) (*Database, error) {
 	var drv model.Driver
 	if dbType == "pgsql" || dbType == "postgres" {
@@ -252,7 +222,8 @@ func CalcTotalPrice3(db *Database, order *models.Order) (float64, error) {
 
 func ListAllProducts(db *Database) ([]*models.Product, error) {
 	filter := goent.LessEquals(db.Product.Field("price"), 100)
-	products, err := db.Product.Select().Filter(filter).All()
+	query := db.Product.Select().Filter(filter)
+	products, err := query.All()
 	if err != nil {
 		return nil, err
 	}
@@ -275,4 +246,34 @@ func ListAllProducts(db *Database) ([]*models.Product, error) {
 	fmt.Printf("\nCategory:\n%+v\n", db.Category.Cache)
 	fmt.Printf("\nProduct:\n%+v\n", db.Product.Cache)
 	return products, nil
+}
+
+func addForeignKeys(db *Database) {
+	db.Product.Foreigns = map[string]*goent.Foreign{
+		"t_category": {
+			Type:       goent.M2O,
+			MountField: "Category",
+			ForeignKey: "category_id",
+			Reference:  db.Category.Field("id"),
+			Middle:     nil,
+		},
+	}
+	db.Order.Foreigns = map[string]*goent.Foreign{
+		"t_order_detail": {
+			Type:       goent.O2M,
+			MountField: "Details",
+			ForeignKey: "id",
+			Reference:  db.OrderDetail.Field("order_id"),
+			Middle:     nil,
+		},
+	}
+	db.OrderDetail.Foreigns = map[string]*goent.Foreign{
+		"t_product": {
+			Type:       goent.O2O,
+			MountField: "Product",
+			ForeignKey: "product_id",
+			Reference:  db.Product.Field("id"),
+			Middle:     nil,
+		},
+	}
 }

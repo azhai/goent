@@ -25,9 +25,10 @@ type dbMigrator struct {
 func migrateFrom(ent any, db *DB) *dbMigrator {
 	valueOf := reflect.ValueOf(ent).Elem()
 	dc := db.driver.GetDatabaseConfig()
+	size := len(tableRegistry)
 	dm := &dbMigrator{
 		Migrator: &model.Migrator{
-			Tables:  make(map[string]*model.TableMigrate),
+			Tables:  make(map[string]*model.TableMigrate, size),
 			Schemas: dc.Schemas(),
 		},
 		db: db,
@@ -364,8 +365,9 @@ func migratePk(typeOf reflect.Type, driver model.Driver) ([]*model.PrimaryKeyMig
 		return nil, nil, model.NewNoPrimaryKeyError(typeOf.String())
 	}
 
-	pks := make([]*model.PrimaryKeyMigrate, len(fields))
-	fieldsNames := make([]string, len(fields))
+	size := len(fields)
+	pks := make([]*model.PrimaryKeyMigrate, size)
+	fieldsNames := make([]string, size)
 	for i := range fields {
 		geoTag := fields[i].Tag.Get("goe")
 		pks[i] = createMigratePk(fields[i].Name, isAutoIncrement(fields[i]),

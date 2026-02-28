@@ -91,7 +91,7 @@ func (s *StateSelect[T, R]) FetchRow(to FetchFunc) (*R, error) {
 		to = s.getFetchFunc()
 	}
 	qr := model.CreateQuery(s.builder.Build(false))
-	// defer PutBuilder(s.builder)
+	defer PutBuilder(s.builder)
 	conn, cfg := s.Prepare(s.table.db.driver)
 	row, err := qr.WrapQueryRow(s.ctx, conn, cfg)
 	if err != nil || row == nil {
@@ -122,7 +122,7 @@ func (s *StateSelect[T, R]) IterRows(to FetchFunc) iter.Seq2[*R, error] {
 		to = s.getFetchFunc()
 	}
 	qr := model.CreateQuery(s.builder.Build(false))
-	// defer PutBuilder(s.builder)
+	defer PutBuilder(s.builder)
 	conn, cfg := s.Prepare(s.table.db.driver)
 	fet := &Fetcher[R]{
 		Handler:   NewHandler(s.ctx, conn, cfg),
@@ -135,11 +135,8 @@ func (s *StateSelect[T, R]) IterRows(to FetchFunc) iter.Seq2[*R, error] {
 // All executes the query and returns all rows as a slice
 // It pre-allocates the slice capacity if a limit is specified
 func (s *StateSelect[T, R]) All() (res []*R, err error) {
-	if s.builder.Limit > 0 {
-		res = make([]*R, 0, s.builder.Limit)
-	} else {
-		res = make([]*R, 0)
-	}
+	size := max(s.builder.Limit, 0)
+	res = make([]*R, 0, size)
 	var obj *R
 	for obj, err = range s.IterRows(nil) {
 		if err != nil {
@@ -160,16 +157,20 @@ func (s *StateSelect[T, R]) Map(key string) (map[int64]*R, error) {
 	if col = s.table.ColumnInfo(key); col == nil {
 		return nil, model.NewColumnNotFoundError(key)
 	}
-	res := make(map[int64]*R)
+	size := max(s.builder.Limit, 0)
+	res := make(map[int64]*R, size)
+	id, ok := int64(0), false
 	for row, err := range s.IterRows(nil) {
 		if err != nil {
 			return nil, err
 		}
 		if s.sameModel && row != nil {
-			s.table.CacheOne(row)
+			id = s.table.CacheOne(row)
 		}
-		if val, ok := col.GetInt64(row); ok {
-			res[val] = row
+		if id > 0 {
+			res[id] = row
+		} else if id, ok = col.GetInt64(row); ok {
+			res[id] = row
 		}
 	}
 	return res, nil
@@ -182,16 +183,20 @@ func (s *StateSelect[T, R]) Rank(key string) (map[int64][]*R, error) {
 	if col = s.table.ColumnInfo(key); col == nil {
 		return nil, model.NewColumnNotFoundError(key)
 	}
-	res := make(map[int64][]*R)
+	size := max(s.builder.Limit, 0)
+	res := make(map[int64][]*R, size)
+	id, ok := int64(0), false
 	for row, err := range s.IterRows(nil) {
 		if err != nil {
 			return nil, err
 		}
 		if s.sameModel && row != nil {
-			s.table.CacheOne(row)
+			id = s.table.CacheOne(row)
 		}
-		if val, ok := col.GetInt64(row); ok {
-			res[val] = append(res[val], row)
+		if id > 0 {
+			res[id] = append(res[id], row)
+		} else if id, ok = col.GetInt64(row); ok {
+			res[id] = append(res[id], row)
 		}
 	}
 	return res, nil
@@ -295,10 +300,11 @@ func (s *StateSelect[T, R]) GetJoinForeign() *Foreign {
 // GetJoinForeigns returns all foreign key relationships for the joined tables
 // It looks up foreign relationships and creates them for joined tables
 func (s *StateSelect[T, R]) GetJoinForeigns() []*Foreign {
-	if len(s.builder.Joins) == 0 {
+	size := len(s.builder.Joins)
+	if size == 0 {
 		return nil
 	}
-	foreigns := make([]*Foreign, 0, len(s.builder.Joins))
+	foreigns := make([]*Foreign, 0, size)
 	valueType := reflect.TypeFor[R]()
 	for _, join := range s.builder.Joins {
 		if foreign, ok := s.table.Foreigns[join.Table.Name]; ok {

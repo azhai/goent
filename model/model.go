@@ -215,7 +215,7 @@ func (c *DatabaseConfig) ErrorQueryHandler(ctx context.Context, query Query) err
 	if c.Logger == nil {
 		return query.Err
 	}
-	logs := make([]any, 0)
+	logs := make([]any, 0, 8)
 	logs = append(logs, "database", c.databaseName)
 	logs = append(logs, "sql", query.RawSql)
 	if c.IncludeArguments {
@@ -235,14 +235,13 @@ func (c *DatabaseConfig) InfoHandler(ctx context.Context, query Query) {
 	}
 	dur := query.QueryDuration
 
-	logs := make([]any, 0)
+	logs := make([]any, 0, 10)
 	logs = append(logs, "database", c.databaseName)
 	logs = append(logs, "query_duration", dur.String())
 	logs = append(logs, "sql", query.RawSql)
 	if c.IncludeArguments {
 		logs = append(logs, "arguments", query.Arguments)
 	}
-
 	if c.QueryThreshold != 0 && dur > c.QueryThreshold {
 		c.Logger.WarnContext(ctx, "query_threshold", logs...)
 		return

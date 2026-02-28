@@ -74,15 +74,15 @@ func run(orm, operation, format string) {
 
 func shuffleBenchmarksMap() {
 	source := rand.NewSource(time.Now().UnixNano())
-	rng := rand.New(source)
-	keys := make([]string, 0, len(benchmarksMap))
+	rng, size := rand.New(source), len(benchmarksMap)
+	keys := make([]string, 0, size)
 	for key := range benchmarksMap {
 		keys = append(keys, key)
 	}
 	rng.Shuffle(len(keys), func(i, j int) {
 		keys[i], keys[j] = keys[j], keys[i]
 	})
-	shuffledMap := make(map[string]benchmark.Benchmark)
+	shuffledMap := make(map[string]benchmark.Benchmark, size)
 	for _, key := range keys {
 		shuffledMap[key] = benchmarksMap[key]
 	}
@@ -99,14 +99,11 @@ func executeBenchmarks(operation string) []benchmark.ResultWrapper {
 
 func doExecuteBenchmarks(b benchmark.Benchmark, orm, operation string) benchmark.ResultWrapper {
 	benchmark.BeforeBenchmark()
-	wrapper := benchmark.ResultWrapper{}
-	wrapper.Orm = orm
-	err := b.Init()
-	if err != nil {
-		wrapper.Err = err
+	wrapper := benchmark.ResultWrapper{Orm: orm}
+	if wrapper.Err = b.Init(); wrapper.Err != nil {
 		return wrapper
 	}
-	resultMap := make(map[string]testing.BenchmarkResult)
+
 	operations := map[string]func(*testing.B){
 		insertOp:     b.Insert,
 		insertBulkOp: b.InsertBulk,
@@ -115,22 +112,25 @@ func doExecuteBenchmarks(b benchmark.Benchmark, orm, operation string) benchmark
 		selectOne:    b.FindByID,
 		selectPage:   b.FindPage,
 	}
-	if operation == all {
-		for op, f := range operations {
-			resultMap[op] = testing.Benchmark(f)
+
+	if operation != all {
+		f, ok := operations[operation]
+		if !ok || f == nil {
+			wrapper.Err = fmt.Errorf("invalid operation: %s", operation)
+			return wrapper
 		}
-		wrapper.Benchmarks = resultMap
+		wrapper.Benchmarks = map[string]testing.BenchmarkResult{
+			operation: testing.Benchmark(f),
+		}
+		return wrapper
+	} else {
+		size := len(operations)
+		wrapper.Benchmarks = make(map[string]testing.BenchmarkResult, size)
+		for op, f := range operations {
+			wrapper.Benchmarks[op] = testing.Benchmark(f)
+		}
 		return wrapper
 	}
-	f, ok := operations[operation]
-	if !ok || f == nil {
-		wrapper.Err = fmt.Errorf("invalid operation: %s", operation)
-		return wrapper
-	}
-	wrapper.Benchmarks = map[string]testing.BenchmarkResult{
-		operation: testing.Benchmark(f),
-	}
-	return wrapper
 }
 
 func printBenchmark(results []benchmark.ResultWrapper, operation string) {

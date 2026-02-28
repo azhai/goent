@@ -77,9 +77,39 @@ func CreateDeleteBuilder() DeleteBuilder {
 
 // NewDeleteBuilder creates a new DeleteBuilder pointer
 // It initializes the builder with default values
-func NewDeleteBuilder() *DeleteBuilder {
+func NewDeleteBuilder() any {
 	builder := CreateDeleteBuilder()
 	return &builder
+}
+
+var deleteBuilderPool = sync.Pool{
+	New: NewDeleteBuilder,
+}
+
+// GetDeleteBuilder retrieves a DeleteBuilder from the pool.
+func GetDeleteBuilder() *DeleteBuilder {
+	return deleteBuilderPool.Get().(*DeleteBuilder)
+}
+
+// PutDeleteBuilder resets and returns a DeleteBuilder to the pool.
+func PutDeleteBuilder(b *DeleteBuilder) {
+	b.Reset()
+	deleteBuilderPool.Put(b)
+}
+
+// Reset resets the DeleteBuilder to its initial state.
+func (b *DeleteBuilder) Reset() {
+	b.Table = nil
+	b.Where = Condition{}
+	b.Limit = TakeNoLimit
+	b.argNo = 0
+	b.holders = b.holders[:0]
+	b.fullName = ""
+	if b.buf != nil {
+		b.buf.Reset()
+	} else {
+		b.buf = bufPool.Get().(*bytes.Buffer)
+	}
 }
 
 // SetTable sets the table for the DeleteBuilder
@@ -184,7 +214,6 @@ func (b *DeleteBuilder) Build() (sql string, args []any) {
 	_ = b.BuildTail()
 	sql = b.buf.String()
 	b.buf.Reset()
-	bufPool.Put(b.buf)
 	return
 }
 
@@ -211,61 +240,53 @@ type Builder struct {
 
 // NewBuilder creates a new Builder instance
 // It initializes the builder with default values and an empty changes map
-func NewBuilder() *Builder {
+func NewBuilder() any {
 	return &Builder{
 		Changes:       make(map[*Field]any),
 		DeleteBuilder: CreateDeleteBuilder(),
 	}
 }
 
-// var builderPool = sync.Pool{
-// 	New: func() any {
-// 		buf := bufPool.Get().(*bytes.Buffer)
-// 		buf.Reset()
-// 		return &Builder{
-// 			Changes: make(map[*Field]any),
-// 			buf:     buf,
-// 		}
-// 	},
-// }
+var builderPool = sync.Pool{
+	New: NewBuilder,
+}
 
-// // GetBuilder retrieves a Builder from the pool.
-// func GetBuilder() *Builder {
-// 	return builderPool.Get().(*Builder)
-// }
+// GetBuilder retrieves a Builder from the pool.
+func GetBuilder() *Builder {
+	return builderPool.Get().(*Builder)
+}
 
-// // PutBuilder resets and returns a Builder to the pool.
-// func PutBuilder(b *Builder) {
-// 	bufPool.Put(b.buf)
-// 	b.Reset()
-// 	builderPool.Put(b)
-// }
+// PutBuilder resets and returns a Builder to the pool.
+func PutBuilder(b *Builder) {
+	b.Reset()
+	builderPool.Put(b)
+}
 
-// // Reset resets the Builder to its initial state.
-// func (b *Builder) Reset() {
-// 	b.ResetForSave()
-// 	b.Type = 0
-// 	b.Table = nil
-// 	b.fullName = ""
-// 	b.Joins = make([]*JoinTable, 0)
-// 	b.Where = Condition{}
-// 	b.Orders = make([]*Order, 0)
-// 	b.Groups = make([]*Group, 0)
-// 	b.Offset = 0
-// 	b.RollUp = ""
-// }
+// Reset resets the Builder to its initial state.
+func (b *Builder) Reset() {
+	b.ResetForSave()
+	b.Type = 0
+	b.Table = nil
+	b.fullName = ""
+	b.Joins = b.Joins[:0]
+	b.Where = Condition{}
+	b.Orders = b.Orders[:0]
+	b.Groups = b.Groups[:0]
+	b.Offset = 0
+	b.RollUp = ""
+}
 
 // ResetForSave resets the Builder for INSERT/UPDATE operations
 // It clears changes, insert values, visit fields, and other operation-specific settings
 func (b *Builder) ResetForSave() {
-	b.Changes = make(map[*Field]any)
-	b.InsertValues = make([][]any, 0)
-	b.VisitFields = make([]*Field, 0)
+	clear(b.Changes) // Clear map instead of creating a new one
+	b.InsertValues = b.InsertValues[:0]
+	b.VisitFields = b.VisitFields[:0]
 	b.Limit = -1
 	b.Returning = ""
 	b.ForUpdate = false
 	b.argNo = 0
-	b.holders = make([]string, 0)
+	b.holders = b.holders[:0]
 }
 
 // IsJoinQuery checks if the query is a join query
@@ -500,11 +521,12 @@ func (b *Builder) Build(destroy bool) (sql string, args []any) {
 		args = append(args, tailArgs...)
 	}
 	sql = b.buf.String()
+
 	b.buf.Reset()
 	bufPool.Put(b.buf)
-	// if destroy {
-	// 	PutBuilder(b)
-	// }
+	if destroy {
+		PutBuilder(b)
+	}
 	return
 }
 
@@ -513,7 +535,7 @@ func (b *Builder) Build(destroy bool) (sql string, args []any) {
 // and returns a map of primary key column names to their values
 func CollectFields[T any](builder *Builder, table *Table[T], valueOf reflect.Value, ignores []string) (Dict, int) {
 	pkFid, pkName, pkeys := table.TableInfo.GetPrimaryInfo()
-	primary := make(Dict)
+	primary := make(Dict, len(pkeys))
 	for _, col := range table.Columns {
 		if len(ignores) > 0 && slices.Contains(ignores, col.FieldName) {
 			continue

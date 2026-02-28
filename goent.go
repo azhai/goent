@@ -40,7 +40,7 @@ func Open[T any](drv model.Driver, logFile string) (*T, error) {
 		return nil, model.ErrInvalidDBField
 	}
 
-	db, schemas := new(DB), make([]string, 0)
+	db, schemas := new(DB), make([]string, 0, dbId)
 	db.SetDriver(drv)
 	schemas, err = travelSchemas(db, dbId, valueOf)
 	dc.SetSchemas(schemas)
@@ -319,8 +319,8 @@ func getPk(db *DB, schema *string, valueOf reflect.Value, tableId int, driver mo
 	}
 
 	table := utils.ParseTableNameByValue(valueOf)
-	pks := make([]pk, len(fields))
-	fieldIds := make([]int, len(fields))
+	size := len(fields)
+	pks, fieldIds := make([]pk, size), make([]int, size)
 	for i := range fields {
 		fieldId := getFieldId(typeOf, fields[i].Name)
 		pks[i] = createPk(db, schema, table, fields[i].Name, isReturningId(fields[i]), tableId, fieldId, driver)

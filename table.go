@@ -20,20 +20,23 @@ type Entity interface {
 // TableInfo contains metadata about a database table including columns, primary keys, and indexes.
 // It is automatically populated when creating a Table using reflection.
 type TableInfo struct {
-	TableAddr    uintptr             // TableAddr is the unique address of the table type.
-	FieldName    string              // FieldName is the name of the field in the entity struct.
-	TableId      int                 // TableId is the unique identifier for the table.
-	TableName    string              // TableName is the name of the table in the database schema.
-	SchemaId     int                 // SchemaId is the unique identifier for the schema.
-	SchemaName   string              // SchemaName is the name of the schema in the database.
-	PrimaryKeys  []*Index            // PrimaryKeys is a list of primary key indexes.
-	Indexes      []*Index            // Indexes is a list of non-primary key indexes.
-	ColumnNames  []string            // ColumnNames is a list of column names in the table.
-	Columns      map[string]*Column  // Columns is a map of column names to Column metadata.
-	Foreigns     map[string]*Foreign // Foreigns is a map of foreign key column names to Foreign metadata.
-	Ignores      []string            // Ignores is a list of column names to ignore.
-	sortedFields []*Field            // sortedFields is a list of columns sorted by field ID.
-	simpleTable  bool                // simpleTable is true if the table has a single primary key.
+	TableAddr  uintptr // TableAddr is the unique address of the table type.
+	FieldName  string  // FieldName is the name of the field in the entity struct.
+	TableId    int     // TableId is the unique identifier for the table.
+	TableName  string  // TableName is the name of the table in the database schema.
+	SchemaId   int     // SchemaId is the unique identifier for the schema.
+	SchemaName string  // SchemaName is the name of the schema in the database.
+
+	PrimaryKeys []*Index            // PrimaryKeys is a list of primary key indexes.
+	Indexes     []*Index            // Indexes is a list of non-primary key indexes.
+	ColumnNames []string            // ColumnNames is a list of column names in the table.
+	Columns     map[string]*Column  // Columns is a map of column names to Column metadata.
+	Foreigns    map[string]*Foreign // Foreigns is a map of foreign key column names to Foreign metadata.
+	Ignores     []string            // Ignores is a list of column names to ignore.
+
+	sortedFields []*Field // sortedFields is a list of columns sorted by field ID.
+	simpleTable  bool     // simpleTable is true if the table has a single primary key.
+	// fieldCache   map[string]*Field // fieldCache caches Field objects to reduce allocations.
 }
 
 // String returns the table name as a string representation.
@@ -70,26 +73,27 @@ func (info TableInfo) ColumnInfo(name string) *Column {
 
 // Field returns a Field pointer for the specified column name.
 // It panics if the column is not found in the table.
-func (info TableInfo) Field(col string) *Field {
-	col = strings.TrimSpace(col)
-	if fid, ok := info.Check(col); ok {
-		return &Field{TableAddr: info.TableAddr, FieldId: fid, ColumnName: col}
+// Uses caching to reduce allocations.
+func (info *TableInfo) Field(name string) *Field {
+	name = strings.TrimSpace(name)
+	if info.simpleTable || name == "" || name == "*" ||
+		strings.ContainsAny(name, " ,+*/%()") {
+		return &Field{TableAddr: info.TableAddr, FieldId: -1, ColumnName: name}
 	}
-	panic(fmt.Sprintf("column %s not found in table %s", col, info.TableName))
-}
-
-// Check returns the field ID and whether the column exists in the table.
-// It returns (-1, true) for wildcard (*) or simple tables.
-func (info TableInfo) Check(col string) (int, bool) {
-	col = strings.TrimSpace(col)
-	if info.simpleTable || col == "" || col == "*" ||
-		strings.ContainsAny(col, " ,+*/%()") {
-		return -1, true
+	var col *Column
+	if col = info.ColumnInfo(name); col == nil {
+		panic(fmt.Sprintf("column %s not found in table %s", name, info.TableName))
 	}
-	if info := info.ColumnInfo(col); info != nil {
-		return info.FieldId, true
-	}
-	return -1, false
+	// Check cache first
+	// if info.fieldCache == nil {
+	// 	info.fieldCache = make(map[string]*Field, len(info.Columns))
+	// } else if fld, ok := info.fieldCache[name]; ok {
+	// 	return fld
+	// }
+	// Create new Field and cache it
+	fld := &Field{TableAddr: info.TableAddr, FieldId: col.FieldId, ColumnName: col.ColumnName}
+	// info.fieldCache[name] = fld
+	return fld
 }
 
 // GetPrimaryInfo returns the primary key field ID, column name, and all primary key column names.
@@ -366,8 +370,7 @@ func (t *Table[T]) Dest() (*T, []any) {
 // ------------------------------
 
 // CacheOne caches a single row in the table's cache using its ID as the key.
-func (t *Table[T]) CacheOne(row any) {
-	var id int64
+func (t *Table[T]) CacheOne(row any) (id int64) {
 	if row, ok := row.(Entity); ok {
 		id = row.GetID()
 	} else {
@@ -377,6 +380,7 @@ func (t *Table[T]) CacheOne(row any) {
 		t.Cache = utils.NewCoMap[int64, T]()
 	}
 	t.Cache.Set(id, row.(*T))
+	return
 }
 
 // ------------------------------

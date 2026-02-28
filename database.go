@@ -42,23 +42,24 @@ func GetTableInfo(addr uintptr) *TableInfo {
 
 // GetTableColumn returns the column info for a given table address and column name
 // It looks up the column information from the table registry
-func GetTableColumn(addr uintptr, name string) *Column {
-	if info := GetTableInfo(addr); info != nil {
-		return info.ColumnInfo(name)
+func GetTableColumn(addr uintptr, name string) (*Column, string) {
+	if addr == 0 {
+		return nil, ""
 	}
-	return nil
+	if info := GetTableInfo(addr); info != nil {
+		return info.ColumnInfo(name), info.TableName
+	}
+	return nil, ""
 }
 
-// GetFieldName returns the qualified field name (table.column) for a given table address and column name
+// GetTableFieldName returns the qualified field name (table.column) for a given table address and column name
 // If the address is 0, it returns just the column name
-func GetFieldName(addr uintptr, name string) (string, error) {
+func GetTableFieldName(addr uintptr, name string) (string, error) {
 	if addr == 0 {
 		return name, nil
 	}
-	if info := GetTableInfo(addr); info != nil {
-		if _, ok := info.Check(name); ok {
-			return fmt.Sprintf("%s.%s", info.String(), name), nil
-		}
+	if info, table := GetTableColumn(addr, name); info != nil {
+		return fmt.Sprintf("%s.%s", table, name), nil
 	}
 	return "", model.NewFieldNotFoundError(name)
 }

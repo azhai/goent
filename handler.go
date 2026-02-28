@@ -193,7 +193,7 @@ type fetchContext struct {
 
 func (ctx *fetchContext) buildDest(valueOf reflect.Value) []any {
 	dest := make([]any, 0, ctx.destSize)
-	foreignValues := make(map[uintptr]reflect.Value)
+	foreignValues := make(map[uintptr]reflect.Value, len(ctx.foreigns))
 	var mainTableAddr uintptr
 	if len(ctx.fields) > 0 {
 		mainTableAddr = ctx.fields[0].TableAddr
@@ -287,7 +287,7 @@ func FlattenDest(valueOf reflect.Value) []any {
 //	rows.Scan(dest...) // scan into struct fields
 // func AppendDestFields(valueOf reflect.Value, fields []*Field, foreigns []*Foreign) []any {
 // 	var dest []any
-// 	foreignValues := make(map[uintptr]reflect.Value)
+// 	foreignValues := make(map[uintptr]reflect.Value, len(foreigns))
 // 	var mainTableAddr uintptr
 // 	if len(fields) > 0 {
 // 		mainTableAddr = fields[0].TableAddr

@@ -4,13 +4,17 @@ import "time"
 
 // Book represents a book from a bookstore system.
 type Book struct {
-	ID           int64 `bun:"id,pk,autoincrement" gorm:"primary_key"`
-	ISBN         string
+	ID           int64
+	ISBN         string `goe:"unique"`
 	Title        string
 	Author       string
 	Genre        string
 	Quantity     int
 	PublicizedAt time.Time
+}
+
+func (*Book) TableName() string {
+	return "books"
 }
 
 func NewBooks(quantity int) []*Book {

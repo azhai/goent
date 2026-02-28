@@ -8,18 +8,24 @@ import (
 	"github.com/azhai/goent"
 )
 
+// Database is the database connection with its driver.
+type Database struct {
+	PublicSchema `goe:"public;prefix:t_"`
+	*goent.DB
+}
+
+// PublicSchema is the public schema of the database.
+type PublicSchema struct {
+	Category    *goent.Table[Category]
+	Product     *goent.Table[Product]
+	Order       *goent.Table[Order]
+	OrderDetail *goent.Table[OrderDetail]
+}
+
 // Category is a category of products.
 type Category struct {
 	ID   int64
 	Name string
-}
-
-func (m *Category) GetID() int64 {
-	return m.ID
-}
-
-func (m *Category) SetID(id int64) {
-	m.ID = id
 }
 
 // Product is a product in the store.
@@ -34,14 +40,6 @@ type Product struct {
 	Category   *Category
 }
 
-func (m *Product) GetID() int64 {
-	return m.ID
-}
-
-func (m *Product) SetID(id int64) {
-	m.ID = id
-}
-
 // Order is an order in the store.
 type Order struct {
 	ID       int64
@@ -54,16 +52,8 @@ type Order struct {
 	Products []*Product `goe:"-"`
 }
 
-func (m *Order) GetID() int64 {
-	return m.ID
-}
-
-func (m *Order) SetID(id int64) {
-	m.ID = id
-}
-
-func (m *Order) GetProductIds() (ids []int64) {
-	for _, dt := range m.Details {
+func (t *Order) GetProductIds() (ids []int64) {
+	for _, dt := range t.Details {
 		ids = append(ids, dt.ProductID)
 	}
 	return
@@ -83,12 +73,4 @@ type OrderDetail struct {
 
 func (*OrderDetail) TableName() string {
 	return "t_order_product"
-}
-
-// PublicSchema is the public schema of the database.
-type PublicSchema struct {
-	Category    *goent.Table[Category]
-	Product     *goent.Table[Product]
-	Order       *goent.Table[Order]
-	OrderDetail *goent.Table[OrderDetail]
 }

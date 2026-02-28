@@ -118,7 +118,7 @@ func QuerySome2One[T, R any](foreign *Foreign, table *Table[T], refer *Table[R])
 	if table.Cache == nil || table.Cache.Size() == 0 {
 		return nil, nil
 	}
-	reg := make(map[int64][]*T)
+	reg := make(map[int64][]*T, table.Cache.Size())
 	for _, row := range table.Cache.Each() {
 		valueOf := reflect.ValueOf(row).Elem()
 		fieldOf := valueOf.Field(col.FieldId)
@@ -160,7 +160,7 @@ func QueryOne2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R])
 	if table.Cache == nil || table.Cache.Size() == 0 {
 		return nil, nil
 	}
-	reg := make(map[int64]*T)
+	reg := make(map[int64]*T, table.Cache.Size())
 	for id, row := range table.Cache.Each() {
 		reg[id] = row
 		elem := reflect.ValueOf(row).Elem()
@@ -207,7 +207,7 @@ func QueryMany2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R]
 	if table.Cache == nil || table.Cache.Size() == 0 {
 		return nil, nil
 	}
-	reg := make(map[int64]*T)
+	reg := make(map[int64]*T, table.Cache.Size())
 	for id, row := range table.Cache.Each() {
 		reg[id] = row
 		elem := reflect.ValueOf(row).Elem()
@@ -223,7 +223,7 @@ func QueryMany2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R]
 		return nil, err
 	}
 
-	rightIds := make([]int64, 0)
+	rightIds := make([]int64, 0, len(middleData))
 	for _, pids := range middleData {
 		rightIds = append(rightIds, pids...)
 	}
@@ -270,22 +270,23 @@ func QueryMiddleTable[T any](foreign *Foreign, table *Table[T], leftCol, rightCo
 		return nil, model.ErrMiddleTableNotSet
 	}
 
-	pkIds := make([]int64, 0)
+	size := table.Cache.Size()
+	pkIds := make([]int64, 0, size)
 	for id := range table.Cache.Each() {
 		pkIds = append(pkIds, id)
 	}
 	if len(pkIds) == 0 {
-		return make(map[int64][]int64), nil
+		return nil, nil
 	}
 	slices.Sort(pkIds)
 
 	leftField := &Field{ColumnName: leftCol}
 	filter := And(foreign.Middle.Where, In(leftField, pkIds))
 
-	builder := NewBuilder()
-	// defer PutBuilder(builder)
+	builder := GetBuilder()
+	defer PutBuilder(builder)
 	builder.Type = model.SelectQuery
-	builder.Where = filter
+	builder.Where, builder.Limit = filter, size
 	builder.VisitFields = []*Field{
 		{ColumnName: leftCol},
 		{ColumnName: rightCol},
@@ -298,7 +299,7 @@ func QueryMiddleTable[T any](foreign *Foreign, table *Table[T], leftCol, rightCo
 	}
 	defer rows.Close()
 
-	data := make(map[int64][]int64)
+	data := make(map[int64][]int64, size)
 	for rows.Next() {
 		var leftId, rightId int64
 		if err = rows.Scan(&leftId, &rightId); err != nil {

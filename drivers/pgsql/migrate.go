@@ -242,7 +242,8 @@ func foreignKeyIsPrimarykey(table *model.TableMigrate, attName string) bool {
 func createTable(tbl *model.TableMigrate, dataMap map[string]dataType, sql *strings.Builder, tables map[string]*model.TableMigrate, sqlForeignKeys *strings.Builder) {
 	t := table{}
 	t.name = fmt.Sprintf("CREATE TABLE %v (", tbl.EscapingTableName())
-	processedAttrs := make(map[string]bool)
+	size := len(tbl.PrimaryKeys) + len(tbl.Attributes)
+	processedAttrs := make(map[string]bool, size)
 
 	for _, att := range tbl.PrimaryKeys {
 		att.DataType = checkDataType(att.DataType, dataMap).typeName

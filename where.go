@@ -28,16 +28,20 @@ func SameTable(field, another *Field) bool {
 //
 //	field := goent.Expr("UPPER(name)").(*goent.Field)
 //	users, _ := db.User.Filter(goent.Equals(field, "JOHN")).Select().All()
-func (f *Field) Func(name string) *Field {
-	f.Function = name
-	return f
+func (f *Field) Func(name, alias string) *Field {
+	return &Field{
+		TableAddr: f.TableAddr, FieldId: -1,
+		ColumnName: f.ColumnName,
+		AliasName:  alias, Function: name,
+	}
 }
 
 // GetFid returns the field ID, resolving it from the table metadata if needed
 // It looks up the field ID from the table registry if not already set
 func (f *Field) GetFid() int {
 	if f.FieldId < 0 && f.ColumnName != "*" {
-		if col := GetTableColumn(f.TableAddr, f.ColumnName); col != nil {
+		col, _ := GetTableColumn(f.TableAddr, f.ColumnName)
+		if col != nil {
 			f.FieldId = col.FieldId
 		}
 	}
@@ -56,7 +60,7 @@ func (f *Field) Simple() string {
 // String returns the qualified field name (table.column) with any SQL function applied
 // It includes the table name for unambiguous reference
 func (f *Field) String() string {
-	res, err := GetFieldName(f.TableAddr, f.ColumnName)
+	res, err := GetTableFieldName(f.TableAddr, f.ColumnName)
 	if err != nil {
 		return ""
 	}
@@ -281,7 +285,10 @@ func NotEqualsField(left, right *Field) Condition {
 //
 //	cond := goent.EqualsMap(db.User.Field("status"), map[string]any{"active": true, "pending": nil})
 func EqualsMap(left *Field, data map[string]any) Condition {
-	var branches []Condition
+	if len(data) == 0 {
+		return Condition{}
+	}
+	branches := make([]Condition, 0, len(data))
 	for key, value := range data {
 		field := &Field{TableAddr: left.TableAddr, ColumnName: key}
 		if _, ok := value.(NilMarker); ok {
