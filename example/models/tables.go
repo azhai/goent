@@ -6,7 +6,13 @@ import (
 	"time"
 
 	"github.com/azhai/goent"
+	"github.com/azhai/goent/drivers/pgsql"
 )
+
+// Connect opens a database connection.
+func Connect(dbDSN, logFile string) (*Database, error) {
+	return goent.Open[Database](pgsql.OpenDSN(dbDSN), logFile)
+}
 
 // Database is the database connection with its driver.
 type Database struct {
