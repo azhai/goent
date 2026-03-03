@@ -103,6 +103,78 @@ type TableMigrate struct {
 	OneToSomes   []OneToSomeMigrate  // One-to-one/one-to-many relationships
 }
 
+// OrderedColumn represents a column with its position for ordering
+type OrderedColumn struct {
+	Pos    int // Field position in struct
+	IsPK   bool
+	PK     *PrimaryKeyMigrate
+	Attr   *AttributeMigrate
+	OneTo  *OneToSomeMigrate
+	ManyTo *ManyToSomeMigrate
+}
+
+// Name returns the column name
+func (c OrderedColumn) Name() string {
+	if c.IsPK {
+		return c.PK.Name
+	}
+	if c.Attr != nil {
+		return c.Attr.Name
+	}
+	if c.OneTo != nil {
+		return c.OneTo.Name
+	}
+	if c.ManyTo != nil {
+		return c.ManyTo.Name
+	}
+	return ""
+}
+
+// GetOrderedColumns returns all columns ordered by their field position
+func (t *TableMigrate) GetOrderedColumns() []OrderedColumn {
+	var columns []OrderedColumn
+
+	for i := range t.PrimaryKeys {
+		columns = append(columns, OrderedColumn{
+			Pos:  t.PrimaryKeys[i].FieldPos,
+			IsPK: true,
+			PK:   &t.PrimaryKeys[i],
+		})
+	}
+
+	for i := range t.Attributes {
+		columns = append(columns, OrderedColumn{
+			Pos:  t.Attributes[i].FieldPos,
+			Attr: &t.Attributes[i],
+		})
+	}
+
+	for i := range t.OneToSomes {
+		columns = append(columns, OrderedColumn{
+			Pos:   t.OneToSomes[i].FieldPos,
+			OneTo: &t.OneToSomes[i],
+		})
+	}
+
+	for i := range t.ManyToSomes {
+		columns = append(columns, OrderedColumn{
+			Pos:    t.ManyToSomes[i].FieldPos,
+			ManyTo: &t.ManyToSomes[i],
+		})
+	}
+
+	// Sort by position
+	for i := 0; i < len(columns)-1; i++ {
+		for j := i + 1; j < len(columns); j++ {
+			if columns[i].Pos > columns[j].Pos {
+				columns[i], columns[j] = columns[j], columns[i]
+			}
+		}
+	}
+
+	return columns
+}
+
 // EscapingTableName returns the escaped table name with schema if available
 // It formats the escaped table name as schema.table if a schema is provided
 func (t TableMigrate) EscapingTableName() string {
@@ -141,6 +213,7 @@ type AttributeMigrate struct {
 	EscapingName string // Escaped column name
 	DataType     string // Data type
 	Default      string // Default value
+	FieldPos     int    // Field position in struct (for ordering)
 }
 
 // OneToSomeMigrate represents a one-to-one or one-to-many relationship for migration

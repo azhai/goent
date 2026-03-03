@@ -186,7 +186,7 @@ func (b *DeleteBuilder) buildTemplate(cond Condition, args *[]any, startIdx int,
 }
 
 func (b *DeleteBuilder) appendValueParam(val *Value, startIdx int, args *[]any) int {
-	if val.Type == reflect.Slice && len(val.Args) > 0 {
+	if len(val.Args) > 0 {
 		b.buf.WriteString("(")
 		for j, arg := range val.Args {
 			startIdx++
@@ -198,10 +198,14 @@ func (b *DeleteBuilder) appendValueParam(val *Value, startIdx int, args *[]any) 
 			*args = append(*args, arg)
 		}
 		b.buf.WriteByte(')')
-	} else if len(val.Args) > 0 {
+	} else if val.Length > 0 {
 		startIdx++
 		b.buf.WriteString("$" + strconv.Itoa(startIdx))
-		*args = append(*args, val.Args[0])
+		if val.single != nil {
+			*args = append(*args, val.single)
+		} else {
+			*args = append(*args, val.Args[0])
+		}
 	}
 	return startIdx
 }

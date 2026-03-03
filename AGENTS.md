@@ -332,7 +332,7 @@ db.Default.Insert().One(&d)
 9. **LeftJoin auto-selects joined table columns** - No need to manually specify columns
 10. **Slice foreign fields are skipped in LeftJoin** - Use standard `Join` for slice relationships
 11. **Use code generator for best performance** - Generated code is 15-27x faster than reflection
-12. **Automatic use of generated code** - GoEnt automatically uses generated `ScanFields()` methods when available, providing performance improvements without manual changes
+12. **Automatic use of generated code** - GoEnt automatically uses generated `ScanDest()` methods when available, providing performance improvements without manual changes
 
 ## Common Tasks
 
@@ -357,7 +357,7 @@ db.Default.Insert().One(&d)
 1. Install: `go install github.com/azhai/goent/cmd/goent-gen@latest`
 2. Add `//go:generate goent-gen .` to your models package
 3. Run `go generate ./models`
-4. Use generated `ScanFields()` or `FetchXXX()` methods for best performance
+4. Use generated `ScanDest()` or `FetchXXX()` methods for best performance
 
 ## Build and Test Commands
 

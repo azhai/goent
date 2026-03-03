@@ -2,6 +2,8 @@ package goent
 
 import (
 	"reflect"
+
+	"github.com/azhai/goent/model"
 )
 
 // Column represents a database column with its metadata and field information
@@ -64,8 +66,9 @@ type ResultFloat = ResultFunc[float64] // Float64 result type
 // FetchSingleResult executes a single-row query and returns the result
 // It fetches a single value from the query result
 // Example: count, err := FetchSingleResult[int64](query)
-func FetchSingleResult[T, V any](query *StateSelect[T, ResultFunc[V]]) (V, error) {
-	obj, err := query.FetchRow(FetchValue)
+func FetchSingleResult[T, V any](state *StateSelect[T, ResultFunc[V]]) (V, error) {
+	qr := model.CreateQuery(state.builder.Build(true))
+	obj, err := state.FetchRow(qr, FetchValue)
 	if obj == nil {
 		obj = new(ResultFunc[V])
 	}
@@ -75,9 +78,9 @@ func FetchSingleResult[T, V any](query *StateSelect[T, ResultFunc[V]]) (V, error
 // FetchArrayResult executes a multi-row query and returns the result array
 // It fetches multiple values from the query result
 // Example: names, err := FetchArrayResult[string](query)
-func FetchArrayResult[T, V any](query *StateSelect[T, ResultFunc[V]]) ([]V, error) {
+func FetchArrayResult[T, V any](state *StateSelect[T, ResultFunc[V]]) ([]V, error) {
 	var res []V
-	for row, err := range query.IterRows(FetchValue) {
+	for row, err := range state.IterRows(FetchValue) {
 		if err != nil {
 			return nil, err
 		}

@@ -214,55 +214,53 @@ func createTable(tbl *model.TableMigrate, dataMap map[string]*dataType, sql *str
 	t.name = fmt.Sprintf("CREATE TABLE %v (", tbl.EscapingTableName())
 	processedAttrs := make(map[string]bool)
 
-	for _, att := range tbl.PrimaryKeys {
-		att.DataType = checkDataType(att.DataType, dataMap).typeName
-		if att.AutoIncrement {
-			t.createAttrs = append(t.createAttrs, fmt.Sprintf("%v %v NOT NULL,", att.EscapingName, att.DataType))
-		} else {
-			t.createAttrs = append(t.createAttrs, fmt.Sprintf("%v %v NOT NULL %v,", att.EscapingName, att.DataType, setDefault(att.Default)))
+	columns := tbl.GetOrderedColumns()
+	for _, col := range columns {
+		if processedAttrs[col.Name()] {
+			continue
 		}
-		processedAttrs[att.Name] = true
-	}
+		processedAttrs[col.Name()] = true
 
-	for _, att := range tbl.Attributes {
-		att.DataType = checkDataType(att.DataType, dataMap).typeName
-		t.createAttrs = append(t.createAttrs, fmt.Sprintf("%v %v %v %v,", att.EscapingName, att.DataType, func() string {
-			if att.Nullable {
-				return "NULL"
+		if col.IsPK {
+			att := col.PK
+			att.DataType = checkDataType(att.DataType, dataMap).typeName
+			if att.AutoIncrement {
+				t.createAttrs = append(t.createAttrs, fmt.Sprintf("%v %v NOT NULL,", att.EscapingName, att.DataType))
 			} else {
-				return "NOT NULL"
+				t.createAttrs = append(t.createAttrs, fmt.Sprintf("%v %v NOT NULL %v,", att.EscapingName, att.DataType, setDefault(att.Default)))
 			}
-		}(), setDefault(att.Default)))
-		processedAttrs[att.Name] = true
-	}
-
-	for _, att := range tbl.OneToSomes {
-		if processedAttrs[att.Name] {
-			continue
-		}
-		tb := tables[att.TargetTable]
-		if tb.Migrated {
-			t.createAttrs = append(t.createAttrs, foreignOneToSome(att, dataMap))
-		} else {
-			if tb != tbl && !skipDependency {
-				createTable(tb, dataMap, sql, tables, false)
+		} else if col.Attr != nil {
+			att := col.Attr
+			att.DataType = checkDataType(att.DataType, dataMap).typeName
+			t.createAttrs = append(t.createAttrs, fmt.Sprintf("%v %v %v %v,", att.EscapingName, att.DataType, func() string {
+				if att.Nullable {
+					return "NULL"
+				} else {
+					return "NOT NULL"
+				}
+			}(), setDefault(att.Default)))
+		} else if col.OneTo != nil {
+			att := col.OneTo
+			tb := tables[att.TargetTable]
+			if tb.Migrated {
+				t.createAttrs = append(t.createAttrs, foreignOneToSome(*att, dataMap))
+			} else {
+				if tb != tbl && !skipDependency {
+					createTable(tb, dataMap, sql, tables, false)
+				}
+				t.createAttrs = append(t.createAttrs, foreignOneToSome(*att, dataMap))
 			}
-			t.createAttrs = append(t.createAttrs, foreignOneToSome(att, dataMap))
-		}
-	}
-
-	for _, att := range tbl.ManyToSomes {
-		if processedAttrs[att.Name] {
-			continue
-		}
-		tb := tables[att.TargetTable]
-		if tb.Migrated {
-			t.createAttrs = append(t.createAttrs, foreignManyToSome(att, dataMap))
-		} else {
-			if tb != tbl && !skipDependency {
-				createTable(tb, dataMap, sql, tables, false)
+		} else if col.ManyTo != nil {
+			att := col.ManyTo
+			tb := tables[att.TargetTable]
+			if tb.Migrated {
+				t.createAttrs = append(t.createAttrs, foreignManyToSome(*att, dataMap))
+			} else {
+				if tb != tbl && !skipDependency {
+					createTable(tb, dataMap, sql, tables, false)
+				}
+				t.createAttrs = append(t.createAttrs, foreignManyToSome(*att, dataMap))
 			}
-			t.createAttrs = append(t.createAttrs, foreignManyToSome(att, dataMap))
 		}
 	}
 

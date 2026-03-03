@@ -22,9 +22,9 @@ func NewCoMap[K int | int64 | string, V any]() *CoMap[K, V] {
 
 // NewCoMapSize creates a new thread-safe concurrent map
 // It initializes the map with the specified key and value types
-func NewCoMapSize[K int | int64 | string, V any](capSize int) *CoMap[K, V] {
+func NewCoMapSize[K int | int64 | string, V any](capacity int) *CoMap[K, V] {
 	return &CoMap[K, V]{
-		data: make(map[K]*V, capSize),
+		data: make(map[K]*V, capacity),
 	}
 }
 
@@ -51,20 +51,20 @@ func (m *CoMap[K, V]) Set(key K, value *V) {
 	m.data[key] = value
 }
 
-// Delete removes a value from the map by key
-// It uses a write lock for thread safety
-func (m *CoMap[K, V]) Delete(key K) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.data, key)
-}
-
 // Update updates the map with multiple key-value pairs
 // It copies all entries from the provided map to the current map
 func (m *CoMap[K, V]) Update(data map[K]*V) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	maps.Copy(m.data, data)
+}
+
+// Delete removes a value from the map by key
+// It uses a write lock for thread safety
+func (m *CoMap[K, V]) Delete(key K) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.data, key)
 }
 
 // Keys returns all keys in the map as a slice

@@ -3,6 +3,7 @@ package pgsql
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -20,6 +21,18 @@ type Rows struct {
 func (rs *Rows) Close() error {
 	rs.Rows.Close()
 	return rs.Err()
+}
+
+type Row struct {
+	pgx.Row
+}
+
+func (r Row) Scan(dest ...any) error {
+	err := r.Row.Scan(dest...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return sql.ErrNoRows
+	}
+	return err
 }
 
 // Driver implements the PostgreSQL database driver using pgx.
@@ -177,7 +190,7 @@ func (c Connection) QueryContext(ctx context.Context, query *model.Query) (model
 }
 
 func (c Connection) QueryRowContext(ctx context.Context, query *model.Query) model.Row {
-	return c.sql.QueryRow(ctx, query.RawSql, query.Arguments...)
+	return Row{c.sql.QueryRow(ctx, query.RawSql, query.Arguments...)}
 }
 
 func (c Connection) ExecContext(ctx context.Context, query *model.Query) error {
@@ -202,7 +215,7 @@ func (t Transaction) QueryContext(ctx context.Context, query *model.Query) (mode
 }
 
 func (t Transaction) QueryRowContext(ctx context.Context, query *model.Query) model.Row {
-	return t.tx.QueryRow(ctx, query.RawSql, query.Arguments...)
+	return Row{t.tx.QueryRow(ctx, query.RawSql, query.Arguments...)}
 }
 
 func (t Transaction) ExecContext(ctx context.Context, query *model.Query) error {

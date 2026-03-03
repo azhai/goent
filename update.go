@@ -26,6 +26,21 @@ func (s *StateUpdate[T]) Exec() error {
 	return qr.WrapExec(s.ctx, conn, cfg)
 }
 
+// ByPK updates a single row by primary key.
+// This is an optimized path for simple primary key updates.
+// Only works for tables with a single primary key column.
+func (s *StateUpdate[T]) ByPK(id int64) error {
+	if len(s.builder.Changes) == 0 {
+		return nil
+	}
+	pkField := s.table.GetPKField()
+	if pkField == nil {
+		return model.ErrNoPrimaryKey
+	}
+	s.builder.Where = Equals(pkField, id)
+	return s.Exec()
+}
+
 // OnTransaction sets the transaction for the UPDATE operation
 // It ensures the update runs within the specified transaction
 func (s *StateUpdate[T]) OnTransaction(tx model.Transaction) *StateUpdate[T] {

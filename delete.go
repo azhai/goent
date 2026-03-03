@@ -35,6 +35,19 @@ func (s *StateDelete[T]) Exec() error {
 	return qr.WrapExec(s.ctx, conn, cfg)
 }
 
+// ByPK deletes a single row by primary key using cached SQL.
+// This is an optimized path that bypasses query building for simple primary key deletions.
+// Only works for tables with a single primary key column.
+func (s *StateDelete[T]) ByPK(id int64) error {
+	sql := s.table.GetDeleteByPKSql()
+	if sql == "" {
+		return model.ErrNoPrimaryKey
+	}
+	conn, cfg := s.Prepare(s.table.db.driver)
+	qr := model.CreateQuery(sql, []any{id})
+	return qr.WrapExec(s.ctx, conn, cfg)
+}
+
 // OnTransaction sets the transaction for the DELETE operation
 // It ensures the delete runs within the specified transaction
 func (s *StateDelete[T]) OnTransaction(tx model.Transaction) *StateDelete[T] {

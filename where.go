@@ -73,9 +73,9 @@ func (f *Field) String() string {
 // Value represents a value or list of values for use in query conditions
 // It handles both single values and slices for IN conditions
 type Value struct {
-	Type   reflect.Kind // Type of the value
-	Args   []any        // Slice of values for IN conditions
-	Length int          // Length of the value slice
+	Args   []any // Slice of values for IN conditions
+	Length int   // Length of the value slice
+	single any   // Single value storage to avoid slice allocation
 }
 
 // NewValue creates a new Value from a Go value
@@ -86,20 +86,41 @@ type Value struct {
 //	value := NewValue([]int{1, 2, 3}) // creates IN (1, 2, 3)
 //	value := NewValue(42)              // creates single value
 func NewValue(value any) *Value {
-	valueOf := reflect.ValueOf(value)
-	kind := valueOf.Kind()
-	if kind == reflect.Slice {
-		size := valueOf.Len()
-		args := make([]any, size)
-		for i := range args {
-			args[i] = valueOf.Index(i).Interface()
+	switch v := value.(type) {
+	default:
+		return NewValueReflect(value)
+	case nil:
+		return &Value{Args: nil, Length: 0}
+	case []any:
+		return &Value{Args: v, Length: len(v)}
+	case []int64:
+		args := make([]any, len(v))
+		for i, x := range v {
+			args[i] = x
 		}
-		return &Value{Type: kind, Args: args, Length: size}
-	} else if kind == reflect.Pointer && valueOf.IsNil() {
-		return &Value{Type: kind, Args: nil, Length: 0}
-	} else {
-		return &Value{Type: kind, Args: []any{value}, Length: 1}
+		return &Value{Args: args, Length: len(v)}
 	}
+}
+
+func NewValueReflect(value any) *Value {
+	valueOf := reflect.ValueOf(value)
+	if valueOf.Kind() != reflect.Slice {
+		return &Value{single: value, Length: 1}
+	}
+	size := valueOf.Len()
+	args := make([]any, size)
+	for i := range args {
+		args[i] = valueOf.Index(i).Interface()
+	}
+	return &Value{Args: args, Length: size}
+}
+
+// GetArgs returns the value arguments as a slice
+func (v *Value) GetArgs() []any {
+	if v.Length == 1 {
+		return []any{v.single}
+	}
+	return v.Args
 }
 
 // Condition represents a SQL WHERE condition with a template and associated fields/values
@@ -124,7 +145,10 @@ func (c Condition) IsEmpty() bool {
 //	cond := goent.Expr("age > ? AND status = ?", 18, "active")
 //	users, _ := db.User.Filter(cond).Select().All()
 func Expr(where string, args ...any) Condition {
-	var values []*Value
+	if len(args) == 0 {
+		return Condition{Template: where, Values: nil}
+	}
+	values := make([]*Value, 0, len(args))
 	for _, arg := range args {
 		switch val := arg.(type) {
 		default:
@@ -222,7 +246,7 @@ func Not(cond Condition) Condition {
 //
 //	cond := goent.IsNull(db.User.Field("deleted_at"))
 func IsNull(left *Field) Condition {
-	return Condition{Template: "%s IS NULL", Fields: []*Field{left}, Values: []*Value{}}
+	return Condition{Template: "%s IS NULL", Fields: []*Field{left}, Values: nil}
 }
 
 // IsNotNull creates a condition that checks if a field is NOT NULL
@@ -232,7 +256,7 @@ func IsNull(left *Field) Condition {
 //
 //	cond := goent.IsNotNull(db.User.Field("email"))
 func IsNotNull(left *Field) Condition {
-	return Condition{Template: "%s IS NOT NULL", Fields: []*Field{left}, Values: []*Value{}}
+	return Condition{Template: "%s IS NOT NULL", Fields: []*Field{left}, Values: nil}
 }
 
 // Equals creates a condition that checks if a field is equal to a value

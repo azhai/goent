@@ -11,12 +11,6 @@ import (
 	"github.com/azhai/goent/utils"
 )
 
-// Entity is the interface for entities that have an ID.
-type Entity interface {
-	GetID() int64
-	SetID(int64)
-}
-
 // TableInfo contains metadata about a database table including columns, primary keys, and indexes.
 // It is automatically populated when creating a Table using reflection.
 type TableInfo struct {
@@ -34,9 +28,11 @@ type TableInfo struct {
 	Foreigns    map[string]*Foreign // Foreigns is a map of foreign key column names to Foreign metadata.
 	Ignores     []string            // Ignores is a list of column names to ignore.
 
-	sortedFields []*Field // sortedFields is a list of columns sorted by field ID.
-	simpleTable  bool     // simpleTable is true if the table has a single primary key.
-	// fieldCache   map[string]*Field // fieldCache caches Field objects to reduce allocations.
+	simpleTable   bool     // simpleTable is true if the table has a single primary key.
+	sortedFields  []*Field // sortedFields is a list of columns sorted by field ID.
+	selectByPKSql string   // selectByPKSql is the cached SELECT BY primary key SQL.
+	deleteByPKSql string   // deleteByPKSql is the cached DELETE BY primary key SQL.
+	pkField       *Field   // pkField is the cached primary key field.
 }
 
 // String returns the table name as a string representation.
@@ -84,16 +80,7 @@ func (info *TableInfo) Field(name string) *Field {
 	if col = info.ColumnInfo(name); col == nil {
 		panic(fmt.Sprintf("column %s not found in table %s", name, info.TableName))
 	}
-	// Check cache first
-	// if info.fieldCache == nil {
-	// 	info.fieldCache = make(map[string]*Field, len(info.Columns))
-	// } else if fld, ok := info.fieldCache[name]; ok {
-	// 	return fld
-	// }
-	// Create new Field and cache it
-	fld := &Field{TableAddr: info.TableAddr, FieldId: col.FieldId, ColumnName: col.ColumnName}
-	// info.fieldCache[name] = fld
-	return fld
+	return info.sortedFields[col.FieldId]
 }
 
 // GetPrimaryInfo returns the primary key field ID, column name, and all primary key column names.
@@ -113,6 +100,19 @@ func (info TableInfo) GetPrimaryInfo() (int, string, []string) {
 	return pkFid, pkName, pkeys
 }
 
+// GetPKField returns the primary key field for single-PK tables.
+// Returns nil for tables with no primary key or composite primary keys.
+func (info *TableInfo) GetPKField() *Field {
+	if info.pkField != nil {
+		return info.pkField
+	}
+	if len(info.PrimaryKeys) != 1 {
+		return nil
+	}
+	info.pkField = info.sortedFields[info.PrimaryKeys[0].Column.FieldId]
+	return info.pkField
+}
+
 // GetSortedFields returns the table's columns sorted by FieldId for SELECT queries.
 // This ensures consistent column ordering between queries and struct fields.
 // Example:
@@ -123,6 +123,37 @@ func (info TableInfo) GetPrimaryInfo() (int, string, []string) {
 //	}
 func (info TableInfo) GetSortedFields() []*Field {
 	return info.sortedFields
+}
+
+func (info TableInfo) getFullName() string {
+	if info.SchemaName != "" {
+		return info.SchemaName + "." + info.TableName
+	}
+	return info.TableName
+}
+
+func (info *TableInfo) GetSelectByPKSql() string {
+	if info.selectByPKSql != "" {
+		return info.selectByPKSql
+	}
+	if len(info.PrimaryKeys) != 1 {
+		return ""
+	}
+	pkName := info.PrimaryKeys[0].ColumnName
+	info.selectByPKSql = "SELECT * FROM " + info.getFullName() + " WHERE " + pkName + " = $1"
+	return info.selectByPKSql
+}
+
+func (info *TableInfo) GetDeleteByPKSql() string {
+	if info.deleteByPKSql != "" {
+		return info.deleteByPKSql
+	}
+	if len(info.PrimaryKeys) != 1 {
+		return ""
+	}
+	pkName := info.PrimaryKeys[0].ColumnName
+	info.deleteByPKSql = "DELETE FROM " + info.getFullName() + " WHERE " + pkName + " = $1"
+	return info.deleteByPKSql
 }
 
 func (info TableInfo) getRefTableName(foreign *Foreign, fkName string) (string, bool) {
@@ -297,8 +328,8 @@ func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schem
 			tableName:    tableName,
 			schemaName:   &schema,
 		}
-		info.ColumnNames = append(info.ColumnNames, columnName)
 		info.Columns[columnName] = column
+		info.ColumnNames = append(info.ColumnNames, columnName)
 		info.sortedFields = append(info.sortedFields, &Field{
 			TableAddr:  info.TableAddr,
 			ColumnName: columnName,
@@ -370,8 +401,8 @@ func (t *Table[T]) Dest() (*T, []any) {
 // ------------------------------
 
 // CacheOne caches a single row in the table's cache using its ID as the key.
-func (t *Table[T]) CacheOne(row any) (id int64) {
-	if row, ok := row.(Entity); ok {
+func (t *Table[T]) CacheOne(obj any) (id int64) {
+	if row, ok := obj.(Entity); ok {
 		id = row.GetID()
 	} else {
 		return
@@ -379,7 +410,7 @@ func (t *Table[T]) CacheOne(row any) (id int64) {
 	if t.Cache == nil {
 		t.Cache = utils.NewCoMap[int64, T]()
 	}
-	t.Cache.Set(id, row.(*T))
+	t.Cache.Set(id, obj.(*T))
 	return
 }
 
@@ -513,11 +544,8 @@ func (t *Table[T]) Update() *StateUpdate[T] {
 
 // UpdateContext creates a new StateUpdate with a specific context.
 func (t *Table[T]) UpdateContext(ctx context.Context) *StateUpdate[T] {
-	var s *StateWhere
-	if s = t.State; s == nil {
-		s = NewStateWhere(ctx)
-		s.builder.Type = model.UpdateQuery
-	}
+	s := NewStateWhere(ctx)
+	s.builder.Type = model.UpdateQuery
 	return &StateUpdate[T]{table: t, StateWhere: s}
 }
 
@@ -536,10 +564,7 @@ func (t *Table[T]) Select(fields ...any) *StateSelect[T, T] {
 
 // SelectContext creates a new StateSelect with a specific context.
 func (t *Table[T]) SelectContext(ctx context.Context, fields ...any) *StateSelect[T, T] {
-	var s *StateWhere
-	if s = t.State; s == nil {
-		s = NewStateWhere(ctx)
-	}
+	s := NewStateWhere(ctx)
 	state := NewStateSelectFrom[T, T](s, t)
 	if len(fields) > 0 {
 		state.Select(fields...)

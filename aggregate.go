@@ -3,9 +3,10 @@ package goent
 // NewSelectFunc creates a new StateSelect with a function applied to the specified column.
 // T is the model type, R is the result type.
 func NewSelectFunc[T, R any](state *StateWhere, table *Table[T], col, fun string) *StateSelect[T, R] {
-	fld := &Field{TableAddr: table.TableAddr, ColumnName: col, Function: fun}
 	s := NewStateSelectFrom[T, R](state, table)
-	s.builder.VisitFields = []*Field{fld}
+	s.builder.VisitFields = []*Field{
+		{TableAddr: table.TableAddr, ColumnName: col, Function: fun},
+	}
 	return s
 }
 

@@ -13,7 +13,8 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-const MinFileSize = 128
+// MinFileSize: a file below this size DONT has any importent content
+const MinFileSize = 150
 
 var (
 	action   string

@@ -188,6 +188,15 @@ func (s *StateSave[T]) One(obj *T) error {
 	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
 	s.builder.ResetForSave()
 
+	// Fast path: use UpdatePairs for single PK update (no reflection needed)
+	if len(s.table.PrimaryKeys) == 1 && len(s.table.Ignores) == 0 {
+		if updater, ok := any(obj).(GenUpdatePairs); ok {
+			if pkID := updater.GetID(); pkID > 0 {
+				return s.table.Update().Set(updater.UpdatePairs()...).ByPK(pkID)
+			}
+		}
+	}
+
 	valueOf := reflect.ValueOf(obj).Elem()
 	primary, retFid := CollectFields(s.builder, s.table, valueOf, s.table.Ignores)
 	qr := s.Take(1).getQuery(primary)

@@ -5,7 +5,6 @@ import (
 	"iter"
 	"math"
 	"reflect"
-	"slices"
 	"strings"
 
 	"github.com/azhai/goent/model"
@@ -73,32 +72,39 @@ func (s *StateSelect[T, R]) Select(fields ...any) *StateSelect[T, R] {
 }
 
 // getFetchFunc returns a FetchFunc for the query
-// It uses generated ScanFields if available, otherwise creates a reflection-based fetcher
+// It uses generated ScanDest if available, otherwise creates a reflection-based fetcher
 func (s *StateSelect[T, R]) getFetchFunc() FetchFunc {
 	if s.sameModel && len(s.builder.Joins) == 0 {
-		if obj, ok := any(new(R)).(GenScanFields); ok {
-			return func(_ any) []any { return obj.ScanFields() }
+		if _, ok := any(new(R)).(GenScanDest); ok {
+			return genScanDestFetch[R]
 		}
 	}
-	info, fields := s.table.TableInfo, slices.Clone(s.builder.VisitFields)
+	info, fields := s.table.TableInfo, s.builder.VisitFields
 	return CreateFetchFunc(info, fields, s.GetJoinForeigns())
+}
+
+func genScanDestFetch[R any](target any) []any {
+	return target.(GenScanDest).ScanDest()
 }
 
 // FetchRow executes the query and returns a single row using the provided FetchFunc
 // It handles the query execution and row scanning
-func (s *StateSelect[T, R]) FetchRow(to FetchFunc) (*R, error) {
+func (s *StateSelect[T, R]) FetchRow(qr model.Query, to FetchFunc) (*R, error) {
 	if to == nil {
 		to = s.getFetchFunc()
 	}
-	qr := model.CreateQuery(s.builder.Build(false))
-	defer PutBuilder(s.builder)
 	conn, cfg := s.Prepare(s.table.db.driver)
 	row, err := qr.WrapQueryRow(s.ctx, conn, cfg)
 	if err != nil || row == nil {
 		return nil, err
 	}
 	target := new(R)
-	err = row.Scan(to(target)...)
+	if err = row.Scan(to(target)...); err != nil {
+		return nil, err
+	}
+	if s.sameModel {
+		s.table.CacheOne(target)
+	}
 	return target, err
 }
 
@@ -108,11 +114,21 @@ func (s *StateSelect[T, R]) One() (obj *R, err error) {
 	if s.sameModel {
 		s = s.Take(1)
 	}
-	obj, err = s.FetchRow(nil)
-	if s.sameModel && err == nil {
-		s.table.CacheOne(obj)
+	qr := model.CreateQuery(s.builder.Build(false))
+	defer PutBuilder(s.builder)
+	return s.FetchRow(qr, nil)
+}
+
+// ByPK selects a single row by primary key using cached SQL.
+// This is an optimized path that bypasses query building for simple primary key lookups.
+// Only works for tables with a single primary key column.
+func (s *StateSelect[T, R]) ByPK(id int64) (*R, error) {
+	sql := s.table.GetSelectByPKSql()
+	if sql == "" {
+		return nil, model.ErrNoPrimaryKey
 	}
-	return
+	qr := model.CreateQuery(sql, []any{id})
+	return s.FetchRow(qr, nil)
 }
 
 // IterRows returns an iterator over the query results
@@ -124,20 +140,16 @@ func (s *StateSelect[T, R]) IterRows(to FetchFunc) iter.Seq2[*R, error] {
 	qr := model.CreateQuery(s.builder.Build(false))
 	defer PutBuilder(s.builder)
 	conn, cfg := s.Prepare(s.table.db.driver)
-	fet := &Fetcher[R]{
-		Handler:   NewHandler(s.ctx, conn, cfg),
-		NewTarget: func() *R { return new(R) },
-		FetchTo:   to,
-	}
-	return fet.FetchResult(qr)
+	hd := NewHandler(s.ctx, conn, cfg)
+	return FetchResult[R](hd, qr, to)
 }
 
 // All executes the query and returns all rows as a slice
 // It pre-allocates the slice capacity if a limit is specified
 func (s *StateSelect[T, R]) All() (res []*R, err error) {
+	var obj *R
 	size := max(s.builder.Limit, 0)
 	res = make([]*R, 0, size)
-	var obj *R
 	for obj, err = range s.IterRows(nil) {
 		if err != nil {
 			return
@@ -160,17 +172,17 @@ func (s *StateSelect[T, R]) Map(key string) (map[int64]*R, error) {
 	size := max(s.builder.Limit, 0)
 	res := make(map[int64]*R, size)
 	id, ok := int64(0), false
-	for row, err := range s.IterRows(nil) {
+	for obj, err := range s.IterRows(nil) {
 		if err != nil {
 			return nil, err
 		}
-		if s.sameModel && row != nil {
-			id = s.table.CacheOne(row)
+		if obj != nil && s.sameModel {
+			id = s.table.CacheOne(obj)
 		}
 		if id > 0 {
-			res[id] = row
-		} else if id, ok = col.GetInt64(row); ok {
-			res[id] = row
+			res[id] = obj
+		} else if id, ok = col.GetInt64(obj); ok {
+			res[id] = obj
 		}
 	}
 	return res, nil
@@ -186,17 +198,17 @@ func (s *StateSelect[T, R]) Rank(key string) (map[int64][]*R, error) {
 	size := max(s.builder.Limit, 0)
 	res := make(map[int64][]*R, size)
 	id, ok := int64(0), false
-	for row, err := range s.IterRows(nil) {
+	for obj, err := range s.IterRows(nil) {
 		if err != nil {
 			return nil, err
 		}
-		if s.sameModel && row != nil {
-			id = s.table.CacheOne(row)
+		if obj != nil && s.sameModel {
+			id = s.table.CacheOne(obj)
 		}
 		if id > 0 {
-			res[id] = append(res[id], row)
-		} else if id, ok = col.GetInt64(row); ok {
-			res[id] = append(res[id], row)
+			res[id] = append(res[id], obj)
+		} else if id, ok = col.GetInt64(obj); ok {
+			res[id] = append(res[id], obj)
 		}
 	}
 	return res, nil

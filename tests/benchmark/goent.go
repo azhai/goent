@@ -126,8 +126,7 @@ func (o *GoentBenchmark) Delete(b *testing.B) {
 		bookID = books[i].ID
 		b.StartTimer()
 
-		filter := goent.Equals(o.db.Book.Field("id"), bookID)
-		err = o.db.Book.Delete().Filter(filter).Exec()
+		err = o.db.Book.Delete().ByPK(bookID)
 
 		b.StopTimer()
 		if err != nil {
@@ -150,8 +149,7 @@ func (o *GoentBenchmark) FindByID(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		for range tools.FindOneLoop {
-			// _, err = o.db.Book.Select().Match(*book).One()
-			_, err = o.db.Book.Select().Where("id = ?", book.ID).One()
+			_, err = o.db.Book.Select().ByPK(book.ID)
 
 			b.StopTimer()
 			if err != nil {
@@ -172,19 +170,12 @@ func (o *GoentBenchmark) FindPage(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	// fetchTo := models.FetchBook()
 
 	for i := 0; i < b.N; i++ {
 		for s := int64(0); s < tools.BulkInsertPageNumber; s = s + tools.PageSize {
 			filter := goent.Greater(o.db.Book.Field("id"), s)
 			query := o.db.Book.Select().Filter(filter).Take(tools.PageSize)
 			_, err = query.All()
-
-			// for _, err = range query.IterRows(fetchTo) {
-			// 	if err != nil {
-			// 		b.Error(err)
-			// 	}
-			// }
 
 			b.StopTimer()
 			if err != nil {

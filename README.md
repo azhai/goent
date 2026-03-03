@@ -1474,8 +1474,8 @@ package models
 
 import "github.com/azhai/goent"
 
-// ScanFields returns a slice of pointers to User fields for database scanning.
-func (t *User) ScanFields() []any {
+// ScanDest returns a slice of pointers to User fields for database scanning.
+func (t *User) ScanDest() []any {
     return []any{
         &t.ID,
         &t.Name,
@@ -1487,7 +1487,7 @@ func (t *User) ScanFields() []any {
 // FetchUser creates a FetchFunc for User.
 func FetchUser() goent.FetchFunc {
     return func(target any) []any {
-        return target.(*User).ScanFields()
+        return target.(*User).ScanDest()
     }
 }
 ```
@@ -1496,7 +1496,7 @@ func FetchUser() goent.FetchFunc {
 
 | Method | Time | Memory | Allocations |
 |--------|------|--------|-------------|
-| **Generated ScanFields** | 1.68 ns/op | 0 B/op | 0 allocs/op |
+| **Generated ScanDest** | 1.68 ns/op | 0 B/op | 0 allocs/op |
 | Reflection-based | 25.04 ns/op | 24 B/op | 1 allocs/op |
 | **Generated FetchFunc** | 1.68 ns/op | 0 B/op | 0 allocs/op |
 | Reflection-based | 45.29 ns/op | 48 B/op | 2 allocs/op |
@@ -1505,7 +1505,7 @@ Generated code is **15-27x faster** than reflection with **zero memory allocatio
 
 ### Using Generated Code
 
-GoEnt automatically uses generated `ScanFields()` methods when available, providing significant performance improvements without requiring manual changes to your code.
+GoEnt automatically uses generated `ScanDest()` methods when available, providing significant performance improvements without requiring manual changes to your code.
 
 ```go
 // Automatic usage - no changes needed!
@@ -1520,9 +1520,9 @@ for user, err := range query.IterRows(models.FetchUser()) {
 	fmt.Printf("%+v\n", user)
 }
 
-// Or use ScanFields directly
+// Or use ScanDest directly
 user := models.NewUser()
-rows.Scan(user.ScanFields()...)
+rows.Scan(user.ScanDest()...)
 ```
 
 [Back to Contents](#content)

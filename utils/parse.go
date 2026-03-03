@@ -248,3 +248,21 @@ func GetTableID(typeOf reflect.Type) (reflect.StructField, bool) {
 		return strings.ToUpper(s) == "ID"
 	})
 }
+
+// ToAnySlice converts a value to a slice of any type.
+func ToAnySlice(value any) ([]any, int) {
+	if value == nil {
+		return nil, 0
+	}
+	valueOf := reflect.ValueOf(value)
+	kind := valueOf.Kind()
+	if kind != reflect.Slice {
+		return []any{value}, 1
+	}
+	size := valueOf.Len()
+	args := make([]any, size)
+	for i := range args {
+		args[i] = valueOf.Index(i).Interface()
+	}
+	return args, size
+}

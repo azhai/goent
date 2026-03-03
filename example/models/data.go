@@ -13,6 +13,13 @@ func DefaultDSN(dbType string) string {
 	return "table-crud.db"
 }
 
+func (m *Order) GetProductIds() (ids []int64) {
+	for _, dt := range m.OrderDetails {
+		ids = append(ids, dt.ProductID)
+	}
+	return
+}
+
 func DataCategories() []*Category {
 	return []*Category{
 		{ID: 1, Name: "Coat"},

@@ -131,6 +131,7 @@ func (dm *dbMigrator) addForeignRelation(tm *model.TableMigrate, fd *fieldDesc, 
 		EscapingName: dm.db.driver.KeywordHandler(fd.colName),
 		DataType:     col.ColumnType,
 		Nullable:     col.AllowNull,
+		FieldPos:     col.FieldId,
 	}
 
 	if foreign.Type == M2O {
@@ -294,6 +295,7 @@ func createManyToSomeMigrate(b body, typeOf reflect.Type) any {
 	rel.EscapingName = b.driver.KeywordHandler(rel.Name)
 	rel.Nullable = b.nullable
 	rel.Default = getTagValue(b.migrate.field.Tag.Get("goe"), "default:")
+	rel.FieldPos = b.fieldId
 	if err := checkIndex(b, rel.AttributeMigrate, true); err != nil {
 		panic(err)
 	}
@@ -328,6 +330,7 @@ func createOneToSomeMigrate(b body, typeOf reflect.Type) any {
 	rel.Name = utils.ToSnakeCase(b.fieldName)
 	rel.EscapingName = b.driver.KeywordHandler(rel.Name)
 	rel.Nullable = b.nullable
+	rel.FieldPos = b.fieldId
 	if err := checkIndex(b, rel.AttributeMigrate, true); err != nil {
 		panic(err)
 	}
@@ -370,11 +373,24 @@ func migratePk(typeOf reflect.Type, driver model.Driver) ([]*model.PrimaryKeyMig
 	fieldsNames := make([]string, size)
 	for i := range fields {
 		geoTag := fields[i].Tag.Get("goe")
+		fieldPos := getFieldPosition(typeOf, fields[i].Name)
 		pks[i] = createMigratePk(fields[i].Name, isAutoIncrement(fields[i]),
-			getTagType(fields[i]), getTagValue(geoTag, "default:"), driver)
+			getTagType(fields[i]), getTagValue(geoTag, "default:"), driver, fieldPos)
 		fieldsNames[i] = fields[i].Name
 	}
 	return pks, fieldsNames, nil
+}
+
+func getFieldPosition(typeOf reflect.Type, fieldName string) int {
+	if typeOf.Kind() == reflect.Pointer {
+		typeOf = typeOf.Elem()
+	}
+	for i := 0; i < typeOf.NumField(); i++ {
+		if typeOf.Field(i).Name == fieldName {
+			return i
+		}
+	}
+	return -1
 }
 
 func isAutoIncrement(id reflect.StructField) bool {
@@ -410,6 +426,7 @@ func migrateAtt(b body) error {
 		b.nullable,
 		getTagValue(migField.Tag.Get("goe"), "default:"),
 		b.driver,
+		b.fieldId,
 	)
 	b.migrate.table.Attributes = append(b.migrate.table.Attributes, at)
 
@@ -460,7 +477,7 @@ func getIndexValue(valueTag string, tag string) string {
 	return ""
 }
 
-func createMigratePk(attributeName string, autoIncrement bool, dataType, defaultTag string, driver model.Driver) *model.PrimaryKeyMigrate {
+func createMigratePk(attributeName string, autoIncrement bool, dataType, defaultTag string, driver model.Driver, fieldPos int) *model.PrimaryKeyMigrate {
 	return &model.PrimaryKeyMigrate{
 		AttributeMigrate: model.AttributeMigrate{
 			FieldName:    attributeName,
@@ -468,12 +485,13 @@ func createMigratePk(attributeName string, autoIncrement bool, dataType, default
 			EscapingName: driver.KeywordHandler(utils.ToSnakeCase(attributeName)),
 			DataType:     dataType,
 			Default:      defaultTag,
+			FieldPos:     fieldPos,
 		},
 		AutoIncrement: autoIncrement,
 	}
 }
 
-func createMigrateAtt(attributeName string, dataType string, nullable bool, defaultValue string, driver model.Driver) model.AttributeMigrate {
+func createMigrateAtt(attributeName string, dataType string, nullable bool, defaultValue string, driver model.Driver, fieldPos int) model.AttributeMigrate {
 	return model.AttributeMigrate{
 		FieldName:    attributeName,
 		Name:         utils.ToSnakeCase(attributeName),
@@ -481,6 +499,7 @@ func createMigrateAtt(attributeName string, dataType string, nullable bool, defa
 		DataType:     dataType,
 		Nullable:     nullable,
 		Default:      defaultValue,
+		FieldPos:     fieldPos,
 	}
 }
 
@@ -578,6 +597,7 @@ func addRelationForTag(b body, fd *fieldDesc, migField reflect.StructField, goeT
 		EscapingName: b.driver.KeywordHandler(utils.ToSnakeCase(migField.Name)),
 		DataType:     getTagType(migField),
 		Nullable:     b.nullable,
+		FieldPos:     b.fieldId,
 	}
 
 	if isO2O {

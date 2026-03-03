@@ -110,10 +110,12 @@ func seedData(db *Database) error {
 
 func createOrder(db *Database, orderNo string) (*models.Order, error) {
 	obj, err := db.Order.Select("id", "status", "total").Match(models.Order{OrderNo: orderNo}).One()
+	fmt.Printf("createOrder: obj=%v, err=%v, err==ErrNoRows=%v\n", obj, err, err == model.ErrNoRows)
 	if err != nil && err != model.ErrNoRows || obj != nil && obj.ID > 0 {
 		return nil, err
 	}
 	order := models.DataOrder(orderNo)
+	fmt.Printf("createOrder: inserting order=%+v\n", order)
 	if err = db.Order.Insert().One(order); err != nil {
 		return nil, err
 	}
@@ -132,7 +134,7 @@ func CalcTotalPrice(db *Database, order *models.Order) (float64, error) {
 
 	filter := goent.Equals(db.OrderDetail.Field("order_id"), order.ID)
 	query := db.OrderDetail.Select().OrderBy("product_id")
-	order.Details, err = query.Filter(filter).All()
+	order.OrderDetails, err = query.Filter(filter).All()
 	if err != nil {
 		return 0.0, err
 	}
@@ -149,7 +151,7 @@ func CalcTotalPrice(db *Database, order *models.Order) (float64, error) {
 	}
 
 	var total float64
-	for _, detail := range order.Details {
+	for _, detail := range order.OrderDetails {
 		product := productMap[detail.ProductID]
 		if product == nil {
 			return total, err
@@ -174,13 +176,13 @@ func CalcTotalPrice2(db *Database, order *models.Order) (float64, error) {
 
 	filter := goent.Equals(db.OrderDetail.Field("order_id"), order.ID)
 	query := db.OrderDetail.Select().OrderBy("product_id").Filter(filter)
-	order.Details, err = query.LeftJoin("product_id", db.Product.Field("id")).All()
+	order.OrderDetails, err = query.LeftJoin("product_id", db.Product.Field("id")).All()
 	if err != nil {
 		return 0.0, err
 	}
 
 	var total float64
-	for _, detail := range order.Details {
+	for _, detail := range order.OrderDetails {
 		if detail.Product == nil {
 			continue
 		}
@@ -261,7 +263,7 @@ func addForeignKeys(db *Database) {
 	db.Order.Foreigns = map[string]*goent.Foreign{
 		"t_order_detail": {
 			Type:       goent.O2M,
-			MountField: "Details",
+			MountField: "OrderDetails",
 			ForeignKey: "id",
 			Reference:  db.OrderDetail.Field("order_id"),
 			Middle:     nil,
