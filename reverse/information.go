@@ -91,27 +91,27 @@ func detectTableType(info *TableInfo, junctionTables map[string]*JunctionInfo, c
 	}
 
 	for junctionName, junctionInfo := range junctionTables {
-		if junctionName == info.Name {
-			result.Type = TableTypeJunction
-			if len(junctionInfo.ReferencedTables) == 2 {
-				if strings.HasPrefix(info.Name, junctionInfo.ReferencedTables[0]) {
-					result.JunctionOtherTable = junctionInfo.ReferencedTables[1]
-				} else {
-					result.JunctionOtherTable = junctionInfo.ReferencedTables[0]
-				}
-			}
-			return result
+		if junctionName != info.Name {
+			continue
 		}
+		result.Type = TableTypeJunction
+		if len(junctionInfo.ReferencedTables) == 2 {
+			if strings.HasPrefix(info.Name, junctionInfo.ReferencedTables[0]) {
+				result.JunctionOtherTable = junctionInfo.ReferencedTables[1]
+			} else {
+				result.JunctionOtherTable = junctionInfo.ReferencedTables[0]
+			}
+		}
+		return result
 	}
 
 	if len(info.ForeignKeys) == 2 {
 		result.Type = TableTypeComplexJunction
 		var primaryTable string
 		for _, fk := range info.ForeignKeys {
-			if len(fk.Columns) == 1 {
-				if primaryTable == "" || strings.HasPrefix(info.Name, fk.ReferencedTable) {
-					primaryTable = fk.ReferencedTable
-				}
+			if len(fk.Columns) == 1 && (primaryTable == "" ||
+				strings.HasPrefix(info.Name, fk.ReferencedTable)) {
+				primaryTable = fk.ReferencedTable
 			}
 		}
 		for _, fk := range info.ForeignKeys {
@@ -134,16 +134,17 @@ func collectRelationshipFields(info *TableInfo, junctionTables map[string]*Junct
 	if relInfo.Type == TableTypeNormal {
 		for _, junctionInfo := range junctionTables {
 			for i, refTable := range junctionInfo.ReferencedTables {
-				if refTable == info.Name {
-					otherTable := junctionInfo.ReferencedTables[1-i]
-					otherStructName := utils.ToCamelCase(otherTable)
-					otherStructName = TrimShortPrefix(otherStructName, prefix)
-					otherStructName = utils.ToSingular(otherStructName)
-					relInfo.O2MFields = append(relInfo.O2MFields, O2MField{
-						FieldName: otherStructName,
-						TypeName:  otherStructName,
-					})
+				if refTable != info.Name {
+					continue
 				}
+				otherTable := junctionInfo.ReferencedTables[1-i]
+				otherStructName := utils.ToCamelCase(otherTable)
+				otherStructName = TrimShortPrefix(otherStructName, prefix)
+				otherStructName = utils.ToSingular(otherStructName)
+				relInfo.O2MFields = append(relInfo.O2MFields, O2MField{
+					FieldName: otherStructName,
+					TypeName:  otherStructName,
+				})
 			}
 		}
 
@@ -176,9 +177,9 @@ func collectRelationshipFields(info *TableInfo, junctionTables map[string]*Junct
 }
 
 // generateStructFields generates struct fields from table columns
-func generateStructFields(buf *bytes.Buffer, info *TableInfo, relInfo TableRelationshipInfo, driver string) {
+func generateStructFields(buf *bytes.Buffer, info *TableInfo, relInfo TableRelationshipInfo, driverType string) {
 	for _, col := range info.Columns {
-		goType := MapSQLTypeToGo(col.DataType, driver)
+		goType := MapSQLTypeToGo(col.DataType, driverType)
 		fieldName := utils.ToCamelCase(col.Name)
 
 		var tagParts []string
@@ -257,7 +258,7 @@ func generateTableNameMethod(buf *bytes.Buffer, structName, tableName string) {
 // GenerateModel generates Go struct code for a table
 func GenerateModel(buf *bytes.Buffer, info *TableInfo,
 	junctionTables map[string]*JunctionInfo, complexJunctionTables map[string]string,
-	driver, prefix string) error {
+	driverType, prefix string) error {
 	structName := utils.ToCamelCase(info.Name)
 	structName = TrimShortPrefix(structName, prefix)
 	structName = utils.ToSingular(structName)
@@ -267,7 +268,7 @@ func GenerateModel(buf *bytes.Buffer, info *TableInfo,
 	fmt.Fprintf(buf, "type %s struct {\n", structName)
 
 	relInfo := collectRelationshipFields(info, junctionTables, complexJunctionTables, structName, prefix)
-	generateStructFields(buf, info, relInfo, driver)
+	generateStructFields(buf, info, relInfo, driverType)
 	generateRelationshipFields(buf, info, relInfo, prefix)
 	generateTableNameMethod(buf, structName, tableName)
 

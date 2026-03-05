@@ -12,10 +12,43 @@ import (
 
 // PublicSchema is the public schema of the database.
 type PublicSchema struct {
+	Book        *goent.Table[Book]
+	PricePolicy *goent.Table[PricePolicy]
 	Category    *goent.Table[Category]
 	Order       *goent.Table[Order]
 	OrderDetail *goent.Table[OrderDetail]
 	Product     *goent.Table[Product]
+}
+
+// Book represents the books table
+type Book struct {
+	ID           int `goe:"pk"`
+	Isbn         string
+	Title        string
+	Author       string
+	Genre        string
+	Quantity     int
+	PublicizedAt time.Time
+}
+
+// TableName returns the database table name
+func (*Book) TableName() string {
+	return "books"
+}
+
+// PricePolicy represents the price_policies table
+type PricePolicy struct {
+	ID        int `goe:"pk"`
+	BookID    int `goe:"m2o"`
+	Price     float64
+	StartDate time.Time
+	EndDate   time.Time
+	Book      *Book `goe:"-"`
+}
+
+// TableName returns the database table name
+func (*PricePolicy) TableName() string {
+	return "price_policies"
 }
 
 // Category represents the t_category table

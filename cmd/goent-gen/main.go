@@ -32,6 +32,10 @@ func main() {
 	fieldsCmd.BoolVar(&force, "force", false, "Force overwrite existing files")
 	fieldsCmd.Usage = genUsage(fieldsCmd)
 
+	projectCmd := flag.NewFlagSet("project", flag.ExitOnError)
+	projectCmd.BoolVar(&force, "force", false, "Force overwrite existing files")
+	projectCmd.Usage = genUsage(projectCmd)
+
 	tablesCmd := flag.NewFlagSet("tables", flag.ExitOnError)
 	tablesCmd.BoolVar(&force, "force", false, "Force overwrite existing files")
 	tablesCmd.StringVar(&revConfig.DatabaseDSN, "dsn", os.Getenv("GOE_DATABASE_DSN"), "Database DSN")
@@ -56,26 +60,56 @@ func main() {
 		fieldsCmd.Parse(cmdArgs[1:])
 		origPath = fieldsCmd.Arg(0)
 		pkgPath := getPkgPath(origPath)
-		outputPath := filepath.Join(origPath, "fields.go")
-		if info, err := os.Stat(outputPath); !force && err == nil && info.Size() > MinFileSize {
-			outputPath += GenFileExtName(info.ModTime()) // File already exists
+		outPath := filepath.Join(origPath, "fields.go")
+		if info, err := os.Stat(outPath); !force && err == nil && info.Size() > MinFileSize {
+			outPath += GenFileExtName(info.ModTime()) // File already exists
 		}
-		if err := RunFieldsGeneration(pkgConfig, pkgPath, outputPath); err != nil {
+		if err := RunFieldsGeneration(pkgConfig, pkgPath, outPath); err != nil {
 			fmt.Printf("Error generating fields: %v\n", err)
+			os.Exit(1)
+		}
+	case "project":
+		projectCmd.Parse(cmdArgs[1:])
+		origPath = projectCmd.Arg(0)
+		revConfig.FixConfigData()
+		pkgPath := getPkgPath(origPath)
+		pkgName, err := getPkgName(pkgConfig, pkgPath)
+		if pkgName == "" {
+			fmt.Printf("Error loading package %s: %v\n", pkgPath, err)
+			os.Exit(1)
+		}
+		if revConfig.DatabaseDSN == "" {
+			fmt.Println("Error: --dsn is required for project action")
+			os.Exit(1)
+		}
+		outPath := filepath.Join(origPath, "conn.go")
+		if info, err := os.Stat(outPath); !force && err == nil && info.Size() > MinFileSize {
+			outPath += GenFileExtName(info.ModTime()) // File already exists
+		}
+		if err := RunProjectGeneration(revConfig, pkgName, outPath); err != nil {
+			fmt.Printf("Error generating project: %v\n", err)
 			os.Exit(1)
 		}
 	case "tables":
 		tablesCmd.Parse(cmdArgs[1:])
 		origPath = tablesCmd.Arg(0)
+		revConfig.FixConfigData()
+		// fmt.Printf("ReverseConfig: %+v\n", revConfig)
+		pkgPath := getPkgPath(origPath)
+		pkgName, err := getPkgName(pkgConfig, pkgPath)
+		if pkgName == "" {
+			fmt.Printf("Error loading package %s: %v\n", pkgPath, err)
+			os.Exit(1)
+		}
 		if revConfig.DatabaseDSN == "" {
 			fmt.Println("Error: --dsn is required for tables action")
 			os.Exit(1)
 		}
-		outputPath := filepath.Join(origPath, "tables.go")
-		if info, err := os.Stat(outputPath); !force && err == nil && info.Size() > MinFileSize {
-			outputPath += GenFileExtName(info.ModTime()) // File already exists
+		outPath := filepath.Join(origPath, "tables.go")
+		if info, err := os.Stat(outPath); !force && err == nil && info.Size() > MinFileSize {
+			outPath += GenFileExtName(info.ModTime()) // File already exists
 		}
-		if err := RunTablesGeneration(revConfig, outputPath); err != nil {
+		if err := RunTablesGeneration(revConfig, pkgName, outPath); err != nil {
 			fmt.Printf("Error generating tables: %v\n", err)
 			os.Exit(1)
 		}
@@ -106,6 +140,14 @@ func getPkgPath(origPath string) string {
 		}
 	}
 	return pkgPath
+}
+
+func getPkgName(cfg *packages.Config, pkgPath string) (string, error) {
+	pkgs, err := packages.Load(cfg, pkgPath)
+	if err == nil && len(pkgs) > 0 {
+		return pkgs[0].Name, nil
+	}
+	return "", err
 }
 
 // GenFileExtName generates the file extension name with the modTime.

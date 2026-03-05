@@ -29,32 +29,43 @@ type SQLTemplates struct {
 }
 
 type ReverseConfig struct {
+	DriverType  string
 	DatabaseDSN string
 	SchemaName  string
 	TablePrefix string
 }
 
-func (rc *ReverseConfig) Unquote() {
+func (rc *ReverseConfig) FixConfigData() {
 	rc.DatabaseDSN = UnquoteWord(rc.DatabaseDSN)
+	rc.DriverType = "sqlite"
+	if strings.HasPrefix(rc.DatabaseDSN, "postgres://") {
+		rc.DriverType = "pgsql"
+	}
 	rc.SchemaName = UnquoteWord(rc.SchemaName)
+	if rc.DriverType == "pgsql" && rc.SchemaName == "" {
+		rc.SchemaName = "public"
+	}
 	rc.TablePrefix = UnquoteWord(rc.TablePrefix)
 }
 
 // ReverseEngineer implements database reverse engineering
 type ReverseEngineer struct {
-	dbType    string
 	driver    model.Driver
 	conn      model.Connection
-	schema    string
 	templates SQLTemplates
+	Config    *ReverseConfig
 }
 
 // NewPgsqlReverseEngineer creates a new PostgreSQL reverse engineer
 func NewPgsqlReverseEngineer(dsn, schema string) (*ReverseEngineer, error) {
-	if schema == "" {
-		schema = "public"
+	cfg := &ReverseConfig{
+		DriverType:  "pgsql",
+		DatabaseDSN: dsn,
+		SchemaName:  schema,
 	}
-	driver := pgsql.OpenDSN(dsn)
+	cfg.FixConfigData()
+
+	driver := pgsql.OpenDSN(cfg.DatabaseDSN)
 	if driver == nil {
 		return nil, fmt.Errorf("failed to create PostgreSQL driver")
 	}
@@ -121,18 +132,24 @@ func NewPgsqlReverseEngineer(dsn, schema string) (*ReverseEngineer, error) {
 			ORDER BY i.relname, a.attnum`,
 	}
 
-	return &ReverseEngineer{
-		dbType:    "pgsql",
+	eng := &ReverseEngineer{
 		driver:    driver,
 		conn:      driver.NewConnection(),
-		schema:    schema,
 		templates: templates,
-	}, nil
+		Config:    cfg,
+	}
+	return eng, nil
 }
 
 // NewSqliteReverseEngineer creates a new SQLite reverse engineer
 func NewSqliteReverseEngineer(dsn string) (*ReverseEngineer, error) {
-	driver := sqlite.OpenDSN(dsn)
+	cfg := &ReverseConfig{
+		DriverType:  "sqlite",
+		DatabaseDSN: dsn,
+	}
+	cfg.FixConfigData()
+
+	driver := sqlite.OpenDSN(cfg.DatabaseDSN)
 	if driver == nil {
 		return nil, fmt.Errorf("failed to create SQLite driver")
 	}
@@ -156,13 +173,13 @@ func NewSqliteReverseEngineer(dsn string) (*ReverseEngineer, error) {
 			ORDER BY il.name, ii.seqno`,
 	}
 
-	return &ReverseEngineer{
-		dbType:    "sqlite",
+	eng := &ReverseEngineer{
 		driver:    driver,
 		conn:      driver.NewConnection(),
-		schema:    "",
 		templates: templates,
-	}, nil
+		Config:    cfg,
+	}
+	return eng, nil
 }
 
 // Close closes the database connection
@@ -170,8 +187,14 @@ func (r *ReverseEngineer) Close() {
 	r.driver.Close()
 }
 
-func (r *ReverseEngineer) query(query string, args ...any) (model.Rows, error) {
-	qr := model.CreateQuery(query, args)
+func (r *ReverseEngineer) queryTableInfo(sql, schema, table string) (model.Rows, error) {
+	var args []any
+	if r.Config.DriverType == "pgsql" {
+		args = []any{schema, table}
+	} else {
+		args = []any{table}
+	}
+	qr := model.CreateQuery(sql, args)
 	return r.conn.QueryContext(context.Background(), &qr)
 }
 
@@ -184,11 +207,7 @@ func (r *ReverseEngineer) GetTables(prefix string) ([]string, error) {
 	var rows model.Rows
 	var err error
 
-	if r.dbType == "pgsql" {
-		rows, err = r.query(r.templates.GetTables, r.schema)
-	} else {
-		rows, err = r.query(r.templates.GetTables)
-	}
+	rows, err = r.queryTableInfo(r.templates.GetTables, r.Config.SchemaName, "")
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +228,7 @@ func (r *ReverseEngineer) GetTables(prefix string) ([]string, error) {
 
 // GetTableInfo returns detailed information about a table
 func (r *ReverseEngineer) GetTableInfo(tableName string) (*TableInfo, error) {
-	info := &TableInfo{Schema: r.schema, Name: tableName}
+	info := &TableInfo{Schema: r.Config.SchemaName, Name: tableName}
 
 	columns, err := r.getColumns(tableName)
 	if err != nil {
@@ -251,17 +270,18 @@ func (r *ReverseEngineer) GetTableInfo(tableName string) (*TableInfo, error) {
 	}
 
 	for _, idx := range indexes {
-		if len(idx.Columns) == 1 {
-			colName := idx.Columns[0]
-			for _, col := range info.Columns {
-				if col.Name == colName {
-					if idx.IsUnique {
-						col.IsUnique = true
-					} else if !fkColumns[colName] {
-						col.IsIndex = true
-					}
-					break
+		if len(idx.Columns) != 1 {
+			continue
+		}
+		colName := idx.Columns[0]
+		for _, col := range info.Columns {
+			if col.Name == colName {
+				if idx.IsUnique {
+					col.IsUnique = true
+				} else if !fkColumns[colName] {
+					col.IsIndex = true
 				}
+				break
 			}
 		}
 	}
@@ -273,11 +293,7 @@ func (r *ReverseEngineer) getColumns(tableName string) ([]*ColumnInfo, error) {
 	var rows model.Rows
 	var err error
 
-	if r.dbType == "pgsql" {
-		rows, err = r.query(r.templates.GetColumns, r.schema, tableName)
-	} else {
-		rows, err = r.query(r.templates.GetColumns, tableName)
-	}
+	rows, err = r.queryTableInfo(r.templates.GetColumns, r.Config.SchemaName, tableName)
 	if err != nil {
 		return nil, err
 	}
@@ -285,21 +301,17 @@ func (r *ReverseEngineer) getColumns(tableName string) ([]*ColumnInfo, error) {
 
 	var columns []*ColumnInfo
 	for rows.Next() {
-		col := &ColumnInfo{}
-		if r.dbType == "pgsql" {
-			var defaultValue *string
-			if err := rows.Scan(&col.Name, &col.DataType, &col.IsNullable, &defaultValue); err != nil {
+		col := &ColumnInfo{DefaultValue: new(string)}
+		if r.Config.DriverType == "pgsql" {
+			if err := rows.Scan(&col.Name, &col.DataType, &col.IsNullable, &col.DefaultValue); err != nil {
 				return nil, err
 			}
-			col.DefaultValue = defaultValue
 		} else {
-			var defaultValue *string
 			var notNull bool
-			if err := rows.Scan(&col.Name, &col.DataType, &defaultValue, &notNull); err != nil {
+			if err := rows.Scan(&col.Name, &col.DataType, &col.DefaultValue, &notNull); err != nil {
 				return nil, err
 			}
 			col.IsNullable = !notNull
-			col.DefaultValue = defaultValue
 		}
 		columns = append(columns, col)
 	}
@@ -310,11 +322,7 @@ func (r *ReverseEngineer) getPrimaryKey(tableName string) (*PrimaryKeyInfo, erro
 	var rows model.Rows
 	var err error
 
-	if r.dbType == "pgsql" {
-		rows, err = r.query(r.templates.GetPrimaryKey, r.schema, tableName)
-	} else {
-		rows, err = r.query(r.templates.GetPrimaryKey, tableName)
-	}
+	rows, err = r.queryTableInfo(r.templates.GetPrimaryKey, r.Config.SchemaName, tableName)
 	if err != nil {
 		return nil, err
 	}
@@ -322,25 +330,21 @@ func (r *ReverseEngineer) getPrimaryKey(tableName string) (*PrimaryKeyInfo, erro
 
 	var pk *PrimaryKeyInfo
 	for rows.Next() {
-		if r.dbType == "pgsql" {
-			var constraintName, columnName string
+		var constraintName, columnName string
+		if r.Config.DriverType == "pgsql" {
 			if err := rows.Scan(&constraintName, &columnName); err != nil {
 				return nil, err
 			}
-			if pk == nil {
-				pk = &PrimaryKeyInfo{Name: constraintName}
-			}
-			pk.Columns = append(pk.Columns, columnName)
 		} else {
-			var columnName string
+			constraintName = "PRIMARY"
 			if err := rows.Scan(&columnName); err != nil {
 				return nil, err
 			}
-			if pk == nil {
-				pk = &PrimaryKeyInfo{Name: "PRIMARY"}
-			}
-			pk.Columns = append(pk.Columns, columnName)
 		}
+		if pk == nil {
+			pk = &PrimaryKeyInfo{Name: constraintName}
+		}
+		pk.Columns = append(pk.Columns, columnName)
 	}
 	return pk, nil
 }
@@ -349,17 +353,13 @@ func (r *ReverseEngineer) getForeignKeys(tableName string) ([]*ForeignKeyInfo, e
 	var rows model.Rows
 	var err error
 
-	if r.dbType == "pgsql" {
-		rows, err = r.query(r.templates.GetForeignKeys, r.schema, tableName)
-	} else {
-		rows, err = r.query(r.templates.GetForeignKeys, tableName)
-	}
+	rows, err = r.queryTableInfo(r.templates.GetForeignKeys, r.Config.SchemaName, tableName)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	if r.dbType == "pgsql" {
+	if r.Config.DriverType == "pgsql" {
 		fkMap := make(map[string]*ForeignKeyInfo)
 		for rows.Next() {
 			var constraintName, columnName, referencedTable, referencedColumn string
@@ -407,11 +407,7 @@ func (r *ReverseEngineer) getIndexes(tableName string) ([]*IndexInfo, error) {
 	var rows model.Rows
 	var err error
 
-	if r.dbType == "pgsql" {
-		rows, err = r.query(r.templates.GetIndexes, r.schema, tableName)
-	} else {
-		rows, err = r.query(r.templates.GetIndexes, tableName)
-	}
+	rows, err = r.queryTableInfo(r.templates.GetIndexes, r.Config.SchemaName, tableName)
 	if err != nil {
 		return nil, err
 	}
@@ -478,7 +474,8 @@ func MapSQLTypeToGo(sqlType string, driver string) string {
 			return "int16"
 		}
 		return "int"
-	case strings.Contains(sqlType, "float") || strings.Contains(sqlType, "double") || strings.Contains(sqlType, "numeric") || strings.Contains(sqlType, "decimal"):
+	case strings.Contains(sqlType, "float") || strings.Contains(sqlType, "double") ||
+		strings.Contains(sqlType, "numeric") || strings.Contains(sqlType, "decimal"):
 		return "float64"
 	case strings.Contains(sqlType, "real"):
 		return "float32"

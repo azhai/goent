@@ -7,6 +7,52 @@ package models
 import "github.com/azhai/goent"
 
 // ------------------------------
+// Book
+// ------------------------------
+
+// implement goent.Entity interface GetID for Book
+func (t *Book) GetID() int64 {
+	return int64(t.ID)
+}
+
+// implement goent.Entity interface SetID for Book
+func (t *Book) SetID(id int64) {
+	t.ID = int(id)
+}
+
+// UpdatePairs returns a slice of Pair for updating non-primary key fields.
+func (t *Book) UpdatePairs() []goent.Pair {
+	return []goent.Pair{
+		{Key: "isbn", Value: t.Isbn},
+		{Key: "title", Value: t.Title},
+		{Key: "author", Value: t.Author},
+		{Key: "genre", Value: t.Genre},
+		{Key: "quantity", Value: t.Quantity},
+		{Key: "publicized_at", Value: t.PublicizedAt},
+	}
+}
+
+// ScanDest returns a slice of pointers to Book fields for database scanning.
+func (t *Book) ScanDest() []any {
+	return []any{
+		&t.ID,
+		&t.Isbn,
+		&t.Title,
+		&t.Author,
+		&t.Genre,
+		&t.Quantity,
+		&t.PublicizedAt,
+	}
+}
+
+// FetchBook creates a FetchFunc for Book.
+func FetchBook() goent.FetchFunc {
+	return func(target any) []any {
+		return target.(*Book).ScanDest()
+	}
+}
+
+// ------------------------------
 // Category
 // ------------------------------
 
@@ -104,6 +150,48 @@ func (t *OrderDetail) ScanDest() []any {
 func FetchOrderDetail() goent.FetchFunc {
 	return func(target any) []any {
 		return target.(*OrderDetail).ScanDest()
+	}
+}
+
+// ------------------------------
+// PricePolicy
+// ------------------------------
+
+// implement goent.Entity interface GetID for PricePolicy
+func (t *PricePolicy) GetID() int64 {
+	return int64(t.ID)
+}
+
+// implement goent.Entity interface SetID for PricePolicy
+func (t *PricePolicy) SetID(id int64) {
+	t.ID = int(id)
+}
+
+// UpdatePairs returns a slice of Pair for updating non-primary key fields.
+func (t *PricePolicy) UpdatePairs() []goent.Pair {
+	return []goent.Pair{
+		{Key: "book_id", Value: t.BookID},
+		{Key: "price", Value: t.Price},
+		{Key: "start_date", Value: t.StartDate},
+		{Key: "end_date", Value: t.EndDate},
+	}
+}
+
+// ScanDest returns a slice of pointers to PricePolicy fields for database scanning.
+func (t *PricePolicy) ScanDest() []any {
+	return []any{
+		&t.ID,
+		&t.BookID,
+		&t.Price,
+		&t.StartDate,
+		&t.EndDate,
+	}
+}
+
+// FetchPricePolicy creates a FetchFunc for PricePolicy.
+func FetchPricePolicy() goent.FetchFunc {
+	return func(target any) []any {
+		return target.(*PricePolicy).ScanDest()
 	}
 }
 
