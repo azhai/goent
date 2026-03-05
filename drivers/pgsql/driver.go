@@ -79,7 +79,10 @@ func Open(dsn string, c config) (driver *Driver) {
 }
 
 func OpenDSN(dsn string) (driver *Driver) {
-	return Open(dsn, NewConfig(Config{}))
+	driver = Open(dsn, NewConfig(Config{}))
+	// dc := driver.GetDatabaseConfig()
+	// dc.Init(driver.Name(), driver.ErrorTranslator())
+	return
 }
 
 func (dr *Driver) AddLogger(logger model.Logger, err error) error {

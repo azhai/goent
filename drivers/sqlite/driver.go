@@ -82,7 +82,10 @@ func Open(dsn string, c config) (driver *Driver) {
 }
 
 func OpenDSN(dsn string) (driver *Driver) {
-	return Open(dsn, NewConfig(Config{}))
+	driver = Open(dsn, NewConfig(Config{}))
+	// dc := driver.GetDatabaseConfig()
+	// dc.Init(driver.Name(), driver.ErrorTranslator())
+	return
 }
 
 func (dr *Driver) AddLogger(logger model.Logger, err error) error {
@@ -94,20 +97,16 @@ func (dr *Driver) AddLogger(logger model.Logger, err error) error {
 }
 
 func (dr *Driver) Init() error {
-	dr.DatabaseConfig.SetInitCallback(func() error {
-		lock.Lock()
-		defer lock.Unlock()
-		var err error
-		dr.setHooks()
-		dr.sql, err = sql.Open("sqlite", dr.dsn)
-		if err != nil {
-			// logged by goe
-			return err
-		}
+	lock.Lock()
+	defer lock.Unlock()
+	dr.setHooks()
+	var err error
+	dr.sql, err = sql.Open("sqlite", dr.dsn)
+	if err != nil {
+		return err
+	}
 
-		return dr.sql.Ping()
-	})
-	return nil
+	return dr.sql.Ping()
 }
 
 func (dr *Driver) setHooks() {

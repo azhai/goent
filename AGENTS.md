@@ -355,8 +355,27 @@ db.Default.Insert().One(&d)
 
 ### Using the code generator
 1. Install: `go install github.com/azhai/goent/cmd/goent-gen@latest`
-2. Add `//go:generate goent-gen .` to your models package
-3. Run `go generate ./models`
+2. Generate tables from database:
+   ```bash
+   # Set database connection
+   export GOE_DATABASE_DSN="postgres://user:pass@localhost/db?sslmode=disable"
+   
+   # Generate tables with optional filters
+   goent-gen tables ./models --schema 'public' --prefix 't_' --force
+   ```
+   
+   **Command-line flags:**
+   - `--dsn`: Database DSN (required, or use `GOE_DATABASE_DSN` env var)
+   - `--schema`: Schema name to reverse (default: "public")
+   - `--prefix`: Table prefix filter (only reverse tables with this prefix)
+   - `--force`: Force overwrite existing files (default: creates backup with timestamp)
+   
+3. Generate fields:
+   ```bash
+   goent-gen fields ./models --force
+   # OR use go generate
+   go generate ./models
+   ```
 4. Use generated `ScanDest()` or `FetchXXX()` methods for best performance
 
 ## Build and Test Commands

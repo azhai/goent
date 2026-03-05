@@ -3,24 +3,7 @@ package utils
 import (
 	"reflect"
 	"strings"
-	"unicode"
-
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 )
-
-// TitleCase converts a string to title case
-// It capitalizes the first letter of each word
-func TitleCase(word string) string {
-	caser := cases.Title(language.Und)
-	return caser.String(word)
-	// if word == "" {
-	// 	return ""
-	// }
-	// runes := []rune(word)
-	// runes[0] = unicode.ToTitle(runes[0])
-	// return string(runes)
-}
 
 // ParseTableNameByValue parses table name by value
 // If method TableName is found, return its value
@@ -105,33 +88,6 @@ func TableNamePattern(name string) string {
 	}
 	name = ToSnakeCase(name)
 	return name
-}
-
-// ToSnakeCase converts camelCase or PascalCase to snake_case
-// It inserts underscores before uppercase letters based on context
-func ToSnakeCase(name string) string {
-	if len(name) == 0 {
-		return name
-	}
-
-	result := strings.Builder{}
-	for i := 0; i < len(name); i++ {
-		letter := rune(name[i])
-		if unicode.IsUpper(letter) {
-			letter = unicode.ToLower(letter)
-			if i > 0 {
-				prevLetter := rune(name[i-1])
-				if unicode.IsLower(prevLetter) {
-					result.WriteRune('_')
-				} else if i+1 < len(name) && unicode.IsLower(rune(name[i+1])) {
-					result.WriteRune('_')
-				}
-			}
-		}
-		result.WriteRune(letter)
-	}
-
-	return result.String()
 }
 
 // HasTagValue checks if tag has key value

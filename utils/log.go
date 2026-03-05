@@ -1,6 +1,9 @@
 package utils
 
 import (
+	"bytes"
+	"fmt"
+	"go/format"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -52,4 +55,19 @@ func MakeDirForFile(filename string) (err error) {
 		return os.MkdirAll(dir, 0755)
 	}
 	return err
+}
+
+// WriteToFile writes the formatted content to a file.
+func WriteToFile(buf *bytes.Buffer, outputPath string) error {
+	formatted, err := format.Source(buf.Bytes())
+	if err != nil {
+		return fmt.Errorf("error formatting output: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+	if err := os.WriteFile(outputPath, formatted, 0644); err != nil {
+		return fmt.Errorf("error writing file: %w", err)
+	}
+	return nil
 }

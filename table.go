@@ -354,7 +354,7 @@ func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schem
 			mountField = strings.TrimSuffix(mountField, "Id")
 			if mountField == fieldOf.Name {
 				mountField = strings.TrimSuffix(columnName, "_id")
-				mountField = utils.TitleCase(mountField)
+				mountField = utils.ToTitleCase(mountField)
 			}
 			info.Foreigns[columnName] = &Foreign{
 				Type:       fkType,

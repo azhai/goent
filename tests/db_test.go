@@ -411,9 +411,7 @@ func TestTx(t *testing.T) {
 func TestRace(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			driver := env.GetStr("GOE_DRIVER", "sqlite")
 			driver = strings.ToLower(driver)
 			var raceDb *Database
@@ -432,7 +430,7 @@ func TestRace(t *testing.T) {
 			if err == nil && raceDb != nil {
 				goent.Close(raceDb)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

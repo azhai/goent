@@ -3,8 +3,15 @@ package utils
 import (
 	"iter"
 	"maps"
+	"slices"
 	"sync"
 )
+
+// UniqueStrings sort and unique strings in the slice.
+func UniqueStrings(words []string) []string {
+	slices.Sort(words)
+	return slices.Compact(words)
+}
 
 // CoMap is a thread-safe concurrent map with read-write locking
 // It supports generic key types (int, int64, string) and any value type
@@ -76,6 +83,13 @@ func (m *CoMap[K, V]) Keys() []K {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// SortedKeys returns sorted keys from the map
+func (m *CoMap[K, V]) SortedKeys() []K {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return slices.Sorted(maps.Keys(m.data))
 }
 
 // Each returns an iterator over all key-value pairs in the map

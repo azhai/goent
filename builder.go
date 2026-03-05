@@ -384,6 +384,9 @@ func (b *Builder) BuildDoing() []any {
 		b.buf.WriteString(strings.Join(b.holders, ", "))
 		b.buf.WriteByte(')')
 	case model.InsertAllQuery:
+		if len(b.InsertValues) == 0 {
+			return args
+		}
 		size, last := len(b.VisitFields), len(b.InsertValues)-1
 		b.buf.WriteString(") VALUES (")
 		for i, row := range b.InsertValues {
@@ -400,6 +403,9 @@ func (b *Builder) BuildDoing() []any {
 		}
 		b.buf.WriteByte(')')
 	case model.UpdateQuery:
+		if len(b.Changes) == 0 {
+			return args
+		}
 		b.buf.WriteString(" SET ")
 		for f, v := range b.Changes {
 			b.argNo += 1
@@ -410,6 +416,9 @@ func (b *Builder) BuildDoing() []any {
 			args = append(args, v)
 		}
 	case model.UpdateJoinQuery:
+		if len(b.Changes) == 0 {
+			return args
+		}
 		b.buf.WriteString(" SET ")
 		isFirst := true
 		for f, v := range b.Changes {

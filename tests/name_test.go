@@ -7,7 +7,7 @@ import (
 )
 
 func TestToSnakeCase(t *testing.T) {
-	tests := []struct {
+	testCases := []struct {
 		name     string
 		input    string
 		expected string
@@ -99,11 +99,11 @@ func TestToSnakeCase(t *testing.T) {
 		// },
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := utils.ToSnakeCase(tt.input)
-			if result != tt.expected {
-				t.Errorf("ToSnakeCase(%q) = %q, want %q", tt.input, result, tt.expected)
+	for _, cas := range testCases {
+		t.Run(cas.name, func(t *testing.T) {
+			result := utils.ToSnakeCase(cas.input)
+			if result != cas.expected {
+				t.Errorf("ToSnakeCase(%q) got %q, BUT want %q", cas.input, result, cas.expected)
 			}
 		})
 	}

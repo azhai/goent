@@ -24,7 +24,7 @@ func main() {
 	env := utils.NewEnvWithFile("../.env")
 	dbType := env.GetStr("GOE_DRIVER", "sqlite")
 	if dbDSN = env.Get("GOE_DATABASE_DSN"); dbDSN == "" {
-		dbDSN = models.DefaultDSN(dbType)
+		dbDSN = DefaultDSN(dbType)
 	}
 	if logFile = env.Get("GOE_LOG_FILE"); logFile == "" {
 		logFile = "stdout"
@@ -45,11 +45,11 @@ func main() {
 		panic(err)
 	}
 
-	order := &models.Order{OrderNo: models.TestOrderNo}
+	order := &models.Order{OrderNo: TestOrderNo}
 	fields := []any{"id", "order_no", "total", "status"}
 	order, err = db.Order.Select(fields...).Match(*order).One()
 	if order == nil {
-		order, err = createOrder(db, models.TestOrderNo)
+		order, err = createOrder(db, TestOrderNo)
 	}
 	if err != nil {
 		fmt.Println(err)
@@ -99,10 +99,10 @@ func seedData(db *Database) error {
 	if err != nil || count > 0 {
 		return err
 	}
-	if err = db.Category.Insert().All(false, models.DataCategories()); err != nil {
+	if err = db.Category.Insert().All(false, DataCategories()); err != nil {
 		return err
 	}
-	if err = db.Product.Insert().All(false, models.DataProducts()); err != nil {
+	if err = db.Product.Insert().All(false, DataProducts()); err != nil {
 		return err
 	}
 	return nil
@@ -114,12 +114,12 @@ func createOrder(db *Database, orderNo string) (*models.Order, error) {
 	if err != nil && err != model.ErrNoRows || obj != nil && obj.ID > 0 {
 		return nil, err
 	}
-	order := models.DataOrder(orderNo)
+	order := DataOrder(orderNo)
 	fmt.Printf("createOrder: inserting order=%+v\n", order)
 	if err = db.Order.Insert().One(order); err != nil {
 		return nil, err
 	}
-	orderDetail := models.DataOrderDetail(order.ID)
+	orderDetail := DataOrderDetail(order.ID)
 	if err = db.OrderDetail.Insert().All(true, orderDetail); err != nil {
 		return nil, err
 	}
@@ -134,24 +134,24 @@ func CalcTotalPrice(db *Database, order *models.Order) (float64, error) {
 
 	filter := goent.Equals(db.OrderDetail.Field("order_id"), order.ID)
 	query := db.OrderDetail.Select().OrderBy("product_id")
-	order.OrderDetails, err = query.Filter(filter).All()
+	order.Details, err = query.Filter(filter).All()
 	if err != nil {
 		return 0.0, err
 	}
 
-	filter = goent.In(db.Product.Field("id"), order.GetProductIds())
-	order.Products, err = db.Product.Select().OrderBy("id").Filter(filter).All()
+	filter = goent.In(db.Product.Field("id"), GetProductIds(order))
+	products, err := db.Product.Select().OrderBy("id").Filter(filter).All()
 	if err != nil {
 		return 0.0, err
 	}
 
-	productMap := make(map[int64]*models.Product, len(order.Products))
-	for _, p := range order.Products {
+	productMap := make(map[int64]*models.Product, len(products))
+	for _, p := range products {
 		productMap[p.ID] = p
 	}
 
 	var total float64
-	for _, detail := range order.OrderDetails {
+	for _, detail := range order.Details {
 		product := productMap[detail.ProductID]
 		if product == nil {
 			return total, err
@@ -176,13 +176,13 @@ func CalcTotalPrice2(db *Database, order *models.Order) (float64, error) {
 
 	filter := goent.Equals(db.OrderDetail.Field("order_id"), order.ID)
 	query := db.OrderDetail.Select().OrderBy("product_id").Filter(filter)
-	order.OrderDetails, err = query.LeftJoin("product_id", db.Product.Field("id")).All()
+	order.Details, err = query.LeftJoin("product_id", db.Product.Field("id")).All()
 	if err != nil {
 		return 0.0, err
 	}
 
 	var total float64
-	for _, detail := range order.OrderDetails {
+	for _, detail := range order.Details {
 		if detail.Product == nil {
 			continue
 		}

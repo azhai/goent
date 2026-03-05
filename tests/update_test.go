@@ -205,13 +205,11 @@ func TestUpdate(t *testing.T) {
 				}
 				var wg sync.WaitGroup
 				for range 10 {
-					wg.Add(1)
-					go func() {
-						defer wg.Done()
+					wg.Go(func() {
 						au := Animal{Id: a.Id}
 						au.Name = "Update Cat"
 						db.Animal.Save().One(&au)
-					}()
+					})
 				}
 				wg.Wait()
 			},
