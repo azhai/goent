@@ -278,6 +278,11 @@ func (b *Builder) Reset() {
 	b.Groups = b.Groups[:0]
 	b.Offset = 0
 	b.RollUp = ""
+	if b.buf != nil {
+		b.buf.Reset()
+	} else {
+		b.buf = bufPool.Get().(*bytes.Buffer)
+	}
 }
 
 // ResetForSave resets the Builder for INSERT/UPDATE operations
@@ -535,10 +540,13 @@ func (b *Builder) Build(destroy bool) (sql string, args []any) {
 	}
 	sql = b.buf.String()
 
-	b.buf.Reset()
-	bufPool.Put(b.buf)
 	if destroy {
+		b.buf.Reset()
+		bufPool.Put(b.buf)
+		b.buf = nil
 		PutBuilder(b)
+	} else {
+		b.buf.Reset()
 	}
 	return
 }

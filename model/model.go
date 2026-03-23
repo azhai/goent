@@ -284,7 +284,9 @@ func (c *DatabaseConfig) ErrorHandler(ctx context.Context, err error) error {
 // ErrorQueryHandler logs the query error using the configured logger
 // It translates the error and logs it with query details
 func (c *DatabaseConfig) ErrorQueryHandler(ctx context.Context, query Query) error {
-	query.Err = c.errorTranslator(query.Err)
+	if c.errorTranslator != nil {
+		query.Err = c.errorTranslator(query.Err)
+	}
 	if c.Logger == nil {
 		return query.Err
 	}

@@ -111,7 +111,7 @@ func (h *Handler) ExecuteReturning(query model.Query, valueOf reflect.Value, ret
 //	fmt.Println(valueOf.Len()) // number of inserted records
 func (h *Handler) BatchReturning(query model.Query, valueOf reflect.Value, returnFid int) error {
 	rows, err := query.WrapQuery(h.ctx, h.conn, h.cfg)
-	if err != nil {
+	if err != nil || rows == nil {
 		return err
 	}
 	defer rows.Close()
@@ -145,7 +145,7 @@ func (h *Handler) BatchReturning(query model.Query, valueOf reflect.Value, retur
 //	}
 func FetchResult[R any](hd *Handler, query model.Query, to FetchFunc) iter.Seq2[*R, error] {
 	rows, err := query.WrapQuery(hd.ctx, hd.conn, hd.cfg)
-	if err != nil {
+	if err != nil || rows == nil {
 		return func(yield func(*R, error) bool) {
 			yield(nil, err)
 		}
