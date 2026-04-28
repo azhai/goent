@@ -1,9 +1,25 @@
 package goent
 
+import "context"
+
 // NewSelectFunc creates a new StateSelect with a function applied to the specified column.
 // T is the model type, R is the result type.
 func NewSelectFunc[T, R any](state *StateWhere, table *Table[T], col, fun string) *StateSelect[T, R] {
-	s := NewStateSelectFrom[T, R](state, table)
+	var ctx = context.Background()
+	if state != nil {
+		ctx = state.ctx
+}
+	s := NewStateSelectFrom[T, R](NewStateWhere(ctx), table)
+	if state != nil {
+		s.builder.Where = state.builder.Where
+		s.builder.Joins = state.builder.Joins
+		s.builder.Orders = state.builder.Orders
+		s.builder.Groups = state.builder.Groups
+		s.builder.Limit = state.builder.Limit
+		s.builder.Offset = state.builder.Offset
+		s.builder.RollUp = state.builder.RollUp
+		s.conn = state.conn
+}
 	s.builder.VisitFields = []*Field{
 		{TableAddr: table.TableAddr, ColumnName: col, Function: fun},
 	}

@@ -16,6 +16,7 @@ type StateInsert[T any] struct {
 // One inserts a single record into the table
 // It handles auto-increment primary keys and returning values
 func (s *StateInsert[T]) One(obj *T) error {
+	defer PutBuilder(s.builder)
 	s.builder.Type = model.InsertQuery
 	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
 	s.builder.ResetForSave()
@@ -77,6 +78,7 @@ func (s *StateInsert[T]) queryLastInsertId() (int64, error) {
 // All inserts multiple records into the table
 // It handles batch insertion and optionally returns auto-increment primary keys
 func (s *StateInsert[T]) All(retPK bool, data []*T) error {
+	defer PutBuilder(s.builder)
 	if len(data) == 0 {
 		return nil
 	} else if len(data) == 1 {
@@ -185,6 +187,7 @@ func (s *StateSave[T]) getQuery(primary Dict) model.Query {
 // One saves a record to the table, inserting if no primary key exists or updating if it does
 // It automatically handles insert/update logic based on primary key presence
 func (s *StateSave[T]) One(obj *T) error {
+	defer PutBuilder(s.builder)
 	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
 	s.builder.ResetForSave()
 
@@ -211,6 +214,7 @@ func (s *StateSave[T]) One(obj *T) error {
 // Map saves records from a map, inserting or updating based on primary key presence
 // It extracts primary keys from the map to determine insert/update logic
 func (s *StateSave[T]) Map(value Dict) error {
+	defer PutBuilder(s.builder)
 	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
 	s.builder.ResetForSave()
 

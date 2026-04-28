@@ -395,8 +395,11 @@ func LessEqualsField(left, right *Field) Condition {
 // It generates an IN clause for the field
 func In(left *Field, value any) Condition {
 	right := NewValue(value)
-	if right.Length <= 1 {
-		return Equals(left, value)
+	if right.Length == 0 {
+		return Expr("1 = 0")
+	}
+	if right.Length == 1 {
+		return Condition{Template: "%s = ?", Fields: []*Field{left}, Values: []*Value{right}}
 	}
 	return Condition{Template: "%s IN ?", Fields: []*Field{left}, Values: []*Value{right}}
 }
@@ -405,8 +408,11 @@ func In(left *Field, value any) Condition {
 // It generates a NOT IN clause for the field
 func NotIn(left *Field, value any) Condition {
 	right := NewValue(value)
-	if right.Length <= 1 {
-		return NotEquals(left, value)
+	if right.Length == 0 {
+		return Expr("1 = 1")
+	}
+	if right.Length == 1 {
+		return Condition{Template: "%s != ?", Fields: []*Field{left}, Values: []*Value{right}}
 	}
 	return Condition{Template: "%s NOT IN ?", Fields: []*Field{left}, Values: []*Value{right}}
 }

@@ -286,6 +286,7 @@ func QueryMiddleTable[T any](foreign *Foreign, table *Table[T], leftCol, rightCo
 	builder := GetBuilder()
 	defer PutBuilder(builder)
 	builder.Type = model.SelectQuery
+	builder.SetTable(table.TableInfo, table.db.driver)
 	builder.Where, builder.Limit = filter, size
 	builder.VisitFields = []*Field{
 		{ColumnName: leftCol},

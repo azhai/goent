@@ -34,7 +34,7 @@ func NewStateSelectFrom[T, R any](state *StateWhere, table *Table[T]) *StateSele
 	}
 	state.builder.Type = model.SelectQuery
 	state.builder.SetTable(table.TableInfo, table.db.driver)
-	state.builder.VisitFields = table.GetSortedFields()
+	state.builder.VisitFields = append([]*Field(nil), table.GetSortedFields()...)
 	return &StateSelect[T, R]{table: table, StateWhere: state}
 }
 

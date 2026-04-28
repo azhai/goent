@@ -567,6 +567,7 @@ func (t *Table[T]) SelectContext(ctx context.Context, fields ...any) *StateSelec
 	s := NewStateWhere(ctx)
 	state := NewStateSelectFrom[T, T](s, t)
 	if len(fields) > 0 {
+		state.builder.VisitFields = make([]*Field, 0, len(fields))
 		state.Select(fields...)
 	} else {
 		state.sameModel = true

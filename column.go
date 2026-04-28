@@ -67,6 +67,7 @@ type ResultFloat = ResultFunc[float64] // Float64 result type
 // It fetches a single value from the query result
 // Example: count, err := FetchSingleResult[int64](query)
 func FetchSingleResult[T, V any](state *StateSelect[T, ResultFunc[V]]) (V, error) {
+	defer PutBuilder(state.builder)
 	qr := model.CreateQuery(state.builder.Build(true))
 	obj, err := state.FetchRow(qr, FetchValue)
 	if obj == nil {

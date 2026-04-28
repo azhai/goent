@@ -290,7 +290,7 @@ func (b *Builder) Reset() {
 func (b *Builder) ResetForSave() {
 	clear(b.Changes) // Clear map instead of creating a new one
 	b.InsertValues = b.InsertValues[:0]
-	b.VisitFields = b.VisitFields[:0]
+	b.VisitFields = nil
 	b.Limit = -1
 	b.Returning = ""
 	b.ForUpdate = false
@@ -312,6 +312,12 @@ func (b *Builder) IsInsertQuery() bool {
 // It delegates to the embedded DeleteBuilder to set the table
 func (b *Builder) SetTable(table TableInfo, driver model.Driver) *Builder {
 	b.DeleteBuilder.SetTable(table, driver)
+	b.Table = table.Table()
+	var schema string
+	if b.Table.Schema != nil {
+		schema = *b.Table.Schema
+	}
+	b.fullName = driver.FormatTableName(schema, b.Table.Name)
 	return b
 }
 
@@ -340,6 +346,10 @@ func (b *Builder) BuildHead() []any {
 		b.buf.WriteString(" FROM ")
 		if b.fullName != "" {
 			b.buf.WriteString(b.fullName)
+		} else if b.Table != nil && b.Table.Name != "" {
+			b.buf.WriteString(b.Table.Name)
+		} else {
+			panic("goent: BuildHead called with empty table name for SELECT query - missing SetTable() call")
 		}
 	case model.DeleteQuery:
 		_ = b.DeleteBuilder.BuildHead()
@@ -347,6 +357,10 @@ func (b *Builder) BuildHead() []any {
 		b.buf.WriteString("INSERT INTO ")
 		if b.fullName != "" {
 			b.buf.WriteString(b.fullName)
+		} else if b.Table != nil && b.Table.Name != "" {
+			b.buf.WriteString(b.Table.Name)
+		} else {
+			panic("goent: BuildHead called with empty table name for INSERT query - missing SetTable() call")
 		}
 		b.buf.WriteByte('(')
 		var columns []string
@@ -361,6 +375,8 @@ func (b *Builder) BuildHead() []any {
 		b.buf.WriteString("INSERT INTO ")
 		if b.fullName != "" {
 			b.buf.WriteString(b.fullName)
+		} else if b.Table != nil && b.Table.Name != "" {
+			b.buf.WriteString(b.Table.Name)
 		}
 		b.buf.WriteByte('(')
 		columns := make([]string, len(b.VisitFields))
@@ -544,7 +560,6 @@ func (b *Builder) Build(destroy bool) (sql string, args []any) {
 		b.buf.Reset()
 		bufPool.Put(b.buf)
 		b.buf = nil
-		PutBuilder(b)
 	} else {
 		b.buf.Reset()
 	}

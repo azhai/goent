@@ -20,6 +20,7 @@ type StateUpdate[T any] struct {
 //	change := Pair{Key:"name", Value:"John"}
 //	err := db.User.Where("id = ?", 1).Update().Set(change).Exec()
 func (s *StateUpdate[T]) Exec() error {
+	defer PutBuilder(s.builder)
 	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
 	qr := model.CreateQuery(s.builder.Build(true))
 	conn, cfg := s.Prepare(s.table.db.driver)
