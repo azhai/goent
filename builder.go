@@ -43,35 +43,23 @@ type Group struct {
 	*Field
 }
 
-var bufPool = sync.Pool{
-	New: func() any {
-		// The Pool's New function should generally only return pointer
-		// types, since a pointer can be put into the return interface
-		// value without an allocation:
-		return new(bytes.Buffer)
-	},
-}
-
-// DeleteBuilder builds DELETE SQL statements
-// It handles WHERE conditions and LIMIT clause for delete operations
 type DeleteBuilder struct {
-	Table *model.Table // The target table for the DELETE operation
-	Where Condition    // The WHERE clause conditions
-	Limit int          // The LIMIT clause value (only supported by SQLite)
+	Table *model.Table
+	Where Condition
+	Limit int
 
-	argNo    int      // Current argument number for parameterized queries
-	holders  []string // Placeholder strings for parameterized queries
-	fullName string   // Full table name with schema
+	argNo    int
+	holders  []string
+	fullName string
 
-	buf *bytes.Buffer // Buffer for building SQL statements
+	buf *bytes.Buffer
+	mu  sync.Mutex
 }
 
-// CreateDeleteBuilder creates a new DeleteBuilder instance
-// It initializes the builder with no limit and a buffer from the pool
 func CreateDeleteBuilder() DeleteBuilder {
 	return DeleteBuilder{
 		Limit: TakeNoLimit,
-		buf:   bufPool.Get().(*bytes.Buffer),
+		buf:   new(bytes.Buffer),
 	}
 }
 
@@ -97,7 +85,6 @@ func PutDeleteBuilder(b *DeleteBuilder) {
 	deleteBuilderPool.Put(b)
 }
 
-// Reset resets the DeleteBuilder to its initial state.
 func (b *DeleteBuilder) Reset() {
 	b.Table = nil
 	b.Where = Condition{}
@@ -108,7 +95,7 @@ func (b *DeleteBuilder) Reset() {
 	if b.buf != nil {
 		b.buf.Reset()
 	} else {
-		b.buf = bufPool.Get().(*bytes.Buffer)
+		b.buf = new(bytes.Buffer)
 	}
 }
 
@@ -210,9 +197,9 @@ func (b *DeleteBuilder) appendValueParam(val *Value, startIdx int, args *[]any) 
 	return startIdx
 }
 
-// Build assembles the complete DELETE SQL statement
-// It builds the head, WHERE clause, and tail, then returns the SQL and arguments
 func (b *DeleteBuilder) Build() (sql string, args []any) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	_ = b.BuildHead()
 	args = b.BuildWhere(false)
 	_ = b.BuildTail()
@@ -266,7 +253,6 @@ func PutBuilder(b *Builder) {
 	builderPool.Put(b)
 }
 
-// Reset resets the Builder to its initial state.
 func (b *Builder) Reset() {
 	b.ResetForSave()
 	b.Type = 0
@@ -281,7 +267,7 @@ func (b *Builder) Reset() {
 	if b.buf != nil {
 		b.buf.Reset()
 	} else {
-		b.buf = bufPool.Get().(*bytes.Buffer)
+		b.buf = new(bytes.Buffer)
 	}
 }
 
@@ -538,9 +524,9 @@ func (b *Builder) BuildJoins() []any {
 	return args
 }
 
-// Build assembles the complete SQL query and returns it along with query arguments
-// It builds all parts of the query including head, doing, joins, where, and tail
 func (b *Builder) Build(destroy bool) (sql string, args []any) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	args = b.BuildHead()
 	if doArgs := b.BuildDoing(); len(doArgs) > 0 {
 		args = append(args, doArgs...)
@@ -555,14 +541,7 @@ func (b *Builder) Build(destroy bool) (sql string, args []any) {
 		args = append(args, tailArgs...)
 	}
 	sql = b.buf.String()
-
-	if destroy {
-		b.buf.Reset()
-		bufPool.Put(b.buf)
-		b.buf = nil
-	} else {
-		b.buf.Reset()
-	}
+	b.buf.Reset()
 	return
 }
 
