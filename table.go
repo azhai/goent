@@ -413,35 +413,161 @@ func (t *Table[T]) CacheOne(obj any) (id int64) {
 }
 
 // ------------------------------
+// TableQuery ...
+// ------------------------------
+
+// TableQuery represents a conditional query builder for a table.
+// It is created by Table.Filter() or Table.Where() and supports chaining
+// aggregate methods, Select(), and Delete().
+//
+// Example:
+//
+//	count, err := db.User.Filter(goent.Equals("status", "active")).Count("id")
+//	users, err := db.User.Where("age > ?", 18).Select().All()
+//	err := db.User.Filter(goent.Equals("status", "deleted")).Delete().Exec()
+type TableQuery[T any] struct {
+	table *Table[T]
+	state *StateWhere
+}
+
+func newTableQuery[T any](table *Table[T], ctx context.Context) *TableQuery[T] {
+	return &TableQuery[T]{table: table, state: NewStateWhere(ctx)}
+}
+
+// Filter adds filter conditions to the query.
+func (q *TableQuery[T]) Filter(args ...Condition) *TableQuery[T] {
+	q.state = q.state.Filter(args...)
+	return q
+}
+
+// Where adds a raw WHERE clause to the query.
+func (q *TableQuery[T]) Where(where string, args ...any) *TableQuery[T] {
+	q.state = q.state.Where(where, args...)
+	return q
+}
+
+// OnTransaction sets the transaction for the query.
+func (q *TableQuery[T]) OnTransaction(tx model.Transaction) *TableQuery[T] {
+	q.state = q.state.OnTransaction(tx)
+	return q
+}
+
+// Select creates a StateSelect from this query's conditions.
+// This allows further chaining with Select-specific methods like All(), One(), etc.
+func (q *TableQuery[T]) Select() *StateSelect[T, T] {
+	return NewStateSelectFrom[T, T](q.state, q.table)
+}
+
+// Delete creates a StateDelete from this query's conditions.
+func (q *TableQuery[T]) Delete() *StateDelete[T] {
+	s := NewStateDeleteWhere(q.state.ctx)
+	s.builder.Where = q.state.builder.Where
+	s.conn = q.state.conn
+	return &StateDelete[T]{table: q.table, StateDeleteWhere: s}
+}
+
+// Count counts the number of rows matching the query conditions.
+func (q *TableQuery[T]) Count(col string) (int64, error) {
+	query := NewSelectFunc[T, ResultLong](q.state, q.table, col, "COUNT(%s)")
+	return FetchSingleResult(query)
+}
+
+// Max returns the maximum value of the specified column.
+func (q *TableQuery[T]) Max(col string) (int64, error) {
+	query := NewSelectFunc[T, ResultLong](q.state, q.table, col, "MAX(%s)")
+	return FetchSingleResult(query)
+}
+
+// Min returns the minimum value of the specified column.
+func (q *TableQuery[T]) Min(col string) (int64, error) {
+	query := NewSelectFunc[T, ResultLong](q.state, q.table, col, "MIN(%s)")
+	return FetchSingleResult(query)
+}
+
+// Sum returns the sum of the specified column.
+func (q *TableQuery[T]) Sum(col string) (int64, error) {
+	query := NewSelectFunc[T, ResultLong](q.state, q.table, col, "SUM(%s)")
+	return FetchSingleResult(query)
+}
+
+// Avg returns the average value of the specified column.
+func (q *TableQuery[T]) Avg(col string) (int64, error) {
+	query := NewSelectFunc[T, ResultLong](q.state, q.table, col, "AVG(%s)")
+	return FetchSingleResult(query)
+}
+
+// MaxFloat returns the maximum value as float64.
+func (q *TableQuery[T]) MaxFloat(col string) (float64, error) {
+	query := NewSelectFunc[T, ResultFloat](q.state, q.table, col, "MAX(%s)")
+	return FetchSingleResult(query)
+}
+
+// MinFloat returns the minimum value as float64.
+func (q *TableQuery[T]) MinFloat(col string) (float64, error) {
+	query := NewSelectFunc[T, ResultFloat](q.state, q.table, col, "MIN(%s)")
+	return FetchSingleResult(query)
+}
+
+// SumFloat returns the sum as float64.
+func (q *TableQuery[T]) SumFloat(col string) (float64, error) {
+	query := NewSelectFunc[T, ResultFloat](q.state, q.table, col, "SUM(%s)")
+	return FetchSingleResult(query)
+}
+
+// AvgFloat returns the average as float64.
+func (q *TableQuery[T]) AvgFloat(col string) (float64, error) {
+	query := NewSelectFunc[T, ResultFloat](q.state, q.table, col, "AVG(%s)")
+	return FetchSingleResult(query)
+}
+
+// ToUpper returns the uppercase values of the specified column.
+func (q *TableQuery[T]) ToUpper(col string) ([]string, error) {
+	query := NewSelectFunc[T, ResultStr](q.state, q.table, col, "UPPER(%s)")
+	return FetchArrayResult(query)
+}
+
+// ToLower returns the lowercase values of the specified column.
+func (q *TableQuery[T]) ToLower(col string) ([]string, error) {
+	query := NewSelectFunc[T, ResultStr](q.state, q.table, col, "LOWER(%s)")
+	return FetchArrayResult(query)
+}
+
+// ------------------------------
 // Filter/Where ...
 // ------------------------------
 
-// Filter adds filter conditions to the table's query using the default context.
+// Filter creates a conditional query builder with the specified filter conditions.
 //
 // Example:
 //
+//	count, err := db.User.Filter(goent.Equals("status", "active")).Count("id")
 //	users, err := db.User.Filter(goent.Equals("status", "active")).Select().All()
-func (t *Table[T]) Filter(args ...Condition) *Table[T] {
+func (t *Table[T]) Filter(args ...Condition) *TableQuery[T] {
 	return t.FilterContext(context.Background(), args...)
 }
 
-// FilterContext adds filter conditions to the table's query with a specific context.
-func (t *Table[T]) FilterContext(ctx context.Context, args ...Condition) *Table[T] {
-	return t
+// FilterContext creates a conditional query builder with the specified context and filter conditions.
+func (t *Table[T]) FilterContext(ctx context.Context, args ...Condition) *TableQuery[T] {
+	q := newTableQuery[T](t, ctx)
+	q.state = q.state.Filter(args...)
+	return q
 }
 
-// Where adds a WHERE clause to the table's query using the default context.
+// Where creates a conditional query builder with the specified WHERE clause.
 //
 // Example:
 //
+//	count, err := db.User.Where("age > ?", 18).Count("id")
 //	users, err := db.User.Where("age > ?", 18).Select().All()
-func (t *Table[T]) Where(where string, args ...any) *Table[T] {
+func (t *Table[T]) Where(where string, args ...any) *TableQuery[T] {
 	return t.WhereContext(context.Background(), where, args...)
 }
 
-// WhereContext adds a WHERE clause to the table's query with a specific context.
-func (t *Table[T]) WhereContext(ctx context.Context, where string, args ...any) *Table[T] {
-	return t
+// WhereContext creates a conditional query builder with the specified context and WHERE clause.
+func (t *Table[T]) WhereContext(ctx context.Context, where string, args ...any) *TableQuery[T] {
+	q := newTableQuery[T](t, ctx)
+	q.state = q.state.Where(where, args...)
+	return q
 }
 
 // Drop drops (deletes) the table from the database.
