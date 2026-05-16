@@ -95,6 +95,10 @@ func (m *mockRows) Next() bool {
 	return false
 }
 
+func (m *mockRows) Err() error {
+	return nil
+}
+
 func (m *mockRows) Scan(dest ...any) error {
 	return nil
 }

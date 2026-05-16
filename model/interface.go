@@ -109,11 +109,9 @@ type SavePoint interface {
 // It defines the interface for iterating over query results
 
 type Rows interface {
-	// Close closes the result set
 	Close() error
-	// Next advances to the next row
 	Next() bool
-	// Row represents a single row in the result set
+	Err() error
 	Row
 }
 

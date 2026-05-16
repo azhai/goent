@@ -164,6 +164,9 @@ func FetchResult[R any](hd *Handler, query model.Query, to FetchFunc) iter.Seq2[
 				return
 			}
 		}
+		if err := rows.Err(); err != nil {
+			yield(nil, err)
+		}
 	}
 }
 

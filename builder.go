@@ -90,7 +90,7 @@ func (b *DeleteBuilder) Reset() {
 	b.Where = Condition{}
 	b.Limit = TakeNoLimit
 	b.argNo = 0
-	b.holders = b.holders[:0]
+	b.holders = nil
 	b.fullName = ""
 	if b.buf != nil {
 		b.buf.Reset()
@@ -113,7 +113,7 @@ func (b *DeleteBuilder) SetTable(table TableInfo, driver model.Driver) *DeleteBu
 
 // BuildHead builds the DELETE statement head
 // It writes "DELETE FROM table_name" to the buffer
-func (b *DeleteBuilder) BuildHead() []any {
+func (b *DeleteBuilder) buildHead() []any {
 	b.buf.WriteString("DELETE FROM ")
 	if b.fullName != "" {
 		b.buf.WriteString(b.fullName)
@@ -123,7 +123,7 @@ func (b *DeleteBuilder) BuildHead() []any {
 
 // BuildTail builds the DELETE statement tail
 // It adds the LIMIT clause if specified
-func (b *DeleteBuilder) BuildTail() []any {
+func (b *DeleteBuilder) buildTail() []any {
 	if b.Limit > 0 {
 		b.buf.WriteString(" LIMIT " + strconv.Itoa(b.Limit))
 	}
@@ -132,7 +132,7 @@ func (b *DeleteBuilder) BuildTail() []any {
 
 // BuildWhere builds the WHERE clause for the DELETE statement
 // It processes the conditions and returns the query arguments
-func (b *DeleteBuilder) BuildWhere(full bool) []any {
+func (b *DeleteBuilder) buildWhere(full bool) []any {
 	if b.Where.IsEmpty() {
 		return nil
 	}
@@ -200,9 +200,9 @@ func (b *DeleteBuilder) appendValueParam(val *Value, startIdx int, args *[]any) 
 func (b *DeleteBuilder) Build() (sql string, args []any) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	_ = b.BuildHead()
-	args = b.BuildWhere(false)
-	_ = b.BuildTail()
+	_ = b.buildHead()
+	args = b.buildWhere(false)
+	_ = b.buildTail()
 	sql = b.buf.String()
 	b.buf.Reset()
 	return
@@ -258,10 +258,10 @@ func (b *Builder) Reset() {
 	b.Type = 0
 	b.Table = nil
 	b.fullName = ""
-	b.Joins = b.Joins[:0]
+	b.Joins = nil
 	b.Where = Condition{}
-	b.Orders = b.Orders[:0]
-	b.Groups = b.Groups[:0]
+	b.Orders = nil
+	b.Groups = nil
 	b.Offset = 0
 	b.RollUp = ""
 	if b.buf != nil {
@@ -274,14 +274,14 @@ func (b *Builder) Reset() {
 // ResetForSave resets the Builder for INSERT/UPDATE operations
 // It clears changes, insert values, visit fields, and other operation-specific settings
 func (b *Builder) ResetForSave() {
-	clear(b.Changes) // Clear map instead of creating a new one
-	b.InsertValues = b.InsertValues[:0]
+	clear(b.Changes)
+	b.InsertValues = nil
 	b.VisitFields = nil
 	b.Limit = -1
 	b.Returning = ""
 	b.ForUpdate = false
 	b.argNo = 0
-	b.holders = b.holders[:0]
+	b.holders = nil
 }
 
 // IsJoinQuery checks if the query is a join query
@@ -292,6 +292,20 @@ func (b *Builder) IsJoinQuery() bool {
 // IsInsertQuery checks if the query is an insert query
 func (b *Builder) IsInsertQuery() bool {
 	return b.Type == model.InsertQuery || b.Type == model.InsertAllQuery
+}
+
+func (b *Builder) sortedChanges() []*Field {
+	fields := make([]*Field, 0, len(b.Changes))
+	for f := range b.Changes {
+		fields = append(fields, f)
+	}
+	slices.SortFunc(fields, func(a, b *Field) int {
+		if a.FieldId != b.FieldId {
+			return a.FieldId - b.FieldId
+		}
+		return strings.Compare(a.ColumnName, b.ColumnName)
+	})
+	return fields
 }
 
 // SetTable sets the table for the query builder
@@ -309,7 +323,7 @@ func (b *Builder) SetTable(table TableInfo, driver model.Driver) *Builder {
 
 // BuildHead builds the SQL statement head for SELECT, INSERT, UPDATE, or DELETE operations
 // It handles different query types and returns the initial query arguments
-func (b *Builder) BuildHead() []any {
+func (b *Builder) buildHead() []any {
 	var args []any
 	switch b.Type {
 	default:
@@ -335,10 +349,10 @@ func (b *Builder) BuildHead() []any {
 		} else if b.Table != nil && b.Table.Name != "" {
 			b.buf.WriteString(b.Table.Name)
 		} else {
-			panic("goent: BuildHead called with empty table name for SELECT query - missing SetTable() call")
+			panic("goent: buildHead called with empty table name for SELECT query - missing SetTable() call")
 		}
 	case model.DeleteQuery:
-		_ = b.DeleteBuilder.BuildHead()
+		_ = b.DeleteBuilder.buildHead()
 	case model.InsertQuery:
 		b.buf.WriteString("INSERT INTO ")
 		if b.fullName != "" {
@@ -346,11 +360,12 @@ func (b *Builder) BuildHead() []any {
 		} else if b.Table != nil && b.Table.Name != "" {
 			b.buf.WriteString(b.Table.Name)
 		} else {
-			panic("goent: BuildHead called with empty table name for INSERT query - missing SetTable() call")
+			panic("goent: buildHead called with empty table name for INSERT query - missing SetTable() call")
 		}
 		b.buf.WriteByte('(')
 		var columns []string
-		for f, v := range b.Changes {
+		for _, f := range b.sortedChanges() {
+			v := b.Changes[f]
 			b.argNo += 1
 			b.holders = append(b.holders, "$"+strconv.Itoa(b.argNo))
 			args = append(args, v)
@@ -381,7 +396,7 @@ func (b *Builder) BuildHead() []any {
 
 // BuildDoing builds the SET clause for UPDATE or VALUES clause for INSERT operations
 // It processes the changes or values and returns the query arguments
-func (b *Builder) BuildDoing() []any {
+func (b *Builder) buildDoing() []any {
 	var args []any
 	switch b.Type {
 	default:
@@ -414,9 +429,10 @@ func (b *Builder) BuildDoing() []any {
 			return args
 		}
 		b.buf.WriteString(" SET ")
-		for f, v := range b.Changes {
+		for i, f := range b.sortedChanges() {
+			v := b.Changes[f]
 			b.argNo += 1
-			if b.argNo > 1 {
+			if i > 0 {
 				b.buf.WriteString(", ")
 			}
 			b.buf.WriteString(f.Simple() + "=$" + strconv.Itoa(b.argNo))
@@ -427,9 +443,9 @@ func (b *Builder) BuildDoing() []any {
 			return args
 		}
 		b.buf.WriteString(" SET ")
-		isFirst := true
-		for f, v := range b.Changes {
-			if !isFirst {
+		for i, f := range b.sortedChanges() {
+			v := b.Changes[f]
+			if i > 0 {
 				b.buf.WriteString(", ")
 			}
 			if fld, ok := v.(*Field); ok {
@@ -439,7 +455,6 @@ func (b *Builder) BuildDoing() []any {
 				b.buf.WriteString(f.Simple() + "=$" + strconv.Itoa(b.argNo))
 				args = append(args, v)
 			}
-			isFirst = false
 		}
 	}
 
@@ -448,11 +463,11 @@ func (b *Builder) BuildDoing() []any {
 
 // BuildTail builds the tail part of the query (GROUP BY, ORDER BY, LIMIT, OFFSET, RETURNING)
 // It handles the trailing clauses for different query types
-func (b *Builder) BuildTail() []any {
+func (b *Builder) buildTail() []any {
 	var args []any
 
 	if b.Type == model.DeleteQuery {
-		b.DeleteBuilder.BuildTail()
+		b.DeleteBuilder.buildTail()
 	}
 
 	if b.Type == model.SelectQuery {
@@ -497,7 +512,7 @@ func (b *Builder) BuildTail() []any {
 
 // BuildJoins builds the JOIN clauses for the query
 // It processes all join tables and returns the query arguments
-func (b *Builder) BuildJoins() []any {
+func (b *Builder) buildJoins() []any {
 	if len(b.Joins) == 0 {
 		return nil
 	}
@@ -527,17 +542,17 @@ func (b *Builder) BuildJoins() []any {
 func (b *Builder) Build(destroy bool) (sql string, args []any) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	args = b.BuildHead()
-	if doArgs := b.BuildDoing(); len(doArgs) > 0 {
+	args = b.buildHead()
+	if doArgs := b.buildDoing(); len(doArgs) > 0 {
 		args = append(args, doArgs...)
 	}
-	if joinArgs := b.BuildJoins(); len(joinArgs) > 0 {
+	if joinArgs := b.buildJoins(); len(joinArgs) > 0 {
 		args = append(args, joinArgs...)
 	}
-	if whereArgs := b.BuildWhere(b.IsJoinQuery()); len(whereArgs) > 0 {
+	if whereArgs := b.buildWhere(b.IsJoinQuery()); len(whereArgs) > 0 {
 		args = append(args, whereArgs...)
 	}
-	if tailArgs := b.BuildTail(); len(tailArgs) > 0 {
+	if tailArgs := b.buildTail(); len(tailArgs) > 0 {
 		args = append(args, tailArgs...)
 	}
 	sql = b.buf.String()

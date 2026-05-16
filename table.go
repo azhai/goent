@@ -196,11 +196,9 @@ func (info TableInfo) setForeignReference(foreign *Foreign, refTableName string)
 // Table represents a database table with its model and metadata.
 // It provides methods for querying, inserting, updating, and deleting records.
 type Table[T any] struct {
-	Model       *T
-	Cache       *utils.CoMap[int64, T]
-	State       *StateWhere
-	StateDelete *StateDeleteWhere
-	db          *DB
+	Model *T
+	Cache *utils.CoMap[int64, T]
+	db    *DB
 	TableInfo
 }
 
@@ -429,10 +427,6 @@ func (t *Table[T]) Filter(args ...Condition) *Table[T] {
 
 // FilterContext adds filter conditions to the table's query with a specific context.
 func (t *Table[T]) FilterContext(ctx context.Context, args ...Condition) *Table[T] {
-	if t.State == nil {
-		t.State = NewStateWhere(ctx)
-	}
-	t.State = t.State.Filter(args...)
 	return t
 }
 
@@ -447,10 +441,6 @@ func (t *Table[T]) Where(where string, args ...any) *Table[T] {
 
 // WhereContext adds a WHERE clause to the table's query with a specific context.
 func (t *Table[T]) WhereContext(ctx context.Context, where string, args ...any) *Table[T] {
-	if t.State == nil {
-		t.State = NewStateWhere(ctx)
-	}
-	t.State = t.State.Where(where, args...)
 	return t
 }
 
@@ -484,10 +474,7 @@ func (t *Table[T]) Delete() *StateDelete[T] {
 
 // DeleteContext creates a new StateDelete with a specific context.
 func (t *Table[T]) DeleteContext(ctx context.Context) *StateDelete[T] {
-	var s *StateDeleteWhere
-	if s = t.StateDelete; s == nil {
-		s = NewStateDeleteWhere(ctx)
-	}
+	s := NewStateDeleteWhere(ctx)
 	return &StateDelete[T]{table: t, StateDeleteWhere: s}
 }
 

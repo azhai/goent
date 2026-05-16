@@ -306,5 +306,8 @@ func QueryMiddleTable[T any](foreign *Foreign, table *Table[T], leftCol, rightCo
 		}
 		data[leftId] = append(data[leftId], rightId)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return data, nil
 }
