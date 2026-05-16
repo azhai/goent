@@ -96,9 +96,10 @@ func (m *CoMap[K, V]) SortedKeys() []K {
 // It uses a read lock for thread safety
 func (m *CoMap[K, V]) Each() iter.Seq2[K, *V] {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	snapshot := maps.Clone(m.data) // 锁提前释放，这里有data race
+	m.mu.RUnlock()
 	return func(yield func(K, *V) bool) {
-		for k, v := range m.data {
+		for k, v := range snapshot {
 			if !yield(k, v) {
 				return
 			}

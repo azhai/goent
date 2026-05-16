@@ -491,6 +491,42 @@ func (t *Table[T]) DeleteContext(ctx context.Context) *StateDelete[T] {
 	return &StateDelete[T]{table: t, StateDeleteWhere: s}
 }
 
+// Truncate removes all rows from the table and resets auto-increment counters.
+// For PostgreSQL it executes TRUNCATE TABLE ... RESTART IDENTITY;
+// For SQLite it executes DELETE FROM ... and resets the sqlite_sequence.
+//
+// Example:
+//
+//	err := db.User.Truncate()
+func (t *Table[T]) Truncate() error {
+	return t.TruncateContext(context.Background())
+}
+
+// TruncateContext removes all rows from the table and resets auto-increment counters with a specific context.
+func (t *Table[T]) TruncateContext(ctx context.Context) error {
+	var sql string
+	tableName := t.getFullName()
+	switch t.db.DriverName() {
+	case "PostgreSQL":
+		sql = "TRUNCATE TABLE " + tableName + " RESTART IDENTITY"
+	default:
+		sql = "DELETE FROM " + tableName
+	}
+	conn := t.db.driver.NewConnection()
+	cfg := t.db.driver.GetDatabaseConfig()
+	qr := model.CreateQuery(sql, nil)
+	err := qr.WrapExec(ctx, conn, cfg)
+	if err != nil {
+		return err
+	}
+	if t.db.DriverName() == "SQLite" {
+		seqSQL := "DELETE FROM sqlite_sequence WHERE name = ?"
+		qr2 := model.CreateQuery(seqSQL, []any{t.TableName})
+		err = qr2.WrapExec(ctx, conn, cfg)
+	}
+	return err
+}
+
 // ------------------------------
 // Insert/Save ...
 // ------------------------------

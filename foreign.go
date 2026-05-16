@@ -166,8 +166,7 @@ func QueryOne2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R])
 		elem := reflect.ValueOf(row).Elem()
 		field := elem.FieldByName(foreign.MountField)
 		if field.CanSet() {
-			sliceType := reflect.SliceOf(reflect.TypeFor[R]())
-			field.Set(reflect.MakeSlice(sliceType, 0, 0))
+			field.Set(reflect.MakeSlice(field.Type(), 0, 0))
 		}
 	}
 
@@ -213,8 +212,7 @@ func QueryMany2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R]
 		elem := reflect.ValueOf(row).Elem()
 		field := elem.FieldByName(foreign.MountField)
 		if field.CanSet() {
-			sliceType := reflect.SliceOf(reflect.TypeFor[R]())
-			field.Set(reflect.MakeSlice(sliceType, 0, 0))
+			field.Set(reflect.MakeSlice(field.Type(), 0, 0))
 		}
 	}
 
