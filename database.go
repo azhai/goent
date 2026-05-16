@@ -82,6 +82,11 @@ func (db *DB) DriverName() string {
 	return db.driver.Name()
 }
 
+// Driver returns the underlying database driver
+func (db *DB) Driver() model.Driver {
+	return db.driver
+}
+
 // Stats returns the database stats as [sql.DBStats]
 // It returns statistics about the underlying database connection
 func (db *DB) Stats() sql.DBStats {

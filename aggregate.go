@@ -2,6 +2,9 @@ package goent
 
 import "context"
 
+// NewSelectFunc creates a new StateSelect for an aggregate function query
+// It builds a SELECT query with the specified column and SQL function (e.g. COUNT, SUM, AVG)
+// If state is provided, its conditions, joins, orders, groups, and pagination are inherited
 func NewSelectFunc[T, R any](state *StateWhere, table *Table[T], col, fun string) *StateSelect[T, R] {
 	var ctx = context.Background()
 	if state != nil {

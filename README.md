@@ -75,6 +75,8 @@ Check out the [Benchmarks](#benchmarks) section for an overview of GoEnt perform
 	- [Filter (Non-Zero Dynamic Where)](#filter-non-zero-dynamic-where)
 	- [Match (Non-Zero Dynamic Where)](#match-non-zero-dynamic-where)
 	- [Join](#join)
+	- [Eager Loading (With)](#eager-loading-with-with)
+	- [IN Clause Batching (InBatch)](#in-clause-batching-with-inbatch)
 	- [Order By](#order-by)
 	- [Group By](#group-by)
 	- [Pagination](#pagination)
@@ -998,6 +1000,15 @@ if err != nil {
 }
 ```
 
+You can also start a query with `Filter()` or `Where()` on the table, then chain to `Select()` or aggregate methods:
+```go
+// Conditional select
+animals, err = db.Animal.Filter(goent.Equals(db.Animal.Field("id"), 2)).Select().All()
+
+// Conditional count
+count, err := db.Animal.Where("id > ?", 0).Count("id")
+```
+
 It's possible to group a list of where operations inside Filter()
 
 ```go
@@ -1184,6 +1195,56 @@ results, err := db.Person.Select().
 > [!NOTE]
 > `LeftJoin` only populates non-slice foreign fields. For slice relationships (e.g., `Jobs []JobTitle`), use the standard `Join` method with manual column selection.
 
+#### Eager Loading with With()
+
+The `With()` method enables eager loading of foreign key relationships. It loads related data in a separate query after the main query completes, avoiding N+1 query problems.
+
+```go
+// Load products with their categories
+products, err := db.Product.Select().With("Category").All()
+for _, p := range products {
+    fmt.Println(p.Name, p.Category.Name) // Category is already populated
+}
+
+// Load multiple relationships at once
+products, err := db.Product.Select().With("Category", "OrderDetails").All()
+
+// With() works with all relationship types: O2O, O2M, M2O, M2M
+```
+
+You can also use the standalone functions for more control:
+
+```go
+// Query a single relationship by name
+err := goent.QueryForeignByName(db.Product, "Category")
+
+// Query multiple relationships
+err := goent.QueryForeignsByName(db.Product, "Category", "OrderDetails")
+
+// With transaction context
+err := goent.QueryForeignByNameCtx(ctx, db.Product, "Category")
+```
+
+> [!NOTE]
+> The name passed to `With()` can be the foreign table name, the struct field name (MountField), or the foreign key column name.
+
+#### IN Clause Batching with InBatch()
+
+The `InBatch()` function automatically splits large IN clauses into batches, avoiding SQL parameter limits (SQLite: 999, PostgreSQL: 65535).
+
+```go
+// Split 5000 IDs into batches of 500
+ids := make([]int64, 5000)
+cond := goent.InBatch(db.User.Field("id"), ids, 500)
+// Generates: (id IN (1,...,500) OR id IN (501,...,1000) OR ...)
+
+// Use in a query
+users, err := db.User.Select().Filter(cond).All()
+```
+
+> [!TIP]
+> For small lists, `InBatch` falls back to a regular `IN` clause automatically. You can also use `In()` directly for lists that are guaranteed to be small.
+
 [Back to Contents](#content)
 ### Order By
 For OrderBy you need to pass a reference to a mapped database field.
@@ -1239,6 +1300,33 @@ Aggregate functions like Count, Sum, Avg are available as table methods.
 ```go
 count, err := db.Animal.Count("id") // (int64, error)
 ```
+
+You can also use aggregates with conditions using `Filter()` or `Where()`:
+
+```go
+// Conditional count
+count, err := db.Animal.Filter(goent.Equals(db.Animal.Field("name"), "Cat")).Count("id")
+
+// Conditional max
+max, err := db.Animal.Where("id > ?", 5).Max("id")
+
+// Conditional sum (float)
+total, err := db.OrderDetail.Filter(goent.Equals(db.OrderDetail.Field("order_id"), 1)).SumFloat("price")
+
+// Chained filters
+count, err := db.Animal.
+    Filter(goent.Greater(db.Animal.Field("id"), 0)).
+    Filter(goent.Less(db.Animal.Field("id"), 10)).
+    Count("id")
+```
+
+`Filter()` and `Where()` on a `Table` return a `TableQuery[T]` that supports chaining:
+- **Aggregate methods**: `Count`, `Max`, `Min`, `Sum`, `Avg`, `MaxFloat`, `MinFloat`, `SumFloat`, `AvgFloat`, `ToUpper`, `ToLower`
+- **Query methods**: `Select()`, `Delete()`
+- **Condition methods**: `Filter()`, `Where()`, `OnTransaction()`
+
+> [!NOTE]
+> Each `Filter()`/`Where()` call creates a new independent query state, so concurrent usage is safe.
 
 [Back to Contents](#content)
 ### Functions
@@ -1397,6 +1485,15 @@ if err != nil {
 Delete all matched records
 ```go
 err = db.Animal.Delete().Filter(goent.Like(db.Animal.Field("name"), "%Cat%")).Exec()
+
+if err != nil {
+	//handler error
+}
+```
+
+You can also use `Filter()` on the table directly to create a conditional delete:
+```go
+err = db.Animal.Filter(goent.Like(db.Animal.Field("name"), "%Cat%")).Delete().Exec()
 
 if err != nil {
 	//handler error
@@ -1565,23 +1662,23 @@ go run main.go -format both -operation all
 ### Benchmark on MacMini M4
 | Operation       | Package |    N    | Avg ns/op |  Avg B/op | Avg allocs/op |  percent  |
 |-----------------|---------|--------:|----------:|----------:|--------------:|----------:|
-| **insert**      | raw     |   14500 |     83205 |       624 |            12 |         = |
-|                 | goent   |   13884 |     81085 |      1927 |            42 |     -2.6% |
-|                 | goe     |   14659 |     89930 |      2644 |            31 |      8.0% |
-| **insert-bulk** | raw     |     159 |   8488125 |   6054969 |         39833 |         = |
-|                 | goent   |     165 |   8831646 |   6798565 |         44044 |      4.0% |
-|                 | goe     |     174 |   7872672 |   5202259 |         28013 |     -7.3% |
-| **update**      | raw     |   13838 |     83008 |       696 |            14 |         = |
-|                 | goent   |   13731 |     83935 |      3059 |            49 |      1.1% |
-|                 | goe     |   13718 |     88365 |      2594 |            27 |      6.4% |
-| **delete**      | raw     |   14036 |     85268 |       256 |             8 |         = |
-|                 | goent   |  470215 |      2819 |      3254 |            23 |    -96.7% |
-|                 | goe     |   45996 |     26029 |      1051 |            15 |    -69.5% |
-| **select-one**  | raw     |   49024 |     24302 |      1760 |            49 |         = |
-|                 | goent   |   42262 |     27388 |      2133 |            39 |     12.6% |
-|                 | goe     |   42026 |     28775 |      3508 |            54 |     18.4% |
-| **select-page** | raw     |    3100 |    388439 |     57840 |          1350 |         = |
-|                 | goent   |    3544 |    330831 |     53286 |          1010 |    -14.9% |
-|                 | goe     |    3392 |    346823 |     55400 |           870 |    -10.8% |
+| **insert**      | raw     |   15019 |     83345 |       576 |            11 |         = |
+|                 | goent   |   15162 |     79144 |      2634 |            52 |     -5.1% |
+|                 | goe     |   14880 |     77558 |      2595 |            29 |     -7.0% |
+| **insert-bulk** | raw     |     176 |   7863814 |   6053177 |         39829 |         = |
+|                 | goent   |     174 |   8120927 |   6565752 |         44033 |      3.2% |
+|                 | goe     |     213 |   6919347 |   5202152 |         28011 |    -12.1% |
+| **update**      | raw     |   15000 |     82769 |       648 |            13 |         = |
+|                 | goent   |   14751 |     85110 |      3177 |            58 |      2.8% |
+|                 | goe     |   14827 |     79039 |      2530 |            25 |     -4.6% |
+| **delete**      | raw     |   14366 |     81902 |       208 |             7 |         = |
+|                 | goent   |  459398 |      3319 |      3309 |            23 |    -96.0% |
+|                 | goe     |   45487 |     25028 |      1003 |            14 |    -69.5% |
+| **select-one**  | raw     |   48055 |     24628 |      1656 |            41 |         = |
+|                 | goent   |   42495 |     27258 |      2620 |            39 |     10.6% |
+|                 | goe     |   40177 |     28598 |      3412 |            46 |     16.1% |
+| **select-page** | raw     |    3100 |    387364 |     56720 |          1270 |         = |
+|                 | goent   |    3408 |    345894 |     57648 |          1010 |    -10.8% |
+|                 | goe     |    1200 |    990756 |     54277 |           790 |    155.7% |
 
 [Back to Contents](#content)

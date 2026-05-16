@@ -28,11 +28,14 @@ type TableInfo struct {
 	Foreigns    map[string]*Foreign // Foreigns is a map of foreign key column names to Foreign metadata.
 	Ignores     []string            // Ignores is a list of column names to ignore.
 
-	simpleTable   bool     // simpleTable is true if the table has a single primary key.
-	sortedFields  []*Field // sortedFields is a list of columns sorted by field ID.
-	selectByPKSql string   // selectByPKSql is the cached SELECT BY primary key SQL.
-	deleteByPKSql string   // deleteByPKSql is the cached DELETE BY primary key SQL.
-	pkField       *Field   // pkField is the cached primary key field.
+	simpleTable   bool         // simpleTable is true if the table has a single primary key.
+	sortedFields  []*Field     // sortedFields is a list of columns sorted by field ID.
+	selectByPKSql string       // selectByPKSql is the cached SELECT BY primary key SQL.
+	deleteByPKSql string       // deleteByPKSql is the cached DELETE BY primary key SQL.
+	pkField       *Field       // pkField is the cached primary key field.
+	modelType     reflect.Type // modelType is the reflect.Type of the table's model struct.
+	driver        model.Driver // driver is the database driver for this table.
+	db            *DB          // db is the database connection for this table.
 }
 
 // String returns the table name as a string representation.
@@ -253,8 +256,11 @@ func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schem
 		SchemaId: schemaId, SchemaName: schemaName,
 		TableId: tableId, TableName: tableName,
 		TableAddr: addr, FieldName: fieldName,
-		Columns:  make(map[string]*Column),
-		Foreigns: make(map[string]*Foreign),
+		Columns:   make(map[string]*Column),
+		Foreigns:  make(map[string]*Foreign),
+		modelType: modelType,
+		driver:    db.driver,
+		db:        db,
 	}
 
 	// var attr field

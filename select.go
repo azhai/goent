@@ -13,9 +13,10 @@ import (
 // StateSelect represents a SELECT query state with type parameters for table and result types
 // It provides methods for building and executing SELECT queries with various options
 type StateSelect[T, R any] struct {
-	table       *Table[T] // The table to query from
-	sameModel   bool      // Whether the result type is the same as the table model
-	*StateWhere           // Embedded StateWhere for WHERE clause construction
+	table        *Table[T] // The table to query from
+	sameModel    bool      // Whether the result type is the same as the table model
+	withForeigns []string  // Names of related tables to eager-load after All()
+	*StateWhere            // Embedded StateWhere for WHERE clause construction
 }
 
 // NewStateSelect creates a new StateSelect for querying data from a table
@@ -34,7 +35,10 @@ func NewStateSelectFrom[T, R any](state *StateWhere, table *Table[T]) *StateSele
 	}
 	state.builder.Type = model.SelectQuery
 	state.builder.SetTable(table.TableInfo, table.db.driver)
-	state.builder.VisitFields = append([]*Field(nil), table.GetSortedFields()...)
+	sorted := table.GetSortedFields()
+	visitFields := make([]*Field, len(sorted))
+	copy(visitFields, sorted)
+	state.builder.VisitFields = visitFields
 	return &StateSelect[T, R]{table: table, StateWhere: state}
 }
 
@@ -146,6 +150,7 @@ func (s *StateSelect[T, R]) IterRows(to FetchFunc) iter.Seq2[*R, error] {
 
 // All executes the query and returns all rows as a slice
 // It pre-allocates the slice capacity if a limit is specified
+// If With() was called, it also eager-loads the specified foreign relationships
 func (s *StateSelect[T, R]) All() (res []*R, err error) {
 	var obj *R
 	size := max(s.builder.Limit, 0)
@@ -158,6 +163,9 @@ func (s *StateSelect[T, R]) All() (res []*R, err error) {
 			s.table.CacheOne(obj)
 		}
 		res = append(res, obj)
+	}
+	if err == nil && s.sameModel && len(s.withForeigns) > 0 {
+		err = QueryForeignsByNameCtx(s.ctx, s.table, s.withForeigns...)
 	}
 	return
 }
@@ -377,6 +385,22 @@ func (s *StateSelect[T, R]) LeftJoin(fkey string, refer *Field) *StateSelect[T, 
 	}
 	s.Join(model.LeftJoin, *info, EqualsField(leftField, refer))
 	s.builder.VisitFields = append(s.builder.VisitFields, info.GetSortedFields()...)
+	return s
+}
+
+// With specifies related tables to eager-load after the query completes.
+// It registers foreign key relationship names for automatic population.
+// The related data is loaded in a separate query after All() returns.
+//
+// Example:
+//
+//	products, err := db.Product.Select().With("Category").All()
+//	// Each product now has its Category field populated
+//	for _, p := range products {
+//		fmt.Println(p.Category.Name)
+//	}
+func (s *StateSelect[T, R]) With(names ...string) *StateSelect[T, R] {
+	s.withForeigns = append(s.withForeigns, names...)
 	return s
 }
 

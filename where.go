@@ -99,6 +99,32 @@ func NewValue(value any) *Value {
 			args[i] = x
 		}
 		return &Value{Args: args, Length: len(v)}
+	case []int:
+		args := make([]any, len(v))
+		for i, x := range v {
+			args[i] = x
+		}
+		return &Value{Args: args, Length: len(v)}
+	case []string:
+		args := make([]any, len(v))
+		for i, x := range v {
+			args[i] = x
+		}
+		return &Value{Args: args, Length: len(v)}
+	case []float64:
+		args := make([]any, len(v))
+		for i, x := range v {
+			args[i] = x
+		}
+		return &Value{Args: args, Length: len(v)}
+	case int64:
+		return &Value{single: v, Length: 1}
+	case int:
+		return &Value{single: v, Length: 1}
+	case float64:
+		return &Value{single: v, Length: 1}
+	case bool:
+		return &Value{single: v, Length: 1}
 	}
 }
 
@@ -113,14 +139,6 @@ func NewValueReflect(value any) *Value {
 		args[i] = valueOf.Index(i).Interface()
 	}
 	return &Value{Args: args, Length: size}
-}
-
-// GetArgs returns the value arguments as a slice
-func (v *Value) GetArgs() []any {
-	if v.Length == 1 {
-		return []any{v.single}
-	}
-	return v.Args
 }
 
 // Condition represents a SQL WHERE condition with a template and associated fields/values
@@ -177,7 +195,19 @@ func And(branches ...Condition) Condition {
 	} else if size == 1 {
 		return branches[0]
 	}
-	idx, res := 0, Condition{Template: ""}
+	totalFields, totalValues := 0, 0
+	for _, cond := range branches {
+		if cond.IsEmpty() {
+			continue
+		}
+		totalFields += len(cond.Fields)
+		totalValues += len(cond.Values)
+	}
+	res := Condition{
+		Fields: make([]*Field, 0, totalFields),
+		Values: make([]*Value, 0, totalValues),
+	}
+	idx := 0
 	for _, cond := range branches {
 		if cond.IsEmpty() {
 			continue
@@ -213,7 +243,19 @@ func Or(branches ...Condition) Condition {
 	} else if size == 1 {
 		return branches[0]
 	}
-	idx, res := 0, Condition{Template: ""}
+	totalFields, totalValues := 0, 0
+	for _, cond := range branches {
+		if cond.IsEmpty() {
+			continue
+		}
+		totalFields += len(cond.Fields)
+		totalValues += len(cond.Values)
+	}
+	res := Condition{
+		Fields: make([]*Field, 0, totalFields),
+		Values: make([]*Value, 0, totalValues),
+	}
+	idx := 0
 	for _, cond := range branches {
 		if cond.IsEmpty() {
 			continue
@@ -393,6 +435,7 @@ func LessEqualsField(left, right *Field) Condition {
 
 // In creates a condition that checks if a field value is in a list of values
 // It generates an IN clause for the field
+// For large lists, use InBatch to automatically split into batches
 func In(left *Field, value any) Condition {
 	right := NewValue(value)
 	if right.Length == 0 {
@@ -402,6 +445,46 @@ func In(left *Field, value any) Condition {
 		return Condition{Template: "%s = ?", Fields: []*Field{left}, Values: []*Value{right}}
 	}
 	return Condition{Template: "%s IN ?", Fields: []*Field{left}, Values: []*Value{right}}
+}
+
+// InBatch creates a condition that checks if a field value is in a list of values,
+// automatically splitting large lists into batches to avoid SQL limitations.
+// Most databases have a limit on the number of parameters in an IN clause
+// (SQLite: 999 by default, PostgreSQL: 65535).
+//
+// Example:
+//
+//	ids := make([]int64, 5000)
+//	cond := goent.InBatch(db.User.Field("id"), ids, 500)
+//	// Generates: (id IN (1,...,500) OR id IN (501,...,1000) OR ...)
+func InBatch(left *Field, value any, batchSize int) Condition {
+	right := NewValue(value)
+	if right.Length == 0 {
+		return Expr("1 = 0")
+	}
+	if right.Length == 1 {
+		return Condition{Template: "%s = ?", Fields: []*Field{left}, Values: []*Value{right}}
+	}
+	if batchSize <= 0 {
+		batchSize = 500
+	}
+	if right.Length <= batchSize {
+		return Condition{Template: "%s IN ?", Fields: []*Field{left}, Values: []*Value{right}}
+	}
+	var branches []Condition
+	for i := 0; i < right.Length; i += batchSize {
+		end := i + batchSize
+		if end > right.Length {
+			end = right.Length
+		}
+		batch := &Value{Args: right.Args[i:end], Length: end - i}
+		branches = append(branches, Condition{
+			Template: "%s IN ?",
+			Fields:   []*Field{left},
+			Values:   []*Value{batch},
+		})
+	}
+	return Or(branches...)
 }
 
 // NotIn creates a condition that checks if a field value is not in a list of values

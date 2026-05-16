@@ -23,7 +23,7 @@ goent/
 ├── insert.go           # INSERT query operations
 ├── update.go           # UPDATE query operations
 ├── delete.go           # DELETE query operations
-├── table.go            # Table metadata and field mapping
+├── table.go            # Table metadata, field mapping, and TableQuery[T]
 ├── handler.go          # Query execution and result handling
 ├── foreign.go          # Foreign key relationship handling (O2O, O2M, M2O, M2M)
 ├── attribute.go        # Attribute/field definitions
@@ -162,6 +162,33 @@ err := db.Animal.Delete().
     Exec()
 ```
 
+### TableQuery (Conditional Queries)
+
+`Table.Filter()` and `Table.Where()` return a `TableQuery[T]` — a stateful query builder
+that holds conditions without modifying shared Table state. This is concurrency-safe.
+
+```go
+// Conditional aggregate
+count, err := db.Animal.Filter(goent.Equals(db.Animal.Field("name"), "Cat")).Count("id")
+
+// Conditional select
+animals, err := db.Animal.Where("age > ?", 18).Select().All()
+
+// Conditional delete
+err := db.Animal.Filter(goent.Equals(db.Animal.Field("status"), "deleted")).Delete().Exec()
+
+// Chained filters
+count, err := db.Animal.
+    Filter(goent.Greater(db.Animal.Field("id"), 0)).
+    Filter(goent.Less(db.Animal.Field("id"), 10)).
+    Count("id")
+```
+
+`TableQuery[T]` supports:
+- **Aggregate methods**: `Count`, `Max`, `Min`, `Sum`, `Avg`, `MaxFloat`, `MinFloat`, `SumFloat`, `AvgFloat`, `ToUpper`, `ToLower`
+- **Query methods**: `Select()` → `*StateSelect[T, T]`, `Delete()` → `*StateDelete[T]`
+- **Condition methods**: `Filter()`, `Where()`, `OnTransaction()`
+
 ### LeftJoin Helper Method
 
 The `LeftJoin` method provides a convenient way to perform LEFT JOIN operations:
@@ -180,6 +207,40 @@ Key behaviors:
 - Only populates non-slice foreign fields (skips slice relationships like `Jobs []JobTitle`)
 - For columns that cannot be mapped to struct fields, uses dummy variables to receive values
 
+### Eager Loading with With()
+
+The `With()` method enables eager loading of foreign key relationships:
+
+```go
+// Load products with their categories
+products, err := db.Product.Select().With("Category").All()
+
+// Load multiple relationships at once
+products, err := db.Product.Select().With("Category", "OrderDetails").All()
+```
+
+Standalone functions for more control:
+- `QueryForeignByName(table, name)` - Query a single relationship by name
+- `QueryForeignsByName(table, names...)` - Query multiple relationships
+- `QueryForeignByNameCtx(ctx, table, name)` - With transaction context
+- `QueryForeignsByNameCtx(ctx, table, names...)` - With transaction context
+
+### IN Clause Batching with InBatch()
+
+The `InBatch()` function splits large IN clauses into batches:
+
+```go
+ids := make([]int64, 5000)
+cond := goent.InBatch(db.User.Field("id"), ids, 500)
+// Generates: (id IN (1,...,500) OR id IN (501,...,1000) OR ...)
+```
+
+### GenSetForeign Interface
+
+The `GenSetForeign` interface allows generated code to set foreign relationship fields
+without reflection. When a model implements `SetForeign(name string, value any)`,
+the eager loading functions use it instead of `reflect.Value.Set`.
+
 ## Code Conventions
 
 ### Naming
@@ -196,6 +257,7 @@ Key behaviors:
 - Tests are in the `tests/` directory
 - Use table-driven tests
 - Clean up test data after each test
+- Run with `-race` flag to detect data races: `go test -race ./tests/...`
 
 ## Database Drivers
 
@@ -333,6 +395,12 @@ db.Default.Insert().One(&d)
 10. **Slice foreign fields are skipped in LeftJoin** - Use standard `Join` for slice relationships
 11. **Use code generator for best performance** - Generated code is 15-27x faster than reflection
 12. **Automatic use of generated code** - GoEnt automatically uses generated `ScanDest()` methods when available, providing performance improvements without manual changes
+13. **`Table.Filter()`/`Table.Where()` return `TableQuery[T]`** - Each call creates a new independent state, safe for concurrent use
+14. **Builder internal methods are private** - `buildHead`, `buildDoing`, `buildWhere`, `buildTail`, `buildJoins` are unexported
+15. **`With()` eager-loads foreign relationships** - Supports O2O, O2M, M2O, M2M; runs a separate query after `All()`
+16. **`InBatch()` splits large IN clauses** - Avoids SQLite 999 and PostgreSQL 65535 parameter limits
+17. **`GenSetForeign` interface for zero-reflection assignment** - Generated code can implement `SetForeign(name, value)` to bypass reflection
+18. **`QueryForeignByNameCtx`/`QueryForeignsByNameCtx` accept context** - Enables transaction-scoped foreign queries
 
 ## Common Tasks
 
