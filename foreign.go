@@ -230,7 +230,7 @@ func querySome2OneReflect[T any](ctx context.Context, foreign *Foreign, table *T
 		}
 	}
 	pkIds := slices.Sorted(maps.Keys(reg))
-	filter := And(foreign.Where, In(foreign.Reference, pkIds))
+	filter := And(foreign.Where, InBatch(foreign.Reference, pkIds, 500))
 
 	pkName := foreign.Reference.ColumnName
 	data, err := selectReferMap(ctx, refInfo, filter, pkName)
@@ -240,7 +240,7 @@ func querySome2OneReflect[T any](ctx context.Context, foreign *Foreign, table *T
 	for id, rows := range reg {
 		if val, ok := data[id]; ok {
 			for _, row := range rows {
-				setForeignField(row, foreign.MountField, val.Elem().Interface())
+				setForeignField(row, foreign.MountField, val.Interface())
 			}
 		}
 	}
@@ -286,7 +286,7 @@ func queryOne2ManyReflect[T any](ctx context.Context, foreign *Foreign, table *T
 
 	pkName := foreign.Reference.ColumnName
 	pkIds := slices.Sorted(maps.Keys(reg))
-	filter := And(foreign.Where, In(foreign.Reference, pkIds))
+	filter := And(foreign.Where, InBatch(foreign.Reference, pkIds, 500))
 
 	data, err := selectReferRank(ctx, refInfo, filter, pkName)
 	if err != nil {
@@ -294,11 +294,12 @@ func queryOne2ManyReflect[T any](ctx context.Context, foreign *Foreign, table *T
 	}
 	for id, rows := range data {
 		if row, ok := reg[id]; ok {
-			rowValues := make([]any, len(rows))
+			sliceType := reflect.SliceOf(reflect.PtrTo(refInfo.modelType))
+			sliceVal := reflect.MakeSlice(sliceType, len(rows), len(rows))
 			for i, r := range rows {
-				rowValues[i] = r.Elem().Interface()
+				sliceVal.Index(i).Set(r)
 			}
-			setForeignField(row, foreign.MountField, rowValues)
+			setForeignField(row, foreign.MountField, sliceVal.Interface())
 		}
 	}
 	return nil
@@ -328,7 +329,7 @@ func queryMany2ManyReflect[T any](ctx context.Context, foreign *Foreign, table *
 	rightIds = slices.Compact(rightIds)
 
 	pkName := foreign.Reference.ColumnName
-	filter := And(foreign.Where, In(foreign.Reference, rightIds))
+	filter := And(foreign.Where, InBatch(foreign.Reference, rightIds, 500))
 	data, err := selectReferMap(ctx, refInfo, filter, pkName)
 	if err != nil {
 		return err
@@ -373,6 +374,7 @@ func selectReferMap(ctx context.Context, refInfo *TableInfo, filter Condition, p
 		if err = rows.Scan(dest...); err != nil {
 			return nil, err
 		}
+		CacheOneByAddr(refInfo.TableAddr, val.Interface())
 		if pkCol != nil {
 			pkField := val.Elem().Field(pkCol.FieldId)
 			result[pkField.Int()] = val
@@ -405,6 +407,7 @@ func selectReferRank(ctx context.Context, refInfo *TableInfo, filter Condition, 
 		if err = rows.Scan(dest...); err != nil {
 			return nil, err
 		}
+		CacheOneByAddr(refInfo.TableAddr, val.Interface())
 		if pkCol != nil {
 			pkField := val.Elem().Field(pkCol.FieldId)
 			result[pkField.Int()] = append(result[pkField.Int()], val)
@@ -413,7 +416,7 @@ func selectReferRank(ctx context.Context, refInfo *TableInfo, filter Condition, 
 	return result, rows.Err()
 }
 
-// QuerySome2One queries and populates many-to-one or one-to-one relationships
+// selectReferMap queries and populates referenced records as a map keyed by primary key.
 // It returns a map of foreign key IDs to referenced records
 //
 // Example:
@@ -440,7 +443,7 @@ func QuerySome2One[T, R any](foreign *Foreign, table *Table[T], refer *Table[R])
 	}
 	pkName := foreign.Reference.ColumnName
 	pkIds := slices.Sorted(maps.Keys(reg))
-	filter := And(foreign.Where, In(foreign.Reference, pkIds))
+	filter := And(foreign.Where, InBatch(foreign.Reference, pkIds, 500))
 	data, err := refer.Select().Filter(filter).Map(pkName)
 	if err != nil {
 		return data, err
@@ -486,7 +489,7 @@ func QueryOne2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R])
 
 	pkName := foreign.Reference.ColumnName
 	pkIds := slices.Sorted(maps.Keys(reg))
-	filter := And(foreign.Where, In(foreign.Reference, pkIds))
+	filter := And(foreign.Where, InBatch(foreign.Reference, pkIds, 500))
 	data, err := refer.Select().Filter(filter).Rank(pkName)
 	if err != nil {
 		return data, err
@@ -545,7 +548,7 @@ func QueryMany2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R]
 	rightIds = slices.Compact(rightIds)
 
 	pkName := foreign.Reference.ColumnName
-	filter := And(foreign.Where, In(foreign.Reference, rightIds))
+	filter := And(foreign.Where, InBatch(foreign.Reference, rightIds, 500))
 	data, err := refer.Select().Filter(filter).Map(pkName)
 	if err != nil {
 		return data, err

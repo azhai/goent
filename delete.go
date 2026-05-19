@@ -2,6 +2,7 @@ package goent
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 
 	"github.com/azhai/goent/model"
@@ -29,7 +30,13 @@ func (s *StateDelete[T]) Match(obj T) *StateDelete[T] {
 // It builds and runs the DELETE statement with the specified conditions
 func (s *StateDelete[T]) Exec() error {
 	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
-	qr := model.CreateQuery(s.builder.Build())
+	sql, args := s.builder.Build()
+	if sql == "" {
+		defer PutDeleteBuilder(s.builder)
+		return fmt.Errorf("goent: StateDelete.Exec built empty SQL (fullName=%q, Where=%v, args=%v)",
+			s.builder.fullName, !s.builder.Where.IsEmpty(), args)
+	}
+	qr := model.CreateQuery(sql, args)
 	defer PutDeleteBuilder(s.builder)
 	conn, cfg := s.Prepare(s.table.db.driver)
 	return qr.WrapExec(s.ctx, conn, cfg)

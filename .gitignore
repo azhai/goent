@@ -20,6 +20,8 @@
 *.sublime-project
 *.sublime-workspace
 
+.arts/
+.codeartsdoer/
 .git/
 .idea/
 .vscode/

@@ -38,7 +38,7 @@ jobs:
           working-directory: tests
 
         - name: Test
-          run: GOE_DRIVER=${{ matrix.driver }} go test . -v -race -count=1
+          run: DB_TYPE=${{ matrix.driver }} go test . -v -race -count=1
           working-directory: tests
           
     postgres:

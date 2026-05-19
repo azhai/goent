@@ -36,6 +36,7 @@ type TableInfo struct {
 	modelType     reflect.Type // modelType is the reflect.Type of the table's model struct.
 	driver        model.Driver // driver is the database driver for this table.
 	db            *DB          // db is the database connection for this table.
+	cacheOne      func(any)    // cacheOne caches a row in the typed table's Cache.
 }
 
 // String returns the table name as a string representation.

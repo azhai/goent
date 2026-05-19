@@ -277,9 +277,12 @@ func TestMain(m *testing.M) {
 }
 
 func Setup() (*Database, error) {
-	dbType := env.GetStr("GOE_DRIVER", "sqlite")
-	dbDSN := env.Get("GOE_DATABASE_DSN")
-	logFile := env.Get("GOE_LOG_FILE")
+	dbType := env.GetStr("DB_TYPE", "sqlite")
+	dbDSN := env.Get("DB_DSN")
+	logFile := env.Get("DB_LOG_FILE")
+	if logFile == "" {
+		logFile = env.Get("LOG_FILE")
+	}
 
 	var err error
 	dbType = strings.ToLower(dbType)
@@ -412,7 +415,7 @@ func TestRace(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 10 {
 		wg.Go(func() {
-			driver := env.GetStr("GOE_DRIVER", "sqlite")
+			driver := env.GetStr("DB_TYPE", "sqlite")
 			driver = strings.ToLower(driver)
 			var raceDb *Database
 			var err error
@@ -421,7 +424,7 @@ func TestRace(t *testing.T) {
 				raceDb, err = goent.Open[Database](sqlite.Open(filename, sqlite.NewConfig(
 					sqlite.Config{})), "")
 			} else {
-				dsn := env.Get("GOE_DATABASE_DSN")
+				dsn := env.Get("DB_DSN")
 				if dsn == "" {
 					dsn = "user=postgres password=postgres host=localhost port=5432 database=postgres"
 				}

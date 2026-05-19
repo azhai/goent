@@ -212,3 +212,22 @@ func (t *Entry) Bool() bool {
 	}
 	return false
 }
+
+func (v *Environ) GetWithFallback(key, fallback string) string {
+	if val := v.GetStr(key); val != "" {
+		return val
+	}
+	return v.GetStr(fallback)
+}
+
+func GetEnvWithFallback(key, fallback string) string {
+	if val := os.Getenv(key); val != "" {
+		return val
+	}
+	return os.Getenv(fallback)
+}
+
+func GetEnvExists(key string) (string, bool) {
+	val, ok := os.LookupEnv(key)
+	return val, ok
+}

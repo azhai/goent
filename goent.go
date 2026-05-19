@@ -115,6 +115,12 @@ func travelSchemas(db *DB, dbId int, valueOf reflect.Value) ([]string, error) {
 			}
 			tableField.Set(tableOf)
 			tableRegistry[info.TableAddr] = &info
+			cacheOneMethod := tableOf.MethodByName("CacheOne")
+			if cacheOneMethod.IsValid() {
+				addr := info.TableAddr
+				fn := func(val any) { cacheOneMethod.Call([]reflect.Value{reflect.ValueOf(val)}) }
+				cacheOneFuncs[addr] = fn
+			}
 		}
 	}
 

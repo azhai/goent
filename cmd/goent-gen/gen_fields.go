@@ -194,7 +194,7 @@ func getModelFields(st *ModelStruct) ([]ModelField, int) {
 		if strings.HasPrefix(fieldType, "[]") {
 			continue
 		}
-		if strings.HasPrefix(fieldType, "*") && isStructType(field.Type()) {
+		if strings.HasPrefix(fieldType, "*") && isTableTypeStruct(field.Type()) {
 			continue
 		}
 
@@ -326,15 +326,37 @@ func hasMethod(st *ModelStruct, methodName string) bool {
 	return false
 }
 
-// isStructType checks if a type is a struct.
-func isStructType(typ types.Type) bool {
+// checkStructTypeName checks if a type is a struct.
+func checkStructTypeName(typ types.Type) (*types.Named, bool) {
 	if ptr, ok := typ.(*types.Pointer); ok {
 		typ = ptr.Elem()
 	}
 	named, ok := typ.(*types.Named)
 	if !ok {
-		return false
+		return nil, false
 	}
 	_, ok = named.Underlying().(*types.Struct)
-	return ok
+	return named, ok
+}
+
+// isTableTypeStruct checks if a pointer type points to a table/model struct.
+// Only table types (structs with a TableName method) should be skipped as fields.
+// Standard library structs like *time.Time should NOT be skipped.
+func isTableTypeStruct(typ types.Type) bool {
+	named, ok := checkStructTypeName(typ)
+	if !ok {
+		return false
+	}
+	typeName := named.Obj().Pkg().Path() + "." + named.Obj().Name()
+	skipTypes := map[string]bool{
+		"time.Time":                true,
+		"time.Location":            true,
+		"net/url.URL":              true,
+		"net/ip.IP":                true,
+		"encoding/json.RawMessage": true,
+	}
+	if skipTypes[typeName] {
+		return false
+	}
+	return true
 }

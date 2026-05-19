@@ -25,9 +25,13 @@ func (rs *Rows) Close() error {
 
 type Row struct {
 	pgx.Row
+	err error
 }
 
 func (r Row) Scan(dest ...any) error {
+	if r.err != nil {
+		return r.err
+	}
 	err := r.Row.Scan(dest...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return sql.ErrNoRows
@@ -96,13 +100,18 @@ func (dr *Driver) AddLogger(logger model.Logger, err error) error {
 func (dr *Driver) Init() error {
 	config, err := pgxpool.ParseConfig(dr.dsn)
 	if err != nil {
-		// logged by goe
 		return err
+	}
+
+	if config.MaxConns == 0 {
+		config.MaxConns = 20
+	}
+	if config.MinConns == 0 {
+		config.MinConns = 4
 	}
 
 	dr.sql, err = pgxpool.NewWithConfig(context.Background(), config)
 	if err != nil {
-		// logged by goe
 		return err
 	}
 
@@ -188,15 +197,24 @@ type Connection struct {
 }
 
 func (c Connection) QueryContext(ctx context.Context, query *model.Query) (model.Rows, error) {
+	if query.RawSql == "" {
+		return nil, fmt.Errorf("goent: attempted to query empty SQL (Arguments=%v)", query.Arguments)
+	}
 	rows, err := c.sql.Query(ctx, query.RawSql, query.Arguments...)
 	return &Rows{rows}, err
 }
 
 func (c Connection) QueryRowContext(ctx context.Context, query *model.Query) model.Row {
-	return Row{c.sql.QueryRow(ctx, query.RawSql, query.Arguments...)}
+	if query.RawSql == "" {
+		return Row{err: fmt.Errorf("goent: attempted to query row with empty SQL (Arguments=%v)", query.Arguments)}
+	}
+	return Row{Row: c.sql.QueryRow(ctx, query.RawSql, query.Arguments...)}
 }
 
 func (c Connection) ExecContext(ctx context.Context, query *model.Query) error {
+	if query.RawSql == "" {
+		return fmt.Errorf("goent: attempted to execute empty SQL query (Arguments=%v)", query.Arguments)
+	}
 	_, err := c.sql.Exec(ctx, query.RawSql, query.Arguments...)
 	return err
 }
@@ -218,7 +236,10 @@ func (t Transaction) QueryContext(ctx context.Context, query *model.Query) (mode
 }
 
 func (t Transaction) QueryRowContext(ctx context.Context, query *model.Query) model.Row {
-	return Row{t.tx.QueryRow(ctx, query.RawSql, query.Arguments...)}
+	if query.RawSql == "" {
+		return Row{err: fmt.Errorf("goent: attempted to query row with empty SQL (Arguments=%v)", query.Arguments)}
+	}
+	return Row{Row: t.tx.QueryRow(ctx, query.RawSql, query.Arguments...)}
 }
 
 func (t Transaction) ExecContext(ctx context.Context, query *model.Query) error {

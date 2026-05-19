@@ -18,8 +18,8 @@ type fieldDesc struct {
 }
 
 type dbMigrator struct {
-	db *DB
 	*model.Migrator
+	db *DB
 }
 
 func migrateFrom(ent any, db *DB) *dbMigrator {

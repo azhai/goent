@@ -22,10 +22,10 @@ func init() {
 	if PostgresDSN = env.Get("POSTGRES_DSN"); PostgresDSN != "" {
 		return
 	}
-	dbType := env.GetStr("GOE_DRIVER", "sqlite")
+	dbType := env.GetStr("DB_TYPE", "sqlite")
 	dbType = strings.ToLower(dbType)
 	if dbType == "pgsql" || dbType == "postgres" {
-		PostgresDSN = env.Get("GOE_DATABASE_DSN")
+		PostgresDSN = env.Get("DB_DSN")
 	}
 	if PostgresDSN == "" {
 		panic("POSTGRES_DSN is required")

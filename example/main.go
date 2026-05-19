@@ -22,11 +22,16 @@ type Database struct {
 func main() {
 	var dbDSN, logFile string
 	env := utils.NewEnvWithFile("../.env")
-	dbType := env.GetStr("GOE_DRIVER", "sqlite")
-	if dbDSN = env.Get("GOE_DATABASE_DSN"); dbDSN == "" {
+	dbType := env.GetStr("DB_TYPE", "sqlite")
+	if dbDSN = env.Get("DB_DSN"); dbDSN == "" {
 		dbDSN = DefaultDSN(dbType)
 	}
-	if logFile = env.Get("GOE_LOG_FILE"); logFile == "" {
+	if _, ok := env.Lookup("DB_LOG_FILE"); ok {
+		logFile = env.Get("DB_LOG_FILE")
+	} else {
+		logFile = env.Get("LOG_FILE")
+	}
+	if logFile == "" {
 		logFile = "stdout"
 	}
 	db, err := connect(dbType, dbDSN, logFile)

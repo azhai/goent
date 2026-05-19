@@ -1,6 +1,8 @@
 package goent
 
 import (
+	"fmt"
+
 	"github.com/azhai/goent/model"
 )
 
@@ -22,7 +24,12 @@ type StateUpdate[T any] struct {
 func (s *StateUpdate[T]) Exec() error {
 	defer PutBuilder(s.builder)
 	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
-	qr := model.CreateQuery(s.builder.Build(true))
+	sql, args := s.builder.Build(true)
+	if sql == "" {
+		return fmt.Errorf("goent: StateUpdate.Exec built empty SQL (Type=%d, Changes=%d, Where=%v, args=%v)",
+			s.builder.Type, len(s.builder.Changes), !s.builder.Where.IsEmpty(), args)
+	}
+	qr := model.CreateQuery(sql, args)
 	conn, cfg := s.Prepare(s.table.db.driver)
 	return qr.WrapExec(s.ctx, conn, cfg)
 }

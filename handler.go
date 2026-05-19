@@ -2,6 +2,7 @@ package goent
 
 import (
 	"context"
+	"fmt"
 	"iter"
 	"reflect"
 
@@ -290,6 +291,10 @@ func (ctx *fetchContext) buildDest(valueOf reflect.Value) []any {
 				dest = append(dest, &dummy)
 			}
 		} else if di.isMain {
+			if di.fieldId >= valueOf.NumField() {
+				panic(fmt.Sprintf("goent: buildDest field index out of range: fieldId=%d, numFields=%d, type=%s, tableName=%s, mainTableAddr=%d, fieldTableAddr=%d",
+					di.fieldId, valueOf.NumField(), valueOf.Type().Name(), ctx.tblInfo.TableName, ctx.mainTableAddr, di.tableAddr))
+			}
 			fieldOf := valueOf.Field(di.fieldId)
 			dest = append(dest, fieldOf.Addr().Interface())
 		}

@@ -2,6 +2,7 @@ package goent
 
 import (
 	"bytes"
+	"fmt"
 	"reflect"
 	"slices"
 	"strconv"
@@ -200,11 +201,16 @@ func (b *DeleteBuilder) appendValueParam(val *Value, startIdx int, args *[]any) 
 func (b *DeleteBuilder) Build() (sql string, args []any) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.argNo = 0
 	_ = b.buildHead()
 	args = b.buildWhere(false)
 	_ = b.buildTail()
 	sql = b.buf.String()
 	b.buf.Reset()
+	if sql == "" {
+		panic(fmt.Sprintf("goent: DeleteBuilder.Build returned empty SQL (fullName=%q, Where=%v)",
+			b.fullName, !b.Where.IsEmpty()))
+	}
 	return
 }
 
@@ -286,7 +292,7 @@ func (b *Builder) ResetForSave() {
 
 // IsJoinQuery checks if the query is a join query
 func (b *Builder) IsJoinQuery() bool {
-	return b.Type == model.SelectJoinQuery || b.Type == model.UpdateJoinQuery
+	return b.Type == model.SelectJoinQuery || b.Type == model.UpdateJoinQuery || len(b.Joins) > 0
 }
 
 // IsInsertQuery checks if the query is an insert query
@@ -349,7 +355,8 @@ func (b *Builder) buildHead() []any {
 		} else if b.Table != nil && b.Table.Name != "" {
 			b.buf.WriteString(b.Table.Name)
 		} else {
-			panic("goent: buildHead called with empty table name for SELECT query - missing SetTable() call")
+			panic(fmt.Sprintf("goent: buildHead called with empty table name for query (Type=%d, fullName=%q, Table=%v) - missing SetTable() call",
+				b.Type, b.fullName, b.Table))
 		}
 	case model.DeleteQuery:
 		_ = b.DeleteBuilder.buildHead()
@@ -470,7 +477,7 @@ func (b *Builder) buildTail() []any {
 		b.DeleteBuilder.buildTail()
 	}
 
-	if b.Type == model.SelectQuery {
+	if b.Type == model.SelectQuery || b.Type == model.SelectJoinQuery {
 		if len(b.Groups) != 0 {
 			b.buf.WriteString(" ")
 			gp := b.Groups[0]
@@ -533,7 +540,7 @@ func (b *Builder) buildJoins() []any {
 		}
 		b.buf.WriteString(" ON ")
 		if j.On.Template != "" {
-			b.buildTemplate(j.On, &args, len(args), true)
+			b.argNo = b.buildTemplate(j.On, &args, b.argNo, true)
 		}
 	}
 	return args
@@ -542,6 +549,7 @@ func (b *Builder) buildJoins() []any {
 func (b *Builder) Build(destroy bool) (sql string, args []any) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.argNo = 0
 	args = b.buildHead()
 	if doArgs := b.buildDoing(); len(doArgs) > 0 {
 		args = append(args, doArgs...)
@@ -557,6 +565,10 @@ func (b *Builder) Build(destroy bool) (sql string, args []any) {
 	}
 	sql = b.buf.String()
 	b.buf.Reset()
+	if sql == "" {
+		panic(fmt.Sprintf("goent: Build returned empty SQL (Type=%d, fullName=%q, Changes=%d, Where=%v)",
+			b.Type, b.fullName, len(b.Changes), !b.Where.IsEmpty()))
+	}
 	return
 }
 

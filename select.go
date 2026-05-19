@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/azhai/goent/model"
+	"github.com/azhai/goent/utils"
 )
 
 // StateSelect represents a SELECT query state with type parameters for table and result types
@@ -142,10 +143,18 @@ func (s *StateSelect[T, R]) IterRows(to FetchFunc) iter.Seq2[*R, error] {
 		to = s.getFetchFunc()
 	}
 	qr := model.CreateQuery(s.builder.Build(false))
-	defer PutBuilder(s.builder)
+	builder := s.builder
 	conn, cfg := s.Prepare(s.table.db.driver)
 	hd := NewHandler(s.ctx, conn, cfg)
-	return FetchResult[R](hd, qr, to)
+	seq := FetchResult[R](hd, qr, to)
+	return func(yield func(*R, error) bool) {
+		defer PutBuilder(builder)
+		for obj, err := range seq {
+			if !yield(obj, err) {
+				return
+			}
+		}
+	}
 }
 
 // All executes the query and returns all rows as a slice
@@ -155,6 +164,9 @@ func (s *StateSelect[T, R]) All() (res []*R, err error) {
 	var obj *R
 	size := max(s.builder.Limit, 0)
 	res = make([]*R, 0, size)
+	if s.sameModel {
+		s.table.Cache = utils.NewCoMapSize[int64, T](size)
+	}
 	for obj, err = range s.IterRows(nil) {
 		if err != nil {
 			return
@@ -332,16 +344,26 @@ func (s *StateSelect[T, R]) GetJoinForeigns() []*Foreign {
 			continue
 		}
 		info := findTableInfoByName(join.Table.Name)
-		if info != nil {
-			if field, ok := valueType.FieldByName(info.FieldName); ok {
-				if field.Type.Kind() == reflect.Slice {
-					continue
-				}
+		if info == nil {
+			continue
+		}
+		if field, ok := valueType.FieldByName(info.FieldName); ok && field.Type.Kind() != reflect.Slice {
+			foreigns = append(foreigns, &Foreign{
+				Type:       O2O,
+				MountField: info.FieldName,
+				Reference:  &Field{TableAddr: info.TableAddr},
+			})
+			continue
+		}
+		for i := 0; i < valueType.NumField(); i++ {
+			sf := valueType.Field(i)
+			if sf.Type.Kind() == reflect.Pointer && sf.Type.Elem() == info.modelType {
 				foreigns = append(foreigns, &Foreign{
 					Type:       O2O,
-					MountField: info.FieldName,
+					MountField: sf.Name,
 					Reference:  &Field{TableAddr: info.TableAddr},
 				})
+				break
 			}
 		}
 	}
@@ -373,15 +395,17 @@ func (s *StateSelect[T, R]) Join(joinType model.JoinType, info TableInfo, on Con
 func (s *StateSelect[T, R]) LeftJoin(fkey string, refer *Field) *StateSelect[T, R] {
 	info := GetTableInfo(refer.TableAddr)
 	var leftField *Field
-	if len(s.builder.Joins) > 0 {
+	leftField = s.table.Field(fkey)
+	if leftField == nil && len(s.builder.Joins) > 0 {
 		lastJoin := s.builder.Joins[len(s.builder.Joins)-1]
 		leftTableInfo := findTableInfoByName(lastJoin.Table.Name)
 		if leftTableInfo == nil {
 			panic("table info not found for join table: " + lastJoin.Table.Name)
 		}
 		leftField = leftTableInfo.Field(fkey)
-	} else {
-		leftField = s.table.Field(fkey)
+	}
+	if leftField == nil {
+		panic("column " + fkey + " not found in main table or last join table")
 	}
 	s.Join(model.LeftJoin, *info, EqualsField(leftField, refer))
 	s.builder.VisitFields = append(s.builder.VisitFields, info.GetSortedFields()...)
@@ -451,6 +475,9 @@ func (s *StateSelect[T, R]) Pagination(page, size int) (*Pagination[T, R], error
 	counter.builder.VisitFields = nil
 	counter.Select(fld)
 	counter.CopyFrom(s.builder, s.conn)
+	counter.builder.Orders = nil
+	counter.builder.Limit = 0
+	counter.builder.Offset = 0
 	count, err := FetchSingleResult(counter)
 	if err != nil {
 		return nil, err

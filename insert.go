@@ -1,6 +1,7 @@
 package goent
 
 import (
+	"fmt"
 	"reflect"
 
 	"github.com/azhai/goent/model"
@@ -28,7 +29,12 @@ func (s *StateInsert[T]) One(obj *T) error {
 	}
 
 	returning := s.builder.Returning
-	qr := model.CreateQuery(s.builder.Build(true))
+	sql, args := s.builder.Build(true)
+	if sql == "" {
+		return fmt.Errorf("goent: StateInsert.One built empty SQL (Type=%d, Changes=%d, args=%v)",
+			s.builder.Type, len(s.builder.Changes), args)
+	}
+	qr := model.CreateQuery(sql, args)
 	conn, cfg := s.Prepare(s.table.db.driver)
 	if retFid >= 0 && returning != "" && s.table.db.driver.SupportsReturning() {
 		hd := NewHandler(s.ctx, conn, cfg)
@@ -181,7 +187,11 @@ func (s *StateSave[T]) getQuery(primary Dict) model.Query {
 	} else {
 		s.builder.Type = model.InsertQuery
 	}
-	return model.CreateQuery(s.builder.Build(true))
+	sql, args := s.builder.Build(true)
+	if sql == "" {
+		return model.CreateQuery("", nil)
+	}
+	return model.CreateQuery(sql, args)
 }
 
 // One saves a record to the table, inserting if no primary key exists or updating if it does

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/azhai/goent/reverse"
+	"github.com/azhai/goent/utils"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -38,7 +39,7 @@ func main() {
 
 	tablesCmd := flag.NewFlagSet("tables", flag.ExitOnError)
 	tablesCmd.BoolVar(&force, "force", false, "Force overwrite existing files")
-	tablesCmd.StringVar(&revConfig.DatabaseDSN, "dsn", os.Getenv("GOE_DATABASE_DSN"), "Database DSN")
+	tablesCmd.StringVar(&revConfig.DatabaseDSN, "dsn", utils.GetEnvWithFallback("DB_DSN", "GOE_DATABASE_DSN"), "Database DSN")
 	tablesCmd.StringVar(&revConfig.SchemaName, "schema", "public", "Schema name to reverse")
 	tablesCmd.StringVar(&revConfig.TablePrefix, "prefix", "", "Table prefix filter (only reverse tables with this prefix)")
 	tablesCmd.Usage = genUsage(tablesCmd)

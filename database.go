@@ -12,9 +12,10 @@ import (
 )
 
 var (
-	schemaRegistry = make(map[string]*string)
-	tableRegistry  = make(map[uintptr]*TableInfo)
-	tableRegLock   sync.RWMutex
+	schemaRegistry  = make(map[string]*string)
+	tableRegistry   = make(map[uintptr]*TableInfo)
+	cacheOneFuncs   = make(map[uintptr]func(any))
+	tableRegLock    sync.RWMutex
 )
 
 // ResetRegistry clears all registered schemas and tables
@@ -24,6 +25,7 @@ func ResetRegistry() {
 	defer tableRegLock.Unlock()
 	schemaRegistry = make(map[string]*string)
 	tableRegistry = make(map[uintptr]*TableInfo)
+	cacheOneFuncs = make(map[uintptr]func(any))
 }
 
 // GetTableInfo returns the table info for a given table address
@@ -62,6 +64,21 @@ func GetTableFieldName(addr uintptr, name string) (string, error) {
 		return fmt.Sprintf("%s.%s", table, name), nil
 	}
 	return "", model.NewFieldNotFoundError(name)
+}
+
+func RegisterCacheOne(addr uintptr, fn func(any)) {
+	tableRegLock.Lock()
+	defer tableRegLock.Unlock()
+	cacheOneFuncs[addr] = fn
+}
+
+func CacheOneByAddr(addr uintptr, val any) {
+	tableRegLock.RLock()
+	fn := cacheOneFuncs[addr]
+	tableRegLock.RUnlock()
+	if fn != nil {
+		fn(val)
+	}
 }
 
 // DB represents a database connection with its driver
@@ -135,6 +152,21 @@ func (db *DB) NewTransaction() (model.Transaction, error) {
 
 // NewTransactionContext creates a new Transaction with the specified context and isolation level
 // It returns a transaction object that can be used for atomic operations
+func (db *DB) RawQueryRowContext(ctx context.Context, rawSql string, args ...any) model.Row {
+	conn := db.driver.NewConnection()
+	dc := db.driver.GetDatabaseConfig()
+	qr := model.CreateQuery(rawSql, args)
+	rows, err := qr.WrapQuery(ctx, conn, dc)
+	if err != nil {
+		return nil
+	}
+	if rows.Next() {
+		return rows
+	}
+	rows.Close()
+	return nil
+}
+
 func (db *DB) NewTransactionContext(ctx context.Context, isolation sql.IsolationLevel) (model.Transaction, error) {
 	t, err := db.driver.NewTransaction(ctx, &sql.TxOptions{Isolation: isolation})
 	if err != nil {
