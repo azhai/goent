@@ -5,17 +5,15 @@ import (
 	"database/sql"
 	"fmt"
 	"reflect"
-	"strings"
 	"sync"
 
 	"github.com/azhai/goent/model"
 )
 
 var (
-	schemaRegistry  = make(map[string]*string)
-	tableRegistry   = make(map[uintptr]*TableInfo)
-	cacheOneFuncs   = make(map[uintptr]func(any))
-	tableRegLock    sync.RWMutex
+	schemaRegistry = make(map[string]*string)
+	tableRegistry  = make(map[uintptr]*TableInfo)
+	tableRegLock   sync.RWMutex
 )
 
 // ResetRegistry clears all registered schemas and tables
@@ -25,7 +23,6 @@ func ResetRegistry() {
 	defer tableRegLock.Unlock()
 	schemaRegistry = make(map[string]*string)
 	tableRegistry = make(map[uintptr]*TableInfo)
-	cacheOneFuncs = make(map[uintptr]func(any))
 }
 
 // GetTableInfo returns the table info for a given table address
@@ -64,21 +61,6 @@ func GetTableFieldName(addr uintptr, name string) (string, error) {
 		return fmt.Sprintf("%s.%s", table, name), nil
 	}
 	return "", model.NewFieldNotFoundError(name)
-}
-
-func RegisterCacheOne(addr uintptr, fn func(any)) {
-	tableRegLock.Lock()
-	defer tableRegLock.Unlock()
-	cacheOneFuncs[addr] = fn
-}
-
-func CacheOneByAddr(addr uintptr, val any) {
-	tableRegLock.RLock()
-	fn := cacheOneFuncs[addr]
-	tableRegLock.RUnlock()
-	if fn != nil {
-		fn(val)
-	}
 }
 
 // DB represents a database connection with its driver
@@ -143,13 +125,6 @@ func (db *DB) RawQueryContext(ctx context.Context, rawSql string, args ...any) (
 	return qr.WrapQuery(ctx, conn, dc)
 }
 
-// NewTransaction creates a new Transaction on the database using the default level
-// It uses [context.Background] internally
-// To specify the context and the isolation level, use [NewTransactionContext]
-func (db *DB) NewTransaction() (model.Transaction, error) {
-	return db.NewTransactionContext(context.Background(), sql.LevelDefault)
-}
-
 // NewTransactionContext creates a new Transaction with the specified context and isolation level
 // It returns a transaction object that can be used for atomic operations
 func (db *DB) RawQueryRowContext(ctx context.Context, rawSql string, args ...any) model.Row {
@@ -167,13 +142,20 @@ func (db *DB) RawQueryRowContext(ctx context.Context, rawSql string, args ...any
 	return nil
 }
 
+// NewTransaction creates a new Transaction on the database using the default level
+// It uses [context.Background] internally
+// To specify the context and the isolation level, use [NewTransactionContext]
+func (db *DB) NewTransaction() (model.Transaction, error) {
+	return db.NewTransactionContext(context.Background(), sql.LevelDefault)
+}
+
 func (db *DB) NewTransactionContext(ctx context.Context, isolation sql.IsolationLevel) (model.Transaction, error) {
-	t, err := db.driver.NewTransaction(ctx, &sql.TxOptions{Isolation: isolation})
+	tx, err := db.driver.NewTransaction(ctx, &sql.TxOptions{Isolation: isolation})
 	if err != nil {
 		dc := db.driver.GetDatabaseConfig()
 		return nil, dc.ErrorHandler(ctx, err)
 	}
-	return t, nil
+	return tx, nil
 }
 
 // BeginTransaction begins a Transaction with the database default level
@@ -183,7 +165,7 @@ func (db *DB) NewTransactionContext(ctx context.Context, isolation sql.Isolation
 //
 // Example:
 //
-//	err = db.BeginTransaction(func(tx goent.Transaction) error {
+//	err = db.BeginTransaction(func(tx model.Transaction) error {
 //		cat := &Animal{Name: "Cat"}
 //		if err = goent.Insert(db.Animal).OnTransaction(tx).One(cat); err != nil {
 //			return err // triggers rollback
@@ -195,8 +177,8 @@ func (db *DB) NewTransactionContext(ctx context.Context, isolation sql.Isolation
 //		}
 //		return nil // commits transaction
 //	})
-func (db *DB) BeginTransaction(txFunc func(Transaction) error) error {
-	return db.BeginTransactionContext(context.Background(), sql.LevelDefault, txFunc)
+func (db *DB) BeginTransaction(exec ExecuteTx) error {
+	return db.BeginTransactionContext(context.Background(), sql.LevelDefault, exec)
 }
 
 // BeginTransactionContext begins a Transaction with the specified context and isolation level
@@ -204,7 +186,7 @@ func (db *DB) BeginTransaction(txFunc func(Transaction) error) error {
 //
 // Example:
 //
-//	err = db.BeginTransactionContext(context.Background(), sql.LevelSerializable, func(tx goent.Transaction) error {
+//	err = db.BeginTransactionContext(context.Background(), sql.LevelSerializable, func(tx model.Transaction) error {
 //		cat := &Animal{Name: "Cat"}
 //		if err = goent.Insert(db.Animal).OnTransaction(tx).One(cat); err != nil {
 //			return err // triggers rollback
@@ -216,21 +198,12 @@ func (db *DB) BeginTransaction(txFunc func(Transaction) error) error {
 //		}
 //		return nil // commits transaction
 //	})
-func (db *DB) BeginTransactionContext(ctx context.Context, isolation sql.IsolationLevel, txFunc func(Transaction) error) (err error) {
-	var t model.Transaction
-	if t, err = db.NewTransactionContext(ctx, isolation); err != nil {
+func (db *DB) BeginTransactionContext(ctx context.Context, isolation sql.IsolationLevel, exec ExecuteTx) (err error) {
+	var tx model.Transaction
+	if tx, err = db.NewTransactionContext(ctx, isolation); err != nil {
 		return
 	}
-	defer func() {
-		if r := recover(); r != nil {
-			t.Rollback()
-		}
-	}()
-	if err = txFunc(Transaction{t}); err != nil {
-		t.Rollback()
-		return
-	}
-	return t.Commit()
+	return RunTransaction(tx, exec)
 }
 
 // DropTables drops all registered tables from the database
@@ -246,12 +219,7 @@ func (db *DB) DropTables() error {
 	if len(tables) == 0 {
 		return nil
 	}
-	sql := "DROP TABLE IF EXISTS %s"
-	if db.DriverName() == "PostgreSQL" {
-		sql += " CASCADE"
-	}
-	sql = fmt.Sprintf(sql, strings.Join(tables, ", "))
-	return db.RawExecContext(context.Background(), sql)
+	return NewSchemaOps(db).DropTables(context.Background(), tables)
 }
 
 // Close closes the database connection and cleans up the table registry
@@ -271,4 +239,23 @@ func Close(ent any) error {
 func getDatabase(ent any) *DB {
 	valueOf := reflect.ValueOf(ent).Elem()
 	return valueOf.Field(valueOf.NumField() - 1).Interface().(*DB)
+}
+
+type ExecuteTx func(model.Transaction) error
+
+func RunTransaction(tx model.Transaction, exec ExecuteTx) (err error) {
+	var sp model.SavePoint
+	if sp, err = tx.SavePoint(); err != nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			sp.Rollback()
+		}
+	}()
+	if err = exec(tx); err != nil {
+		sp.Rollback()
+		return
+	}
+	return sp.Commit()
 }

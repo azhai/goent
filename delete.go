@@ -113,24 +113,31 @@ func MatchDeleteWhere[T any](s *StateDeleteWhere, table *Table[T], obj T) *State
 	return s.Filter(MatchFilter(table, obj))
 }
 
-func (s *StateDeleteWhere) Filter(conds ...Condition) *StateDeleteWhere {
+func applyFilter(w *Condition, conds ...Condition) Condition {
 	if len(conds) == 0 || len(conds) == 1 && conds[0].IsEmpty() {
-		return s
+		return *w
 	}
-	if !s.builder.Where.IsEmpty() {
-		conds = append(conds, s.builder.Where)
+	if !w.IsEmpty() {
+		conds = append(conds, *w)
 	}
-	s.builder.Where = And(conds...)
+	return And(conds...)
+}
+
+func applyWhere(w *Condition, where string, args ...any) Condition {
+	cond := Expr(where, args...)
+	if !w.IsEmpty() {
+		return And(*w, cond)
+	}
+	return cond
+}
+
+func (s *StateDeleteWhere) Filter(conds ...Condition) *StateDeleteWhere {
+	s.builder.Where = applyFilter(&s.builder.Where, conds...)
 	return s
 }
 
 func (s *StateDeleteWhere) Where(where string, args ...any) *StateDeleteWhere {
-	cond := Expr(where, args...)
-	if !s.builder.Where.IsEmpty() {
-		cond = And(s.builder.Where, cond)
-	} else {
-		s.builder.Where = cond
-	}
+	s.builder.Where = applyWhere(&s.builder.Where, where, args...)
 	return s
 }
 
@@ -167,23 +174,12 @@ func MatchWhere[T any](s *StateWhere, table *Table[T], obj T) *StateWhere {
 }
 
 func (s *StateWhere) Filter(conds ...Condition) *StateWhere {
-	if len(conds) == 0 || len(conds) == 1 && conds[0].IsEmpty() {
-		return s
-	}
-	if !s.builder.Where.IsEmpty() {
-		conds = append(conds, s.builder.Where)
-	}
-	s.builder.Where = And(conds...)
+	s.builder.Where = applyFilter(&s.builder.Where, conds...)
 	return s
 }
 
 func (s *StateWhere) Where(where string, args ...any) *StateWhere {
-	cond := Expr(where, args...)
-	if !s.builder.Where.IsEmpty() {
-		cond = And(s.builder.Where, cond)
-	} else {
-		s.builder.Where = cond
-	}
+	s.builder.Where = applyWhere(&s.builder.Where, where, args...)
 	return s
 }
 

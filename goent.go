@@ -17,7 +17,7 @@ import (
 //	goent.Open[Database](pgsql.Open("user=postgres password=postgres host=localhost port=5432 database=postgres", pgsql.Config{}))
 func Open[T any](drv model.Driver, logFile string) (*T, error) {
 	if logFile != "" {
-		err := drv.AddLogger(utils.CreateLogger(logFile))
+		err := drv.AddLogger(utils.CreateDailyLogger(logFile, true))
 		if err != nil {
 			return nil, err
 		}
@@ -115,12 +115,6 @@ func travelSchemas(db *DB, dbId int, valueOf reflect.Value) ([]string, error) {
 			}
 			tableField.Set(tableOf)
 			tableRegistry[info.TableAddr] = &info
-			cacheOneMethod := tableOf.MethodByName("CacheOne")
-			if cacheOneMethod.IsValid() {
-				addr := info.TableAddr
-				fn := func(val any) { cacheOneMethod.Call([]reflect.Value{reflect.ValueOf(val)}) }
-				cacheOneFuncs[addr] = fn
-			}
 		}
 	}
 
@@ -262,10 +256,6 @@ func InitField(db *DB, schema *string, tableId int, tables, modelOf reflect.Valu
 			})
 		}
 	}
-	// for i := range pks {
-	// 	addr := uintptr(modelOf.Field(fieldIds[i]).Addr().UnsafePointer())
-	// 	addrMap.set(addr, pks[i])
-	// }
 	return nil
 }
 
@@ -280,36 +270,6 @@ func handlerSlice(b body, helper func(b body) error) error {
 	}
 	return nil
 }
-
-// func newAttr(b body) error {
-// 	goeTag := b.valueOf.Type().Field(b.fieldId).Tag.Get("goe")
-// 	at := createAtt(
-// 		b.mapp.db,
-// 		b.valueOf.Type().Field(b.fieldId).Name,
-// 		b.schema,
-// 		b.mapp.pks[0].tableName,
-// 		b.mapp.tableId,
-// 		b.fieldId,
-// 		getTagValue(goeTag, "default:") != "",
-// 		b.driver,
-// 	)
-// 	addrMap.set(b.mapp.addr, at)
-// 	return nil
-// }
-
-// func getPks(typeOf reflect.Type) []reflect.StructField {
-// 	var pks []reflect.StructField
-// 	pks = append(pks, fieldsByTags("pk", typeOf)...)
-
-// 	id, valid := utils.GetTableID(typeOf)
-// 	isSameName := func(f reflect.StructField) bool {
-// 		return f.Name == id.Name
-// 	}
-// 	if valid && !slices.ContainsFunc(pks, isSameName) {
-// 		pks = append(pks, id)
-// 	}
-// 	return pks
-// }
 
 func getPk(db *DB, schema *string, valueOf reflect.Value, tableId int, driver model.Driver) ([]pk, []int, error) {
 	typeOf := valueOf.Type()
@@ -477,4 +437,121 @@ func helperAttribute(b body) error {
 		v.IsOneToMany = utils.HasTagValue(goeTag, "o2m")
 	}
 	return nil
+}
+
+type attributeStrings struct {
+	db            *DB
+	schemaName    *string
+	tableId       int
+	tableName     string
+	attributeName string
+	fieldId       int
+}
+
+type pk struct {
+	autoIncrement bool
+	attributeStrings
+}
+
+type att struct {
+	isDefault bool
+	attributeStrings
+}
+
+type ManyToSomeRelation struct {
+	IsDefault bool
+	attributeStrings
+}
+
+type OneToSomeRelation struct {
+	IsOneToMany bool
+	attributeStrings
+}
+
+func createAttributeStrings(db *DB, schema *string, table string, attributeName string, tableId, fieldId int, Driver model.Driver) attributeStrings {
+	name := Driver.KeywordHandler(utils.ToSnakeCase(attributeName))
+	return attributeStrings{
+		db:            db,
+		tableName:     table,
+		tableId:       tableId,
+		fieldId:       fieldId,
+		schemaName:    schema,
+		attributeName: name,
+	}
+}
+
+func createAttFromColumn(db *DB, col *Column, tableId int) att {
+	attStr := createAttributeStrings(db, col.schemaName, col.tableName, col.FieldName, tableId, col.FieldId, db.driver)
+	return att{attributeStrings: attStr, isDefault: col.HasDefault}
+}
+
+func createManyToSome(b body, typeOf reflect.Type) any {
+	rel := ManyToSomeRelation{}
+	targetPks := getPksFromType(typeOf)
+	count := 0
+	for i := range targetPks {
+		if targetPks[i].Name == b.prefixName {
+			count++
+		}
+	}
+
+	if count == 0 {
+		return nil
+	}
+	rel.IsDefault = getTagValue(b.valueOf.Type().Field(b.fieldId).Tag.Get("goe"), "default:") != ""
+	rel.attributeStrings = createAttributeStrings(
+		b.mapp.db,
+		b.schema,
+		b.mapp.pks[0].tableName,
+		b.fieldName,
+		b.mapp.tableId,
+		b.fieldId,
+		b.driver,
+	)
+	return rel
+}
+
+func createOneToSome(b body, typeOf reflect.Type) any {
+	rel := OneToSomeRelation{}
+	targetPks := getPksFromType(typeOf)
+	count := 0
+	for i := range targetPks {
+		if targetPks[i].Name == b.prefixName {
+			count++
+		}
+	}
+
+	if count == 0 {
+		return nil
+	}
+
+	rel.attributeStrings = createAttributeStrings(
+		b.mapp.db,
+		b.schema,
+		b.mapp.pks[0].tableName,
+		b.fieldName,
+		b.mapp.tableId,
+		b.fieldId,
+		b.driver,
+	)
+	return rel
+}
+
+func newAttr(b body) error {
+	createAttFromColumn(b.mapp.db, &Column{
+		ColumnName: utils.ToSnakeCase(b.fieldName),
+		FieldName:  b.fieldName,
+		HasDefault: b.nullable,
+	}, b.mapp.tableId)
+	return nil
+}
+
+func getPksFromType(typeOf reflect.Type) []reflect.StructField {
+	field, exists := utils.GetTableID(typeOf)
+	if exists {
+		pks := make([]reflect.StructField, 1)
+		pks[0] = field
+		return pks
+	}
+	return fieldsByTags("pk", typeOf)
 }

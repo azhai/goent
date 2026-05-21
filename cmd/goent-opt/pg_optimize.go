@@ -25,90 +25,56 @@ type recommendation struct {
 	SQL     string
 }
 
-func runPgOptimize(args []string) {
-	var (
-		rulesFile string
-		dryRun    bool
-		initFile  string
-	)
-
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--dry-run":
-			dryRun = true
-		case "--init":
-			i++
-			if i < len(args) {
-				initFile = args[i]
-			} else {
-				initFile = "optimized-rules.txt"
-			}
-		case "--rules":
-			i++
-			if i < len(args) {
-				rulesFile = args[i]
-			}
-		case "--help", "-h":
-			printPgOptimizeUsage()
-			return
-		}
-	}
-
-	if initFile != "" {
-		if err := writeDefaultRules(initFile); err != nil {
+func runPgOptimize(args *PgOptimizeArgs) {
+	if args.Init != "" {
+		if err := writeDefaultRules(args.Init); err != nil {
 			fmt.Printf("Error writing rules file: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("Default rules file written to: %s\n", initFile)
+		fmt.Printf("Default rules file written to: %s\n", args.Init)
 		return
 	}
 
-	filtered := filterPgArgs(args)
-
-	var cliDSN string
-	if len(filtered) >= 1 && isLikelyDSN(filtered[0]) {
-		cliDSN = filtered[0]
-	}
-
-	cfg, err := ParseDSNArgs(cliDSN)
+	env := NewEnvSafe()
+	dbType := resolveDBType(env)
+	cfg, err := ToDBConfig(args.DSN, dbType)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err.Error())
-		printPgOptimizeUsage()
+		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
 	}
 
-	if !cfg.IsPg {
-		fmt.Fprintln(os.Stderr, "Error: DSN must be a PostgreSQL connection string")
-		os.Exit(1)
-	}
-
-	tdb, err := OpenToolsDB(cfg)
+	db, err := OpenDB(cfg)
 	if err != nil {
 		fmt.Printf("Error opening database: %v\n", err)
 		os.Exit(1)
 	}
-	defer CloseDB(tdb)
+	defer CloseDB(db)
+
+	if !goent.NewSchemaOps(db.DB).IsPg() {
+		fmt.Fprintln(os.Stderr, "Error: pg-optimize requires a PostgreSQL database")
+		os.Exit(1)
+	}
 
 	ctx := context.Background()
 
-	pgVersion, err := getPgVersion(ctx, tdb)
+	pgVersion, err := getPgVersion(ctx, db.DB)
 	if err != nil {
 		fmt.Printf("Error getting PostgreSQL version: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Printf("PostgreSQL version: %.1f\n\n", pgVersion)
 
-	if rulesFile == "" {
-		rulesFile = "optimized-rules.txt"
-		if _, err := os.Stat(rulesFile); err != nil {
-			fmt.Printf("Rules file not found: %s\n", rulesFile)
+	if args.Rules == "" {
+		args.Rules = "optimized-rules.txt"
+		if _, err := os.Stat(args.Rules); err != nil {
+			fmt.Printf("Rules file not found: %s\n", args.Rules)
 			fmt.Println("Run with --init to generate a default rules file:")
-			fmt.Println("  goent-tools pg-optimize --init optimized-rules.txt")
+			fmt.Println("  goent-opt pg-optimize --init optimized-rules.txt")
 			os.Exit(1)
 		}
 	}
 
-	rules, err := loadRules(rulesFile)
+	rules, err := loadRules(args.Rules)
 	if err != nil {
 		fmt.Printf("Error loading rules: %v\n", err)
 		os.Exit(1)
@@ -128,13 +94,13 @@ func runPgOptimize(args []string) {
 		}
 	}
 
-	schema, err := loadSchema(ctx, tdb)
+	schema, err := loadSchema(ctx, db.DB)
 	if err != nil {
 		fmt.Printf("Error loading schema: %v\n", err)
 		os.Exit(1)
 	}
 
-	stats, err := loadStats(ctx, tdb)
+	stats, err := loadStats(ctx, db.DB)
 	if err != nil {
 		fmt.Printf("Warning: could not load index stats: %v\n", err)
 		stats = &dbStats{}
@@ -190,7 +156,7 @@ func runPgOptimize(args []string) {
 		fmt.Println()
 	}
 
-	if dryRun {
+	if args.DryRun {
 		fmt.Println("[DRY RUN] No changes were made.")
 		return
 	}
@@ -218,7 +184,7 @@ func runPgOptimize(args []string) {
 
 	for i, stmt := range sqls {
 		fmt.Printf("Executing %d/%d...\n", i+1, len(sqls))
-		if err := tdb.RawExecContext(ctx, stmt); err != nil {
+		if err := db.DB.RawExecContext(ctx, stmt); err != nil {
 			fmt.Printf("  Error: %v\n", err)
 			fmt.Printf("  SQL: %s\n", stmt)
 		} else {
@@ -228,44 +194,7 @@ func runPgOptimize(args []string) {
 	fmt.Println("Done!")
 }
 
-func printPgOptimizeUsage() {
-	fmt.Println("Usage: goent-tools pg-optimize [options] [dsn]")
-	fmt.Println()
-	fmt.Println("Analyze PostgreSQL indexes and provide optimization recommendations.")
-	printDSNHelp()
-	fmt.Println()
-	fmt.Println("Options:")
-	fmt.Println("  --rules <file>     Path to rules file (default: optimized-rules.txt)")
-	fmt.Println("  --init [<file>]    Generate default rules file (default: optimized-rules.txt)")
-	fmt.Println("  --dry-run          Show recommendations only, don't execute SQL")
-	fmt.Println("  --help             Show this help message")
-	fmt.Println()
-	fmt.Println("Examples:")
-	fmt.Println("  goent-tools pg-optimize --init")
-	fmt.Println("  goent-tools pg-optimize 'postgres://user:pass@localhost/db?sslmode=disable'")
-	fmt.Println("  goent-tools pg-optimize --rules my-rules.txt --dry-run 'postgres://...'")
-	fmt.Println("  DB_DSN='postgres://...' goent-tools pg-optimize")
-}
 
-func filterPgArgs(args []string) []string {
-	var filtered []string
-	skip := false
-	for _, arg := range args {
-		if skip {
-			skip = false
-			continue
-		}
-		if arg == "--rules" || arg == "--init" {
-			skip = true
-			continue
-		}
-		if arg == "--dry-run" || arg == "--help" || arg == "-h" {
-			continue
-		}
-		filtered = append(filtered, arg)
-	}
-	return filtered
-}
 
 func writeDefaultRules(path string) error {
 	content := `# PostgreSQL Index Optimization Rules
@@ -276,7 +205,7 @@ func writeDefaultRules(path string) error {
 # Example: covering_index = on 11  (only for PG 11+)
 #
 # Run with --init to generate this default file:
-#   goent-tools pg-optimize --init optimized-rules.txt
+#   goent-opt pg-optimize --init optimized-rules.txt
 
 # --- Foreign Key Indexes ---
 fk_index = on
@@ -354,8 +283,8 @@ func filterRules(rules []rule, pgVersion float64) []rule {
 	return active
 }
 
-func getPgVersion(ctx context.Context, tdb *ToolsDB) (float64, error) {
-	versionStr, err := goent.GetPgVersion(ctx, tdb.DB)
+func getPgVersion(ctx context.Context, db *goent.DB) (float64, error) {
+	versionStr, err := goent.NewSchemaOps(db).GetVersion(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -425,165 +354,75 @@ type dbStats struct {
 	TableStats []pgTableStat
 }
 
-func loadSchema(ctx context.Context, tdb *ToolsDB) ([]pgTableInfo, error) {
-	var tables []pgTableInfo
-
-	rows, err := tdb.RawQueryContext(ctx, `
-		SELECT table_name
-		FROM information_schema.tables
-		WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-		ORDER BY table_name`)
+func loadSchema(ctx context.Context, db *goent.DB) ([]pgTableInfo, error) {
+	probe := goent.NewSchemaOps(db)
+	tableNames, err := probe.ListTables(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var tableNames []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		tableNames = append(tableNames, name)
-	}
-	rows.Close()
 
+	var tables []pgTableInfo
 	for _, name := range tableNames {
 		ti := pgTableInfo{Name: name}
 
-		colRows, err := tdb.RawQueryContext(ctx, `
-			SELECT column_name, data_type, is_nullable = 'YES'
-			FROM information_schema.columns
-			WHERE table_schema = 'public' AND table_name = $1
-			ORDER BY ordinal_position`, name)
+		cols, err := probe.GetColumns(ctx, name)
 		if err != nil {
 			return nil, err
 		}
-		for colRows.Next() {
-			var col pgColumnInfo
-			if err := colRows.Scan(&col.Name, &col.DataType, &col.IsNullable); err != nil {
-				colRows.Close()
-				return nil, err
-			}
-			ti.Columns = append(ti.Columns, col)
+		for _, col := range cols {
+			ti.Columns = append(ti.Columns, pgColumnInfo{Name: col.Name, DataType: col.DataType, IsNullable: col.Nullable})
 		}
-		colRows.Close()
 
-		idxRows, err := tdb.RawQueryContext(ctx, `
-			SELECT i.relname, a.attname, ix.indisunique, ix.indisprimary
-			FROM pg_class t
-			JOIN pg_index ix ON t.oid = ix.indrelid
-			JOIN pg_class i ON i.oid = ix.indexrelid
-			JOIN pg_namespace n ON n.oid = t.relnamespace
-			JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey)
-			WHERE n.nspname = 'public' AND t.relname = $1
-			ORDER BY i.relname, a.attnum`, name)
+		indexes, err := probe.GetIndexes(ctx, name)
 		if err != nil {
 			return nil, err
 		}
-		idxMap := make(map[string]*pgIndexInfo)
-		for idxRows.Next() {
-			var idxName, colName string
-			var isUnique, isPrimary bool
-			if err := idxRows.Scan(&idxName, &colName, &isUnique, &isPrimary); err != nil {
-				idxRows.Close()
-				return nil, err
-			}
-			if _, ok := idxMap[idxName]; !ok {
-				idxMap[idxName] = &pgIndexInfo{Name: idxName, IsUnique: isUnique, IsPrimary: isPrimary}
-			}
-			idxMap[idxName].Columns = append(idxMap[idxName].Columns, colName)
-		}
-		idxRows.Close()
-		for _, idx := range idxMap {
-			ti.Indexes = append(ti.Indexes, *idx)
+		for _, idx := range indexes {
+			ti.Indexes = append(ti.Indexes, pgIndexInfo{Name: idx.Name, Columns: idx.Columns, IsUnique: idx.Unique})
 		}
 
-		fkRows, err := tdb.RawQueryContext(ctx, `
-			SELECT tc.constraint_name, kcu.column_name, ccu.table_name, ccu.column_name
-			FROM information_schema.table_constraints tc
-			JOIN information_schema.key_column_usage kcu
-				ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
-			JOIN information_schema.constraint_column_usage ccu
-				ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
-			WHERE tc.constraint_type = 'FOREIGN KEY'
-				AND tc.table_schema = 'public' AND tc.table_name = $1
-			ORDER BY tc.constraint_name, kcu.ordinal_position`, name)
+		fks, err := probe.GetForeignKeys(ctx, name)
 		if err != nil {
 			return nil, err
 		}
-		fkMap := make(map[string]*pgFKInfo)
-		for fkRows.Next() {
-			var constraintName, columnName, refTable, refColumn string
-			if err := fkRows.Scan(&constraintName, &columnName, &refTable, &refColumn); err != nil {
-				fkRows.Close()
-				return nil, err
-			}
-			if _, ok := fkMap[constraintName]; !ok {
-				fkMap[constraintName] = &pgFKInfo{Name: constraintName, ReferencedTable: refTable}
-			}
-			fkMap[constraintName].Columns = append(fkMap[constraintName].Columns, columnName)
-			fkMap[constraintName].ReferencedColumns = append(fkMap[constraintName].ReferencedColumns, refColumn)
-		}
-		fkRows.Close()
-		for _, fk := range fkMap {
-			ti.FKs = append(ti.FKs, *fk)
+		for _, fk := range fks {
+			ti.FKs = append(ti.FKs, pgFKInfo{Name: fk.Name, Columns: fk.Columns, ReferencedTable: fk.RefTable, ReferencedColumns: fk.RefColumns})
 		}
 
-		row := tdb.RawQueryRowContext(ctx,
-			fmt.Sprintf("SELECT COALESCE((SELECT reltuples::bigint FROM pg_class WHERE oid = '%s'::regclass), 0)", name))
-		row.Scan(&ti.RowCount)
-
+		ti.RowCount, _ = probe.GetTableRowCount(ctx, name)
 		tables = append(tables, ti)
 	}
 
 	return tables, nil
 }
 
-func loadStats(ctx context.Context, tdb *ToolsDB) (*dbStats, error) {
+func loadStats(ctx context.Context, db *goent.DB) (*dbStats, error) {
+	probe := goent.NewSchemaOps(db)
 	stats := &dbStats{}
 
-	idxRows, err := tdb.RawQueryContext(ctx, `
-		SELECT schemaname, relname, indexrelname,
-		       COALESCE(idx_scan, 0), COALESCE(idx_tup_fetch, 0),
-		       COALESCE(idx_tup_read, 0), COALESCE(idx_tup_fetch, 0),
-		       COALESCE(pg_relation_size(indexrelid), 0)
-		FROM pg_stat_user_indexes
-		WHERE schemaname = 'public'`)
+	idxStats, err := probe.GetIndexStats(ctx)
 	if err != nil {
 		return nil, err
 	}
-	for idxRows.Next() {
-		var s pgIndexStat
-		var schema string
-		if err := idxRows.Scan(&schema, &s.TableName, &s.IndexName,
-			&s.IdxScan, &s.IdxFetch, &s.IdxTupRead, &s.IdxTupFetch, &s.Size); err != nil {
-			idxRows.Close()
-			return nil, err
-		}
-		stats.IndexStats = append(stats.IndexStats, s)
+	for _, s := range idxStats {
+		stats.IndexStats = append(stats.IndexStats, pgIndexStat{
+			TableName: s.TableName, IndexName: s.IndexName,
+			IdxScan: s.IdxScan, IdxFetch: s.IdxFetch,
+			IdxTupRead: s.IdxTupRead, IdxTupFetch: s.IdxTupFetch, Size: s.Size,
+		})
 	}
-	idxRows.Close()
 
-	tblRows, err := tdb.RawQueryContext(ctx, `
-		SELECT relname,
-		       COALESCE(seq_scan, 0), COALESCE(idx_scan, 0),
-		       COALESCE(n_dead_tup, 0), COALESCE(n_live_tup, 0),
-		       last_vacuum, last_analyze
-		FROM pg_stat_user_tables
-		WHERE schemaname = 'public'`)
+	tblStats, err := probe.GetTableStats(ctx)
 	if err != nil {
 		return nil, err
 	}
-	for tblRows.Next() {
-		var s pgTableStat
-		if err := tblRows.Scan(&s.TableName, &s.SeqScan, &s.IdxScan,
-			&s.NDeadTup, &s.NLiveTup, &s.LastVacuum, &s.LastAnalyze); err != nil {
-			tblRows.Close()
-			return nil, err
-		}
-		stats.TableStats = append(stats.TableStats, s)
+	for _, s := range tblStats {
+		stats.TableStats = append(stats.TableStats, pgTableStat{
+			TableName: s.TableName, SeqScan: s.SeqScan, IdxScan: s.IdxScan,
+			NDeadTup: s.NDeadTup, NLiveTup: s.NLiveTup,
+			LastVacuum: s.LastVacuum, LastAnalyze: s.LastAnalyze,
+		})
 	}
-	tblRows.Close()
 
 	return stats, nil
 }

@@ -1,6 +1,7 @@
 package goent
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"slices"
@@ -9,6 +10,14 @@ import (
 	"github.com/azhai/goent/model"
 	"github.com/azhai/goent/utils"
 )
+
+func AutoMigrate(ent any) error {
+	return AutoMigrateContext(context.Background(), ent)
+}
+
+func AutoMigrateContext(ctx context.Context, ent any) error {
+	return NewSchemaOps(getDatabase(ent)).AutoMigrate(ctx, ent)
+}
 
 type fieldDesc struct {
 	info         *TableInfo

@@ -6,9 +6,9 @@ import (
 	"math"
 	"reflect"
 	"strings"
+	"unsafe"
 
 	"github.com/azhai/goent/model"
-	"github.com/azhai/goent/utils"
 )
 
 // StateSelect represents a SELECT query state with type parameters for table and result types
@@ -107,9 +107,6 @@ func (s *StateSelect[T, R]) FetchRow(qr model.Query, to FetchFunc) (*R, error) {
 	if err = row.Scan(to(target)...); err != nil {
 		return nil, err
 	}
-	if s.sameModel {
-		s.table.CacheOne(target)
-	}
 	return target, err
 }
 
@@ -164,20 +161,15 @@ func (s *StateSelect[T, R]) All() (res []*R, err error) {
 	var obj *R
 	size := max(s.builder.Limit, 0)
 	res = make([]*R, 0, size)
-	if s.sameModel {
-		s.table.Cache = utils.NewCoMapSize[int64, T](size)
-	}
 	for obj, err = range s.IterRows(nil) {
 		if err != nil {
 			return
 		}
-		if obj != nil && s.sameModel {
-			s.table.CacheOne(obj)
-		}
 		res = append(res, obj)
 	}
 	if err == nil && s.sameModel && len(s.withForeigns) > 0 {
-		err = QueryForeignsByNameCtx(s.ctx, s.table, s.withForeigns...)
+		rows := *(*[]*T)(unsafe.Pointer(&res))
+		err = QueryForeignsByNameContext(s.ctx, s.table, rows, s.withForeigns...)
 	}
 	return
 }
@@ -191,17 +183,11 @@ func (s *StateSelect[T, R]) Map(key string) (map[int64]*R, error) {
 	}
 	size := max(s.builder.Limit, 0)
 	res := make(map[int64]*R, size)
-	id, ok := int64(0), false
 	for obj, err := range s.IterRows(nil) {
 		if err != nil {
 			return nil, err
 		}
-		if obj != nil && s.sameModel {
-			id = s.table.CacheOne(obj)
-		}
-		if id > 0 {
-			res[id] = obj
-		} else if id, ok = col.GetInt64(obj); ok {
+		if id, ok := col.GetInt64(obj); ok {
 			res[id] = obj
 		}
 	}
@@ -217,17 +203,11 @@ func (s *StateSelect[T, R]) Rank(key string) (map[int64][]*R, error) {
 	}
 	size := max(s.builder.Limit, 0)
 	res := make(map[int64][]*R, size)
-	id, ok := int64(0), false
 	for obj, err := range s.IterRows(nil) {
 		if err != nil {
 			return nil, err
 		}
-		if obj != nil && s.sameModel {
-			id = s.table.CacheOne(obj)
-		}
-		if id > 0 {
-			res[id] = append(res[id], obj)
-		} else if id, ok = col.GetInt64(obj); ok {
+		if id, ok := col.GetInt64(obj); ok {
 			res[id] = append(res[id], obj)
 		}
 	}

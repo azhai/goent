@@ -63,7 +63,6 @@ func main() {
 		if order.ID > 0 && order.Total == 0.0 {
 			order.Total, err = CalcTotalPrice2(db, order)
 		}
-		// fmt.Printf("\n\nOrder:\n\n%+v\n\n%#v\n\n%#v\n", order, db.Order.Cache, db.Order.TableInfo)
 	}
 
 	products, _ := ListAllProducts(db)
@@ -250,8 +249,6 @@ func ListAllProducts(db *Database) ([]*models.Product, error) {
 	// 	return nil, err
 	// }
 
-	fmt.Printf("\nCategory:\n%+v\n", db.Category.Cache)
-	fmt.Printf("\nProduct:\n%+v\n", db.Product.Cache)
 	return products, nil
 }
 

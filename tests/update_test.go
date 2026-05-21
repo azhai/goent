@@ -524,7 +524,7 @@ func TestUpdate(t *testing.T) {
 					Id:   uuid.New(),
 					Name: "City",
 				}
-				err = db.BeginTransaction(func(tx goent.Transaction) error {
+				err = db.BeginTransaction(func(tx model.Transaction) error {
 					if err = db.Animal.Insert().OnTransaction(tx).One(&a); err != nil {
 						t.Fatalf("Expected a insert animal, got error: %v", err)
 					}
@@ -532,7 +532,7 @@ func TestUpdate(t *testing.T) {
 					as := Animal{
 						Name: "Dog",
 					}
-					tx.BeginTransaction(func(tx2 goent.Transaction) error {
+					goent.RunTransaction(tx, func(tx2 model.Transaction) error {
 						if err = db.Animal.Insert().OnTransaction(tx2).One(&as); err != nil {
 							t.Fatalf("Expected a insert animal, got error: %v", err)
 						}
@@ -545,7 +545,7 @@ func TestUpdate(t *testing.T) {
 						t.Fatalf("Expected a goent.ErrNoRows, got: %v", err)
 					}
 
-					tx.BeginTransaction(func(tx3 goent.Transaction) error {
+					goent.RunTransaction(tx, func(tx3 model.Transaction) error {
 						if err = db.Animal.Insert().OnTransaction(tx3).One(&as); err != nil {
 							t.Fatalf("Expected a insert animal, got error: %v", err)
 						}

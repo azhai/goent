@@ -1,0 +1,42 @@
+# PostgreSQL Index Optimization Rules
+# ====================================
+# Format: rule_name = on|off [min_pg_version]
+#
+# min_pg_version: optional, only apply when PostgreSQL version >= this value
+# Example: covering_index = on 11  (only for PG 11+)
+#
+# Run with --init to generate this default file:
+#   goent-opt pg-optimize --init optimized-rules.txt
+
+# --- Foreign Key Indexes ---
+fk_index = on
+
+# --- Unused Indexes ---
+unused_index = on
+
+# --- Redundant Indexes ---
+redundant_index = on
+
+# --- Duplicate Indexes ---
+duplicate_index = on
+
+# --- Covering Indexes (INCLUDE) ---
+covering_index = on 11
+
+# --- Partial Indexes ---
+partial_index = off
+
+# --- BRIN Indexes for Large Tables ---
+brin_index = on 9.5
+
+# --- Composite Index Suggestions ---
+composite_index = on
+
+# --- Concurrent Index Creation ---
+concurrent = on
+
+# --- Table Bloat Detection ---
+table_bloat = on
+
+# --- Index Bloat Detection ---
+index_bloat = on 12

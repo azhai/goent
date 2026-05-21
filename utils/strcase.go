@@ -64,37 +64,6 @@ func ToSnakeCase(word string) string {
 	return b.String()
 }
 
-// ToSnakeCaseV0 converts camelCase or PascalCase to snake_case in early version of golang
-func ToSnakeCaseV0(word string) string {
-	var prev, result []byte
-	prevUp, currUp := false, false
-	for i := 0; i < len(word); i++ {
-		letter := word[i]
-		if letter < 32 || letter > 126 { // It is NOT visible character
-			continue
-		}
-		if letter >= 'A' && letter <= 'Z' {
-			letter, currUp = letter+('a'-'A'), true
-		}
-		if prevUp { // cache to varibale named prev
-			if n := len(prev); n > 0 && !currUp {
-				prev = append(prev[:n-1], '_', prev[n-1])
-			}
-			prev = append(prev, letter)
-		} else { // write to the result and clear prev
-			result = append(result, prev...)
-			if currUp && i > 0 {
-				result = append(result, '_')
-			}
-			result = append(result, letter)
-			prev = prev[:0]
-		}
-		prevUp = currUp
-	}
-	result = append(result, prev...)
-	return string(result)
-}
-
 // ToSingular converts a plural name to its singular form.
 func ToSingular(name string) string {
 	if strings.HasSuffix(name, "ies") && len(name) > 3 {

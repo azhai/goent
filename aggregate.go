@@ -2,9 +2,6 @@ package goent
 
 import "context"
 
-// NewSelectFunc creates a new StateSelect for an aggregate function query
-// It builds a SELECT query with the specified column and SQL function (e.g. COUNT, SUM, AVG)
-// If state is provided, its conditions, joins, orders, groups, and pagination are inherited
 func NewSelectFunc[T, R any](state *StateWhere, table *Table[T], col, fun string) *StateSelect[T, R] {
 	var ctx = context.Background()
 	if state != nil {
@@ -27,112 +24,105 @@ func NewSelectFunc[T, R any](state *StateWhere, table *Table[T], col, fun string
 	return s
 }
 
-func (s *StateSelect[T, R]) Count(col string) (int64, error) {
-	query := NewSelectFunc[T, ResultLong](s.StateWhere, s.table, col, "COUNT(%s)")
+func aggInt[T any](state *StateWhere, table *Table[T], col, fun string) (int64, error) {
+	query := NewSelectFunc[T, ResultLong](state, table, col, fun)
 	return FetchSingleResult(query)
+}
+
+func aggFloat[T any](state *StateWhere, table *Table[T], col, fun string) (float64, error) {
+	query := NewSelectFunc[T, ResultFloat](state, table, col, fun)
+	return FetchSingleResult(query)
+}
+
+func aggStr[T any](state *StateWhere, table *Table[T], col, fun string) ([]string, error) {
+	query := NewSelectFunc[T, ResultStr](state, table, col, fun)
+	return FetchArrayResult(query)
+}
+
+func (s *StateSelect[T, R]) Count(col string) (int64, error) {
+	return aggInt[T](s.StateWhere, s.table, col, "COUNT(%s)")
 }
 
 func (t *Table[T]) Count(col string) (int64, error) {
-	query := NewSelectFunc[T, ResultLong](nil, t, col, "COUNT(%s)")
-	return FetchSingleResult(query)
+	return aggInt[T](nil, t, col, "COUNT(%s)")
 }
 
 func (s *StateSelect[T, R]) Max(col string) (int64, error) {
-	query := NewSelectFunc[T, ResultLong](s.StateWhere, s.table, col, "MAX(%s)")
-	return FetchSingleResult(query)
+	return aggInt[T](s.StateWhere, s.table, col, "MAX(%s)")
 }
 
 func (t *Table[T]) Max(col string) (int64, error) {
-	query := NewSelectFunc[T, ResultLong](nil, t, col, "MAX(%s)")
-	return FetchSingleResult(query)
+	return aggInt[T](nil, t, col, "MAX(%s)")
 }
 
 func (s *StateSelect[T, R]) Min(col string) (int64, error) {
-	query := NewSelectFunc[T, ResultLong](s.StateWhere, s.table, col, "MIN(%s)")
-	return FetchSingleResult(query)
+	return aggInt[T](s.StateWhere, s.table, col, "MIN(%s)")
 }
 
 func (t *Table[T]) Min(col string) (int64, error) {
-	query := NewSelectFunc[T, ResultLong](nil, t, col, "MIN(%s)")
-	return FetchSingleResult(query)
+	return aggInt[T](nil, t, col, "MIN(%s)")
 }
 
 func (s *StateSelect[T, R]) Sum(col string) (int64, error) {
-	query := NewSelectFunc[T, ResultLong](s.StateWhere, s.table, col, "SUM(%s)")
-	return FetchSingleResult(query)
+	return aggInt[T](s.StateWhere, s.table, col, "SUM(%s)")
 }
 
 func (t *Table[T]) Sum(col string) (int64, error) {
-	query := NewSelectFunc[T, ResultLong](nil, t, col, "SUM(%s)")
-	return FetchSingleResult(query)
+	return aggInt[T](nil, t, col, "SUM(%s)")
 }
 
 func (s *StateSelect[T, R]) Avg(col string) (int64, error) {
-	query := NewSelectFunc[T, ResultLong](s.StateWhere, s.table, col, "AVG(%s)")
-	return FetchSingleResult(query)
+	return aggInt[T](s.StateWhere, s.table, col, "AVG(%s)")
 }
 
 func (t *Table[T]) Avg(col string) (int64, error) {
-	query := NewSelectFunc[T, ResultLong](nil, t, col, "AVG(%s)")
-	return FetchSingleResult(query)
+	return aggInt[T](nil, t, col, "AVG(%s)")
 }
 
 func (s *StateSelect[T, R]) MaxFloat(col string) (float64, error) {
-	query := NewSelectFunc[T, ResultFloat](s.StateWhere, s.table, col, "MAX(%s)")
-	return FetchSingleResult(query)
+	return aggFloat[T](s.StateWhere, s.table, col, "MAX(%s)")
 }
 
 func (t *Table[T]) MaxFloat(col string) (float64, error) {
-	query := NewSelectFunc[T, ResultFloat](nil, t, col, "MAX(%s)")
-	return FetchSingleResult(query)
+	return aggFloat[T](nil, t, col, "MAX(%s)")
 }
 
 func (s *StateSelect[T, R]) MinFloat(col string) (float64, error) {
-	query := NewSelectFunc[T, ResultFloat](s.StateWhere, s.table, col, "MIN(%s)")
-	return FetchSingleResult(query)
+	return aggFloat[T](s.StateWhere, s.table, col, "MIN(%s)")
 }
 
 func (t *Table[T]) MinFloat(col string) (float64, error) {
-	query := NewSelectFunc[T, ResultFloat](nil, t, col, "MIN(%s)")
-	return FetchSingleResult(query)
+	return aggFloat[T](nil, t, col, "MIN(%s)")
 }
 
 func (s *StateSelect[T, R]) SumFloat(col string) (float64, error) {
-	query := NewSelectFunc[T, ResultFloat](s.StateWhere, s.table, col, "SUM(%s)")
-	return FetchSingleResult(query)
+	return aggFloat[T](s.StateWhere, s.table, col, "SUM(%s)")
 }
 
 func (t *Table[T]) SumFloat(col string) (float64, error) {
-	query := NewSelectFunc[T, ResultFloat](nil, t, col, "SUM(%s)")
-	return FetchSingleResult(query)
+	return aggFloat[T](nil, t, col, "SUM(%s)")
 }
 
 func (s *StateSelect[T, R]) AvgFloat(col string) (float64, error) {
-	query := NewSelectFunc[T, ResultFloat](s.StateWhere, s.table, col, "AVG(%s)")
-	return FetchSingleResult(query)
+	return aggFloat[T](s.StateWhere, s.table, col, "AVG(%s)")
 }
 
 func (t *Table[T]) AvgFloat(col string) (float64, error) {
-	query := NewSelectFunc[T, ResultFloat](nil, t, col, "AVG(%s)")
-	return FetchSingleResult(query)
+	return aggFloat[T](nil, t, col, "AVG(%s)")
 }
 
 func (s *StateSelect[T, R]) ToUpper(col string) ([]string, error) {
-	query := NewSelectFunc[T, ResultStr](s.StateWhere, s.table, col, "UPPER(%s)")
-	return FetchArrayResult(query)
+	return aggStr[T](s.StateWhere, s.table, col, "UPPER(%s)")
 }
 
 func (t *Table[T]) ToUpper(col string) ([]string, error) {
-	query := NewSelectFunc[T, ResultStr](nil, t, col, "UPPER(%s)")
-	return FetchArrayResult(query)
+	return aggStr[T](nil, t, col, "UPPER(%s)")
 }
 
 func (s *StateSelect[T, R]) ToLower(col string) ([]string, error) {
-	query := NewSelectFunc[T, ResultStr](s.StateWhere, s.table, col, "LOWER(%s)")
-	return FetchArrayResult(query)
+	return aggStr[T](s.StateWhere, s.table, col, "LOWER(%s)")
 }
 
 func (t *Table[T]) ToLower(col string) ([]string, error) {
-	query := NewSelectFunc[T, ResultStr](nil, t, col, "LOWER(%s)")
-	return FetchArrayResult(query)
+	return aggStr[T](nil, t, col, "LOWER(%s)")
 }

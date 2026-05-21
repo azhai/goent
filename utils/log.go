@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"go/format"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -13,7 +14,7 @@ import (
 // If log file directory doesn't exist, it creates it
 // Returns the created logger or an error
 func CreateLogger(logFile string) (logger *slog.Logger, err error) {
-	var fh *os.File
+	var fh io.Writer
 	switch logFile {
 	case "":
 		return
@@ -32,6 +33,25 @@ func CreateLogger(logFile string) (logger *slog.Logger, err error) {
 	}
 	opts := &slog.HandlerOptions{AddSource: false}
 	logger = slog.New(slog.NewJSONHandler(fh, opts))
+	return
+}
+
+// CreateDailyLogger creates an slog.Logger with daily log rotation using preset defaults (7-day age, 7 backups).
+// compress: whether to gzip-compress rotated log files.
+func CreateDailyLogger(logFile string, compress bool) (logger *slog.Logger, err error) {
+	if logFile == "" {
+		return
+	}
+	if logFile == "/dev/null" {
+		logger = slog.New(slog.DiscardHandler)
+		return
+	}
+	if logFile == "stdout" || logFile == "stderr" {
+		return CreateLogger(logFile)
+	}
+	w := NewPresetRotateWriter(logFile, compress)
+	opts := &slog.HandlerOptions{AddSource: false}
+	logger = slog.New(slog.NewJSONHandler(w, opts))
 	return
 }
 

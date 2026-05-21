@@ -1222,7 +1222,7 @@ err := goent.QueryForeignByName(db.Product, "Category")
 err := goent.QueryForeignsByName(db.Product, "Category", "OrderDetails")
 
 // With transaction context
-err := goent.QueryForeignByNameCtx(ctx, db.Product, "Category")
+err := goent.QueryForeignByNameContext(ctx, db.Product, "Category")
 ```
 
 > [!NOTE]

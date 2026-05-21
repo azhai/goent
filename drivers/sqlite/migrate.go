@@ -126,87 +126,18 @@ func (dr *Driver) DropColumn(schema, table, column string) error {
 	return dr.rawExecContext(context.TODO(), dropColumn(table, column))
 }
 
-func renameColumn(table, oldColumnName, newColumnName string) string {
-	return fmt.Sprintf("ALTER TABLE %v RENAME COLUMN %v TO %v;\n", table, oldColumnName, newColumnName)
-}
-
-func dropColumn(table, columnName string) string {
-	return fmt.Sprintf("ALTER TABLE %v DROP COLUMN %v;\n", table, columnName)
-}
-
-func createTableSql(create, pks string, attributes []string, sql *strings.Builder) {
-	sql.WriteString(create)
-	for _, a := range attributes {
-		sql.WriteString(a)
-	}
-	sql.WriteString(pks)
-	sql.WriteString(");\n")
-}
-
-type dbColumn struct {
-	columnName   string
-	dataType     string
-	defaultValue *string
-	nullable     bool
-	migrated     bool
-}
-
-type dbTable struct {
-	columns map[string]*dbColumn
-}
-
 func checkTableChanges(b body) error {
-	sqlTableInfos := `SELECT
-	name AS column_name,
-	lower(type) AS data_type,
-	dflt_value AS column_default,
-	NOT "notnull" AS is_nullable
-	FROM pragma_table_info($1);
-	`
-
-	rows, err := b.conn.QueryContext(context.Background(), sqlTableInfos, b.table.Name)
+	dbTbl, err := getTableColumns(b.conn, b.table.Name)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-
-	dts := make(map[string]*dbColumn)
-	dt := dbColumn{}
-	for rows.Next() {
-		err = rows.Scan(&dt.columnName, &dt.dataType, &dt.defaultValue, &dt.nullable)
-		if err != nil {
-			return err
-		}
-
-		dts[dt.columnName] = &dbColumn{
-			columnName:   dt.columnName,
-			dataType:     dt.dataType,
-			defaultValue: dt.defaultValue,
-			nullable:     dt.nullable,
-		}
-	}
-	if len(dts) == 0 {
+	if len(dbTbl.columns) == 0 {
 		return nil
 	}
-	b.dbTable = dbTable{columns: dts}
+	b.dbTable = dbTbl
 	b.table.Migrated = true
 	checkFields(b)
 	return nil
-}
-
-func primaryKeyIsForeignKey(table *model.TableMigrate, attName string) bool {
-	return slices.ContainsFunc(table.ManyToSomes, func(m model.ManyToSomeMigrate) bool {
-		return m.Name == attName
-	}) || slices.ContainsFunc(table.OneToSomes, func(m model.OneToSomeMigrate) bool {
-		return m.Name == attName
-	})
-}
-
-func foreignKeyIsPrimarykey(table *model.TableMigrate, attName string) bool {
-	isSameName := func(m model.PrimaryKeyMigrate) bool {
-		return m.Name == attName
-	}
-	return slices.ContainsFunc(table.PrimaryKeys, isSameName)
 }
 
 func createTable(tbl *model.TableMigrate, dataMap map[string]*dataType, sql *strings.Builder, tables map[string]*model.TableMigrate, skipDependency bool) {
@@ -273,114 +204,16 @@ func createTable(tbl *model.TableMigrate, dataMap map[string]*dataType, sql *str
 	createTableSql(t.name, t.createPk, t.createAttrs, sql)
 }
 
-func setDefault(d string) string {
-	if d == "" {
-		return ""
-	}
-
-	return fmt.Sprintf("DEFAULT %v", d)
-}
-
-func foreignManyToSome(att model.ManyToSomeMigrate, dataMap map[string]*dataType) string {
-	att.DataType = checkDataType(att.DataType, dataMap).typeName
-	feature := "NULL"
-	if !att.Nullable {
-		feature = "NOT NULL"
-	}
-	return fmt.Sprintf("%v %v %v REFERENCES %v(%v),",
-		att.EscapingName, att.DataType, feature,
-		att.EscapingTargetTable, att.EscapingTargetColumn)
-}
-
-func foreignOneToSome(att model.OneToSomeMigrate, dataMap map[string]*dataType) string {
-	att.DataType = checkDataType(att.DataType, dataMap).typeName
-	feature := "NULL"
-	if !att.Nullable {
-		feature = "NOT NULL"
-	}
-	if !att.IsOneToMany {
-		feature = "UNIQUE " + feature
-	}
-	return fmt.Sprintf("%v %v %s REFERENCES %v(%v),",
-		att.EscapingName, att.DataType, feature,
-		att.EscapingTargetTable, att.EscapingTargetColumn)
-}
-
 type table struct {
 	name        string
 	createPk    string
 	createAttrs []string
 }
 
-type databaseIndex struct {
-	indexName string
-	unique    bool
-	attname   string
-	table     string
-	sql       string
-	migrated  bool
-}
-
 func checkIndex(indexes []model.IndexMigrate, table *model.TableMigrate, sql *strings.Builder, conn *sql.DB) error {
-
-	sqlQuery := `
-		WITH index_list AS (
-			SELECT
-				name AS index_name,
-				[unique] AS is_unique,
-				origin,
-				partial
-			FROM pragma_index_list($1)
-			WHERE origin = 'c'  -- only regular indexes, exclude pk and unique constraints
-		),
-		index_columns AS (
-			SELECT
-				il.index_name,
-				COALESCE(ii.name, '') AS column_name,
-				ii.seqno
-			FROM index_list il
-			JOIN pragma_index_info(il.index_name) ii
-		),
-		index_sql AS (
-			SELECT
-				name AS index_name,
-				sql  AS index_sql
-			FROM sqlite_master
-			WHERE type = 'index'
-		)
-		SELECT DISTINCT
-			il.index_name,
-			il.is_unique,
-			$1 AS table_name,
-			ic.column_name,
-			COALESCE(isql.index_sql, '')
-		FROM index_list il
-		JOIN index_columns ic
-			ON il.index_name = ic.index_name
-		LEFT JOIN index_sql isql
-			ON il.index_name = isql.index_name;
-	`
-
-	rows, err := conn.QueryContext(context.Background(), sqlQuery, table.Name)
+	dis, err := getTableIndexes(conn, table.Name)
 	if err != nil {
 		return err
-	}
-	defer rows.Close()
-
-	dis := make(map[string]*databaseIndex)
-	di := databaseIndex{}
-	for rows.Next() {
-		err = rows.Scan(&di.indexName, &di.unique, &di.table, &di.attname, &di.sql)
-		if err != nil {
-			return err
-		}
-		dis[di.indexName] = &databaseIndex{
-			indexName: di.indexName,
-			unique:    di.unique,
-			attname:   di.attname,
-			table:     di.table,
-			sql:       di.sql,
-		}
 	}
 
 	for i := range indexes {
@@ -411,33 +244,6 @@ func checkIndex(indexes []model.IndexMigrate, table *model.TableMigrate, sql *st
 	return nil
 }
 
-func createIndex(index model.IndexMigrate, table *model.TableMigrate) string {
-	return fmt.Sprintf("CREATE %v %v ON %v (%v);\n",
-		func() string {
-			if index.Unique {
-				return "UNIQUE INDEX"
-			}
-			return "INDEX"
-		}(),
-		index.EscapingName,
-		table.EscapingName,
-		func() string {
-			var s strings.Builder
-			if index.Func != "" {
-				s.WriteString(index.Func + "(")
-			}
-			s.WriteString(fmt.Sprintf("%v", index.Attributes[0].EscapingName))
-			for _, a := range index.Attributes[1:] {
-				s.WriteString(fmt.Sprintf(",%v", a.EscapingName))
-			}
-			if index.Func != "" {
-				s.WriteString(")")
-			}
-			return s.String()
-		}(),
-	)
-}
-
 func checkFields(b body) {
 	var alter bool
 	for _, att := range b.table.PrimaryKeys {
@@ -454,18 +260,15 @@ func checkFields(b body) {
 			}
 			if !att.AutoIncrement && column.defaultValue != nil {
 				if att.Default == "" {
-					// drop default
 					alter = true
 					break
 				}
 				if *column.defaultValue != att.Default {
-					// update default
 					alter = true
 					break
 				}
 			}
 			if att.Default != "" && column.defaultValue == nil {
-				// create default
 				alter = true
 				break
 			}
@@ -475,7 +278,6 @@ func checkFields(b body) {
 	for _, att := range b.table.OneToSomes {
 		if column, exist := b.dbTable.columns[att.Name]; exist {
 			column.migrated = true
-			// change from many to one to one to one
 			if unique := checkFkUnique(b.conn, b.table.Name, att.Name); !unique {
 				if foreignKeyIsPrimarykey(b.table, att.Name) {
 					continue
@@ -496,7 +298,6 @@ func checkFields(b body) {
 	for _, att := range b.table.ManyToSomes {
 		if column, exist := b.dbTable.columns[att.Name]; exist {
 			column.migrated = true
-			// change from one to one to many to one
 			if unique := checkFkUnique(b.conn, b.table.Name, att.Name); unique {
 				alter = true
 				break
@@ -524,16 +325,13 @@ func checkFields(b body) {
 			}
 			if column.defaultValue != nil {
 				if att.Default == "" {
-					// drop default
 					alter = true
 				}
 				if *column.defaultValue != setDefault(att.Default)[8:] {
-					// update default
 					alter = true
 				}
 			}
 			if att.Default != "" && column.defaultValue == nil {
-				// create default
 				alter = true
 			}
 			continue
@@ -556,7 +354,6 @@ func checkFields(b body) {
 	if alter {
 		alterSqlite(b)
 	}
-
 }
 
 func alterSqlite(b body) {
@@ -599,97 +396,4 @@ func tableAttributes(t *model.TableMigrate) (string, string) {
 	newColumns := sql.String()
 
 	return newColumns, newColumns
-}
-
-func checkFkUnique(conn *sql.DB, table, attribute string) bool {
-	sql := `
-	WITH index_list AS (
-		SELECT
-			name AS index_name,
-			[unique] AS is_unique,
-			origin,
-			partial
-		FROM pragma_index_list($1)
-		WHERE origin != 'pk'  -- exclude primary key
-	),
-	index_columns AS (
-		SELECT
-			il.index_name,
-			ii.name AS column_name,
-			ii.seqno
-		FROM index_list il
-		JOIN pragma_index_info(il.index_name) ii
-		WHERE ii.name = $2
-	)
-	SELECT DISTINCT
-		il.is_unique
-	FROM index_list il
-	JOIN index_columns ic ON il.index_name = ic.index_name;`
-
-	var b bool
-	row := conn.QueryRowContext(context.Background(), sql, table, attribute)
-	row.Scan(&b)
-	return b
-}
-
-func addColumn(table *model.TableMigrate, column string, dataType dataType, nullable bool) string {
-	if nullable {
-		return fmt.Sprintf("ALTER TABLE %v ADD COLUMN %v %v NULL;\n", table.EscapingTableName(), column, dataType.typeName)
-	}
-	return fmt.Sprintf("ALTER TABLE %v ADD COLUMN %v %v NOT NULL DEFAULT %v;\n", table.EscapingTableName(), column, dataType.typeName, dataType.zeroValue)
-}
-
-type dataType struct {
-	typeName  string
-	zeroValue string
-}
-
-func checkDataType(structDataType string, dataMap map[string]*dataType) dataType {
-	dt := dataType{typeName: structDataType}
-	switch structDataType {
-	case "int8", "uint8", "uint16":
-		dt = dataType{"int16", "0"}
-	case "int", "uint", "uint32":
-		dt = dataType{"int32", "0"}
-	case "uint64":
-		dt = dataType{"int64", "0"}
-	case "[16]uint8":
-		dt = dataType{"uuid", "'00000000-0000-0000-0000-000000000000'"}
-	}
-
-	if dataMap[dt.typeName] != nil {
-		return *dataMap[dt.typeName]
-	}
-
-	if strings.Contains(structDataType, "uuid.UUID") {
-		return dataType{"uuid", "'00000000-0000-0000-0000-000000000000'"}
-	}
-
-	for _, s := range []string{"number", "numeric", "decimal"} {
-		if strings.Contains(strings.ToLower(structDataType), s) {
-			return dataType{structDataType, "0"}
-		}
-	}
-
-	if strings.Contains(structDataType, "Decimal") {
-		return dataType{"decimal", "0"}
-	}
-
-	for _, s := range []string{"date", "time"} {
-		if strings.Contains(strings.ToLower(structDataType), s) {
-			return dataType{structDataType, "0000-01-01"}
-		}
-	}
-
-	for _, s := range []string{"char", "varchar", "text"} {
-		if strings.Contains(strings.ToLower(structDataType), s) {
-			return dataType{structDataType, "''"}
-		}
-	}
-
-	return dt
-}
-
-func dropIndex(_ *model.TableMigrate, idxName string) string {
-	return fmt.Sprintf("DROP INDEX IF EXISTS %v;", idxName) + "\n"
 }

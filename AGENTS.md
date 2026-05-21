@@ -39,7 +39,13 @@ goent/
 │   └── enum.go         # Query type and join type enumerations
 ├── drivers/            # Database drivers
 │   ├── pgsql/          # PostgreSQL driver
+│   │   ├── driver.go   # Driver implementation
+│   │   ├── migrate.go  # Migration logic
+│   │   └── schema.go   # DDL query functions and helpers
 │   └── sqlite/         # SQLite driver
+│       ├── driver.go   # Driver implementation
+│       ├── migrate.go  # Migration logic
+│       └── schema.go   # DDL query functions and helpers
 ├── utils/              # Utility functions
 └── example/            # Example usage
 ```
@@ -209,7 +215,8 @@ Key behaviors:
 
 ### Eager Loading with With()
 
-The `With()` method enables eager loading of foreign key relationships:
+The `With()` method enables eager loading of foreign key relationships.
+It runs a separate query after `All()` to populate the specified foreign fields:
 
 ```go
 // Load products with their categories
@@ -219,11 +226,11 @@ products, err := db.Product.Select().With("Category").All()
 products, err := db.Product.Select().With("Category", "OrderDetails").All()
 ```
 
-Standalone functions for more control:
-- `QueryForeignByName(table, name)` - Query a single relationship by name
-- `QueryForeignsByName(table, names...)` - Query multiple relationships
-- `QueryForeignByNameCtx(ctx, table, name)` - With transaction context
-- `QueryForeignsByNameCtx(ctx, table, names...)` - With transaction context
+Standalone functions for more control (require passing the query results explicitly):
+- `QueryForeignByName(table, rows, name)` - Query a single relationship by name
+- `QueryForeignsByName(table, rows, names...)` - Query multiple relationships
+- `QueryForeignByNameContext(ctx, table, rows, name)` - With transaction context
+- `QueryForeignsByNameContext(ctx, table, rows, names...)` - With transaction context
 
 ### IN Clause Batching with InBatch()
 
@@ -397,10 +404,10 @@ db.Default.Insert().One(&d)
 12. **Automatic use of generated code** - GoEnt automatically uses generated `ScanDest()` methods when available, providing performance improvements without manual changes
 13. **`Table.Filter()`/`Table.Where()` return `TableQuery[T]`** - Each call creates a new independent state, safe for concurrent use
 14. **Builder internal methods are private** - `buildHead`, `buildDoing`, `buildWhere`, `buildTail`, `buildJoins` are unexported
-15. **`With()` eager-loads foreign relationships** - Supports O2O, O2M, M2O, M2M; runs a separate query after `All()`
+15. **`With()` eager-loads foreign relationships** - Supports O2O, O2M, M2O, M2M; runs a separate query after `All()`, passing results directly to foreign key query functions
 16. **`InBatch()` splits large IN clauses** - Avoids SQLite 999 and PostgreSQL 65535 parameter limits
 17. **`GenSetForeign` interface for zero-reflection assignment** - Generated code can implement `SetForeign(name, value)` to bypass reflection
-18. **`QueryForeignByNameCtx`/`QueryForeignsByNameCtx` accept context** - Enables transaction-scoped foreign queries
+18. **`QueryForeignByNameContext`/`QueryForeignsByNameContext` accept context and rows** - Enables transaction-scoped foreign queries; rows parameter provides the records to populate
 
 ## Common Tasks
 

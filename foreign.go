@@ -66,13 +66,6 @@ func fieldByCachedIdx(valueOf reflect.Value, idx int) reflect.Value {
 // GetForeign retrieves the foreign key relationship between two tables
 // It searches by table name first, then by table address
 // Returns nil if no foreign key relationship is found
-//
-// Example:
-//
-//	foreign := GetForeign(userTable, addressTable)
-//	if foreign != nil {
-//		fmt.Println(foreign.Type) // prints O2O, O2M, M2O, or M2M
-//	}
 func GetForeign[T, R any](table *Table[T], refer *Table[R]) *Foreign {
 	name := refer.TableInfo.TableName
 	if foreign, ok := table.Foreigns[name]; ok {
@@ -87,20 +80,11 @@ func GetForeign[T, R any](table *Table[T], refer *Table[R]) *Foreign {
 	return nil
 }
 
-// QueryForeign queries and populates related records for a foreign key relationship
-// It automatically determines the relationship type and calls the appropriate query method
-// Returns nil if no foreign key relationship is found
-//
-// Example:
-//
-//	err := QueryForeign(orderTable, customerTable)
-//	if err != nil {
-//		log.Fatal(err)
-//	}
-//	for _, order := range orderTable.Cache.Each() {
-//		fmt.Println(order.Customer) // populated Customer struct
-//	}
-func QueryForeign[T, R any](table *Table[T], refer *Table[R]) error {
+// QueryForeign queries and populates related records for a foreign key relationship.
+// It automatically determines the relationship type and calls the appropriate query method.
+// The rows parameter contains the records whose foreign fields should be populated.
+// Returns nil if no foreign key relationship is found.
+func QueryForeign[T, R any](table *Table[T], refer *Table[R], rows []*T) error {
 	var foreign *Foreign
 	if foreign = GetForeign(table, refer); foreign == nil {
 		return nil
@@ -109,16 +93,16 @@ func QueryForeign[T, R any](table *Table[T], refer *Table[R]) error {
 	default:
 		return nil
 	case O2O:
-		_, err := QuerySome2One(foreign, table, refer)
+		_, err := QuerySome2One(foreign, table, refer, rows)
 		return err
 	case M2O:
-		_, err := QuerySome2One(foreign, table, refer)
+		_, err := QuerySome2One(foreign, table, refer, rows)
 		return err
 	case O2M:
-		_, err := QueryOne2Many(foreign, table, refer)
+		_, err := QueryOne2Many(foreign, table, refer, rows)
 		return err
 	case M2M:
-		_, err := QueryMany2Many(foreign, table, refer)
+		_, err := QueryMany2Many(foreign, table, refer, rows)
 		return err
 	}
 }
@@ -127,53 +111,34 @@ func QueryForeign[T, R any](table *Table[T], refer *Table[R]) error {
 // It looks up the foreign relationship by name in the table's Foreigns map,
 // then uses reflection to call the appropriate query method.
 // The name can be the foreign table name, field name, or column name.
-//
-// Example:
-//
-//	err := QueryForeignByName(db.Product, "t_category")
-//	err := QueryForeignByName(db.Product, "Category")
-//	err := QueryForeignByName(db.Product, "category_id")
-func QueryForeignByName[T any](table *Table[T], name string) error {
-	return QueryForeignByNameCtx(context.Background(), table, name)
+// The rows parameter contains the records whose foreign fields should be populated.
+func QueryForeignByName[T any](table *Table[T], rows []*T, name string) error {
+	return QueryForeignByNameContext(context.Background(), table, rows, name)
 }
 
-// QueryForeignByNameCtx queries and populates related records by foreign key name using the given context.
+// QueryForeignByNameContext queries and populates related records by foreign key name using the given context.
 // The context can carry a transaction for atomic operations.
-//
-// Example:
-//
-//	err := goent.WithTransaction(ctx, db, func(tx *goent.DB) error {
-//		return QueryForeignByNameCtx(ctx, db.Product, "Category")
-//	})
-func QueryForeignByNameCtx[T any](ctx context.Context, table *Table[T], name string) error {
+// The rows parameter contains the records whose foreign fields should be populated.
+func QueryForeignByNameContext[T any](ctx context.Context, table *Table[T], rows []*T, name string) error {
 	foreign := findForeignByName(table.Foreigns, name)
 	if foreign == nil {
 		return nil
 	}
-	return queryForeignReflect(ctx, foreign, table)
+	return queryForeignReflect(ctx, foreign, table, rows)
 }
 
 // QueryForeignsByName queries and populates multiple related records by foreign key names.
-// It iterates over the names and calls QueryForeignByName for each.
-//
-// Example:
-//
-//	err := QueryForeignsByName(db.Product, "Category", "OrderDetails")
-func QueryForeignsByName[T any](table *Table[T], names ...string) error {
-	return QueryForeignsByNameCtx(context.Background(), table, names...)
+// The rows parameter contains the records whose foreign fields should be populated.
+func QueryForeignsByName[T any](table *Table[T], rows []*T, names ...string) error {
+	return QueryForeignsByNameContext(context.Background(), table, rows, names...)
 }
 
-// QueryForeignsByNameCtx queries and populates multiple related records by foreign key names using the given context.
+// QueryForeignsByNameContext queries and populates multiple related records by foreign key names using the given context.
 // The context can carry a transaction for atomic operations.
-//
-// Example:
-//
-//	err := goent.WithTransaction(ctx, db, func(tx *goent.DB) error {
-//		return QueryForeignsByNameCtx(ctx, db.Product, "Category", "OrderDetails")
-//	})
-func QueryForeignsByNameCtx[T any](ctx context.Context, table *Table[T], names ...string) error {
+// The rows parameter contains the records whose foreign fields should be populated.
+func QueryForeignsByNameContext[T any](ctx context.Context, table *Table[T], rows []*T, names ...string) error {
 	for _, name := range names {
-		if err := QueryForeignByNameCtx(ctx, table, name); err != nil {
+		if err := QueryForeignByNameContext(ctx, table, rows, name); err != nil {
 			return err
 		}
 	}
@@ -195,8 +160,8 @@ func findForeignByName(foreigns map[string]*Foreign, name string) *Foreign {
 }
 
 // queryForeignReflect executes the appropriate foreign key query using reflection.
-func queryForeignReflect[T any](ctx context.Context, foreign *Foreign, table *Table[T]) error {
-	if table.Cache == nil || table.Cache.Size() == 0 {
+func queryForeignReflect[T any](ctx context.Context, foreign *Foreign, table *Table[T], rows []*T) error {
+	if len(rows) == 0 {
 		return nil
 	}
 	refInfo := GetTableInfo(foreign.Reference.TableAddr)
@@ -207,22 +172,22 @@ func queryForeignReflect[T any](ctx context.Context, foreign *Foreign, table *Ta
 	default:
 		return nil
 	case O2O, M2O:
-		return querySome2OneReflect(ctx, foreign, table, refInfo)
+		return querySome2OneReflect(ctx, foreign, table, refInfo, rows)
 	case O2M:
-		return queryOne2ManyReflect(ctx, foreign, table, refInfo)
+		return queryOne2ManyReflect(ctx, foreign, table, refInfo, rows)
 	case M2M:
-		return queryMany2ManyReflect(ctx, foreign, table, refInfo)
+		return queryMany2ManyReflect(ctx, foreign, table, refInfo, rows)
 	}
 }
 
 // querySome2OneReflect performs M2O/O2O query using reflection instead of generics for the refer table.
-func querySome2OneReflect[T any](ctx context.Context, foreign *Foreign, table *Table[T], refInfo *TableInfo) error {
+func querySome2OneReflect[T any](ctx context.Context, foreign *Foreign, table *Table[T], refInfo *TableInfo, rows []*T) error {
 	col := table.ColumnInfo(foreign.ForeignKey)
 	if col == nil {
 		return model.NewForeignKeyNotFoundError(foreign.ForeignKey)
 	}
-	reg := make(map[int64][]*T, table.Cache.Size())
-	for _, row := range table.Cache.Each() {
+	reg := make(map[int64][]*T, len(rows))
+	for _, row := range rows {
 		valueOf := reflect.ValueOf(row).Elem()
 		fieldOf := valueOf.Field(col.FieldId)
 		if key := fieldOf.Int(); key != 0 {
@@ -237,9 +202,9 @@ func querySome2OneReflect[T any](ctx context.Context, foreign *Foreign, table *T
 	if err != nil {
 		return err
 	}
-	for id, rows := range reg {
+	for id, matchedRows := range reg {
 		if val, ok := data[id]; ok {
-			for _, row := range rows {
+			for _, row := range matchedRows {
 				setForeignField(row, foreign.MountField, val.Interface())
 			}
 		}
@@ -277,10 +242,16 @@ func initForeignSlice(row any, foreign *Foreign) {
 }
 
 // queryOne2ManyReflect performs O2M query using reflection.
-func queryOne2ManyReflect[T any](ctx context.Context, foreign *Foreign, table *Table[T], refInfo *TableInfo) error {
-	reg := make(map[int64]*T, table.Cache.Size())
-	for id, row := range table.Cache.Each() {
-		reg[id] = row
+func queryOne2ManyReflect[T any](ctx context.Context, foreign *Foreign, table *Table[T], refInfo *TableInfo, rows []*T) error {
+	pkCol := table.ColumnInfo(table.PrimaryKeys[0].ColumnName)
+	reg := make(map[int64]*T, len(rows))
+	for _, row := range rows {
+		valueOf := reflect.ValueOf(row).Elem()
+		if pkCol != nil {
+			if id := valueOf.Field(pkCol.FieldId).Int(); id != 0 {
+				reg[id] = row
+			}
+		}
 		initForeignSlice(row, foreign)
 	}
 
@@ -292,11 +263,11 @@ func queryOne2ManyReflect[T any](ctx context.Context, foreign *Foreign, table *T
 	if err != nil {
 		return err
 	}
-	for id, rows := range data {
+	for id, refRows := range data {
 		if row, ok := reg[id]; ok {
 			sliceType := reflect.SliceOf(reflect.PtrTo(refInfo.modelType))
-			sliceVal := reflect.MakeSlice(sliceType, len(rows), len(rows))
-			for i, r := range rows {
+			sliceVal := reflect.MakeSlice(sliceType, len(refRows), len(refRows))
+			for i, r := range refRows {
 				sliceVal.Index(i).Set(r)
 			}
 			setForeignField(row, foreign.MountField, sliceVal.Interface())
@@ -306,17 +277,23 @@ func queryOne2ManyReflect[T any](ctx context.Context, foreign *Foreign, table *T
 }
 
 // queryMany2ManyReflect performs M2M query using reflection.
-func queryMany2ManyReflect[T any](ctx context.Context, foreign *Foreign, table *Table[T], refInfo *TableInfo) error {
+func queryMany2ManyReflect[T any](ctx context.Context, foreign *Foreign, table *Table[T], refInfo *TableInfo, rows []*T) error {
 	if foreign.Middle == nil {
 		return model.ErrMiddleTableNotSet
 	}
-	reg := make(map[int64]*T, table.Cache.Size())
-	for id, row := range table.Cache.Each() {
-		reg[id] = row
+	pkCol := table.ColumnInfo(table.PrimaryKeys[0].ColumnName)
+	reg := make(map[int64]*T, len(rows))
+	for _, row := range rows {
+		valueOf := reflect.ValueOf(row).Elem()
+		if pkCol != nil {
+			if id := valueOf.Field(pkCol.FieldId).Int(); id != 0 {
+				reg[id] = row
+			}
+		}
 		initForeignSlice(row, foreign)
 	}
 
-	middleData, err := QueryMiddleTable(foreign, table, foreign.Middle.Left, foreign.Middle.Right)
+	middleData, err := QueryMiddleTable(foreign, table, rows, foreign.Middle.Left, foreign.Middle.Right)
 	if err != nil {
 		return err
 	}
@@ -374,7 +351,6 @@ func selectReferMap(ctx context.Context, refInfo *TableInfo, filter Condition, p
 		if err = rows.Scan(dest...); err != nil {
 			return nil, err
 		}
-		CacheOneByAddr(refInfo.TableAddr, val.Interface())
 		if pkCol != nil {
 			pkField := val.Elem().Field(pkCol.FieldId)
 			result[pkField.Int()] = val
@@ -407,7 +383,6 @@ func selectReferRank(ctx context.Context, refInfo *TableInfo, filter Condition, 
 		if err = rows.Scan(dest...); err != nil {
 			return nil, err
 		}
-		CacheOneByAddr(refInfo.TableAddr, val.Interface())
 		if pkCol != nil {
 			pkField := val.Elem().Field(pkCol.FieldId)
 			result[pkField.Int()] = append(result[pkField.Int()], val)
@@ -416,25 +391,19 @@ func selectReferRank(ctx context.Context, refInfo *TableInfo, filter Condition, 
 	return result, rows.Err()
 }
 
-// selectReferMap queries and populates referenced records as a map keyed by primary key.
-// It returns a map of foreign key IDs to referenced records
-//
-// Example:
-//
-//	results, err := QuerySome2One(foreign, orderTable, customerTable)
-//	for id, customer := range results {
-//		fmt.Printf("Order %d: %s\n", id, customer.Name)
-//	}
-func QuerySome2One[T, R any](foreign *Foreign, table *Table[T], refer *Table[R]) (map[int64]*R, error) {
+// QuerySome2One queries and populates M2O/O2O relationships.
+// The rows parameter contains the records whose foreign fields should be populated.
+// It returns a map of foreign key IDs to referenced records.
+func QuerySome2One[T, R any](foreign *Foreign, table *Table[T], refer *Table[R], rows []*T) (map[int64]*R, error) {
 	col := table.ColumnInfo(foreign.ForeignKey)
 	if col == nil {
 		return nil, model.NewForeignKeyNotFoundError(foreign.ForeignKey)
 	}
-	if table.Cache == nil || table.Cache.Size() == 0 {
+	if len(rows) == 0 {
 		return nil, nil
 	}
-	reg := make(map[int64][]*T, table.Cache.Size())
-	for _, row := range table.Cache.Each() {
+	reg := make(map[int64][]*T, len(rows))
+	for _, row := range rows {
 		valueOf := reflect.ValueOf(row).Elem()
 		fieldOf := valueOf.Field(col.FieldId)
 		if key := fieldOf.Int(); key != 0 {
@@ -448,9 +417,9 @@ func QuerySome2One[T, R any](foreign *Foreign, table *Table[T], refer *Table[R])
 	if err != nil {
 		return data, err
 	}
-	for id, rows := range reg {
+	for id, matchedRows := range reg {
 		if val, ok := data[id]; ok {
-			for _, row := range rows {
+			for _, row := range matchedRows {
 				elem := reflect.ValueOf(row).Elem()
 				idx := foreign.getMountFieldIdx(elem)
 				field := fieldByCachedIdx(elem, idx)
@@ -463,22 +432,22 @@ func QuerySome2One[T, R any](foreign *Foreign, table *Table[T], refer *Table[R])
 	return data, err
 }
 
-// QueryOne2Many queries and populates one-to-many relationships
-// It returns a map of parent IDs to slices of child records
-//
-// Example:
-//
-//	results, err := QueryOne2Many(foreign, categoryTable, productTable)
-//	for catId, products := range results {
-//		fmt.Printf("Category %d has %d products\n", catId, len(products))
-//	}
-func QueryOne2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R]) (map[int64][]*R, error) {
-	if table.Cache == nil || table.Cache.Size() == 0 {
+// QueryOne2Many queries and populates one-to-many relationships.
+// The rows parameter contains the records whose foreign fields should be populated.
+// It returns a map of parent IDs to slices of child records.
+func QueryOne2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R], rows []*T) (map[int64][]*R, error) {
+	if len(rows) == 0 {
 		return nil, nil
 	}
-	reg := make(map[int64]*T, table.Cache.Size())
-	for id, row := range table.Cache.Each() {
-		reg[id] = row
+	pkCol := table.ColumnInfo(table.PrimaryKeys[0].ColumnName)
+	reg := make(map[int64]*T, len(rows))
+	for _, row := range rows {
+		valueOf := reflect.ValueOf(row).Elem()
+		if pkCol != nil {
+			if id := valueOf.Field(pkCol.FieldId).Int(); id != 0 {
+				reg[id] = row
+			}
+		}
 		elem := reflect.ValueOf(row).Elem()
 		idx := foreign.getMountFieldIdx(elem)
 		field := fieldByCachedIdx(elem, idx)
@@ -494,39 +463,39 @@ func QueryOne2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R])
 	if err != nil {
 		return data, err
 	}
-	for id, rows := range data {
+	for id, refRows := range data {
 		if row, ok := reg[id]; ok {
 			elem := reflect.ValueOf(row).Elem()
 			idx := foreign.getMountFieldIdx(elem)
 			field := fieldByCachedIdx(elem, idx)
 			if field.CanSet() {
-				field.Set(reflect.ValueOf(rows))
+				field.Set(reflect.ValueOf(refRows))
 			}
 		}
 	}
 	return data, err
 }
 
-// QueryMany2Many queries and populates many-to-many relationships
-// It uses the middle table to establish the relationship between two tables
-// Returns a map of left-side IDs to right-side records
-//
-// Example:
-//
-//	results, err := QueryMany2Many(foreign, studentTable, courseTable)
-//	for studentId, courses := range results {
-//		fmt.Printf("Student %d is enrolled in %d courses\n", studentId, len(courses))
-//	}
-func QueryMany2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R]) (map[int64]*R, error) {
+// QueryMany2Many queries and populates many-to-many relationships.
+// It uses the middle table to establish the relationship between two tables.
+// The rows parameter contains the records whose foreign fields should be populated.
+// Returns a map of left-side IDs to right-side records.
+func QueryMany2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R], rows []*T) (map[int64]*R, error) {
 	if foreign.Middle == nil {
 		return nil, model.ErrMiddleTableNotSet
 	}
-	if table.Cache == nil || table.Cache.Size() == 0 {
+	if len(rows) == 0 {
 		return nil, nil
 	}
-	reg := make(map[int64]*T, table.Cache.Size())
-	for id, row := range table.Cache.Each() {
-		reg[id] = row
+	pkCol := table.ColumnInfo(table.PrimaryKeys[0].ColumnName)
+	reg := make(map[int64]*T, len(rows))
+	for _, row := range rows {
+		valueOf := reflect.ValueOf(row).Elem()
+		if pkCol != nil {
+			if id := valueOf.Field(pkCol.FieldId).Int(); id != 0 {
+				reg[id] = row
+			}
+		}
 		elem := reflect.ValueOf(row).Elem()
 		idx := foreign.getMountFieldIdx(elem)
 		field := fieldByCachedIdx(elem, idx)
@@ -535,7 +504,7 @@ func QueryMany2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R]
 		}
 	}
 
-	middleData, err := QueryMiddleTable(foreign, table, foreign.Middle.Left, foreign.Middle.Right)
+	middleData, err := QueryMiddleTable(foreign, table, rows, foreign.Middle.Left, foreign.Middle.Right)
 	if err != nil {
 		return nil, err
 	}
@@ -574,24 +543,23 @@ func QueryMany2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R]
 	return data, err
 }
 
-// QueryMiddleTable queries the middle junction table for many-to-many relationships
-// It returns a map of left-side IDs to slices of right-side IDs
-//
-// Example:
-//
-//	mapping, err := QueryMiddleTable(foreign, studentTable, "student_id", "course_id")
-//	for studentId, courseIds := range mapping {
-//		fmt.Printf("Student %d is in courses: %v\n", studentId, courseIds)
-//	}
-func QueryMiddleTable[T any](foreign *Foreign, table *Table[T], leftCol, rightCol string) (map[int64][]int64, error) {
+// QueryMiddleTable queries the middle junction table for many-to-many relationships.
+// The rows parameter contains the records whose primary keys are used to query the junction table.
+// It returns a map of left-side IDs to slices of right-side IDs.
+func QueryMiddleTable[T any](foreign *Foreign, table *Table[T], rows []*T, leftCol, rightCol string) (map[int64][]int64, error) {
 	if foreign.Middle == nil {
 		return nil, model.ErrMiddleTableNotSet
 	}
 
-	size := table.Cache.Size()
-	pkIds := make([]int64, 0, size)
-	for id := range table.Cache.Each() {
-		pkIds = append(pkIds, id)
+	pkCol := table.ColumnInfo(table.PrimaryKeys[0].ColumnName)
+	pkIds := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		valueOf := reflect.ValueOf(row).Elem()
+		if pkCol != nil {
+			if id := valueOf.Field(pkCol.FieldId).Int(); id != 0 {
+				pkIds = append(pkIds, id)
+			}
+		}
 	}
 	if len(pkIds) == 0 {
 		return nil, nil
@@ -605,28 +573,28 @@ func QueryMiddleTable[T any](foreign *Foreign, table *Table[T], leftCol, rightCo
 	defer PutBuilder(builder)
 	builder.Type = model.SelectQuery
 	builder.SetTable(table.TableInfo, table.db.driver)
-	builder.Where, builder.Limit = filter, size
+	builder.Where, builder.Limit = filter, len(pkIds)
 	builder.VisitFields = []*Field{
 		{ColumnName: leftCol},
 		{ColumnName: rightCol},
 	}
 
 	sqlQuery, args := builder.Build(false)
-	rows, err := table.db.RawQueryContext(context.Background(), sqlQuery, args...)
+	dbRows, err := table.db.RawQueryContext(context.Background(), sqlQuery, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer dbRows.Close()
 
-	data := make(map[int64][]int64, size)
-	for rows.Next() {
+	data := make(map[int64][]int64, len(pkIds))
+	for dbRows.Next() {
 		var leftId, rightId int64
-		if err = rows.Scan(&leftId, &rightId); err != nil {
+		if err = dbRows.Scan(&leftId, &rightId); err != nil {
 			return nil, err
 		}
 		data[leftId] = append(data[leftId], rightId)
 	}
-	if err := rows.Err(); err != nil {
+	if err := dbRows.Err(); err != nil {
 		return nil, err
 	}
 	return data, nil

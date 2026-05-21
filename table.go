@@ -36,7 +36,6 @@ type TableInfo struct {
 	modelType     reflect.Type // modelType is the reflect.Type of the table's model struct.
 	driver        model.Driver // driver is the database driver for this table.
 	db            *DB          // db is the database connection for this table.
-	cacheOne      func(any)    // cacheOne caches a row in the typed table's Cache.
 }
 
 // String returns the table name as a string representation.
@@ -201,7 +200,6 @@ func (info TableInfo) setForeignReference(foreign *Foreign, refTableName string)
 // It provides methods for querying, inserting, updating, and deleting records.
 type Table[T any] struct {
 	Model *T
-	Cache *utils.CoMap[int64, T]
 	db    *DB
 	TableInfo
 }
@@ -402,24 +400,6 @@ func (t *Table[T]) Dest() (*T, []any) {
 }
 
 // ------------------------------
-// LoadOne/LoadAll ...
-// ------------------------------
-
-// CacheOne caches a single row in the table's cache using its ID as the key.
-func (t *Table[T]) CacheOne(obj any) (id int64) {
-	if row, ok := obj.(Entity); ok {
-		id = row.GetID()
-	} else {
-		return
-	}
-	if t.Cache == nil {
-		t.Cache = utils.NewCoMap[int64, T]()
-	}
-	t.Cache.Set(id, obj.(*T))
-	return
-}
-
-// ------------------------------
 // TableQuery ...
 // ------------------------------
 
@@ -475,68 +455,47 @@ func (q *TableQuery[T]) Delete() *StateDelete[T] {
 
 // Count counts the number of rows matching the query conditions.
 func (q *TableQuery[T]) Count(col string) (int64, error) {
-	query := NewSelectFunc[T, ResultLong](q.state, q.table, col, "COUNT(%s)")
-	return FetchSingleResult(query)
+	return aggInt[T](q.state, q.table, col, "COUNT(%s)")
 }
 
-// Max returns the maximum value of the specified column.
 func (q *TableQuery[T]) Max(col string) (int64, error) {
-	query := NewSelectFunc[T, ResultLong](q.state, q.table, col, "MAX(%s)")
-	return FetchSingleResult(query)
+	return aggInt[T](q.state, q.table, col, "MAX(%s)")
 }
 
-// Min returns the minimum value of the specified column.
 func (q *TableQuery[T]) Min(col string) (int64, error) {
-	query := NewSelectFunc[T, ResultLong](q.state, q.table, col, "MIN(%s)")
-	return FetchSingleResult(query)
+	return aggInt[T](q.state, q.table, col, "MIN(%s)")
 }
 
-// Sum returns the sum of the specified column.
 func (q *TableQuery[T]) Sum(col string) (int64, error) {
-	query := NewSelectFunc[T, ResultLong](q.state, q.table, col, "SUM(%s)")
-	return FetchSingleResult(query)
+	return aggInt[T](q.state, q.table, col, "SUM(%s)")
 }
 
-// Avg returns the average value of the specified column.
 func (q *TableQuery[T]) Avg(col string) (int64, error) {
-	query := NewSelectFunc[T, ResultLong](q.state, q.table, col, "AVG(%s)")
-	return FetchSingleResult(query)
+	return aggInt[T](q.state, q.table, col, "AVG(%s)")
 }
 
-// MaxFloat returns the maximum value as float64.
 func (q *TableQuery[T]) MaxFloat(col string) (float64, error) {
-	query := NewSelectFunc[T, ResultFloat](q.state, q.table, col, "MAX(%s)")
-	return FetchSingleResult(query)
+	return aggFloat[T](q.state, q.table, col, "MAX(%s)")
 }
 
-// MinFloat returns the minimum value as float64.
 func (q *TableQuery[T]) MinFloat(col string) (float64, error) {
-	query := NewSelectFunc[T, ResultFloat](q.state, q.table, col, "MIN(%s)")
-	return FetchSingleResult(query)
+	return aggFloat[T](q.state, q.table, col, "MIN(%s)")
 }
 
-// SumFloat returns the sum as float64.
 func (q *TableQuery[T]) SumFloat(col string) (float64, error) {
-	query := NewSelectFunc[T, ResultFloat](q.state, q.table, col, "SUM(%s)")
-	return FetchSingleResult(query)
+	return aggFloat[T](q.state, q.table, col, "SUM(%s)")
 }
 
-// AvgFloat returns the average as float64.
 func (q *TableQuery[T]) AvgFloat(col string) (float64, error) {
-	query := NewSelectFunc[T, ResultFloat](q.state, q.table, col, "AVG(%s)")
-	return FetchSingleResult(query)
+	return aggFloat[T](q.state, q.table, col, "AVG(%s)")
 }
 
-// ToUpper returns the uppercase values of the specified column.
 func (q *TableQuery[T]) ToUpper(col string) ([]string, error) {
-	query := NewSelectFunc[T, ResultStr](q.state, q.table, col, "UPPER(%s)")
-	return FetchArrayResult(query)
+	return aggStr[T](q.state, q.table, col, "UPPER(%s)")
 }
 
-// ToLower returns the lowercase values of the specified column.
 func (q *TableQuery[T]) ToLower(col string) ([]string, error) {
-	query := NewSelectFunc[T, ResultStr](q.state, q.table, col, "LOWER(%s)")
-	return FetchArrayResult(query)
+	return aggStr[T](q.state, q.table, col, "LOWER(%s)")
 }
 
 // ------------------------------
@@ -587,7 +546,7 @@ func (t *Table[T]) WhereContext(ctx context.Context, where string, args ...any) 
 //	}
 func (t *Table[T]) Drop() error {
 	if t.db != nil {
-		return Migrate(t.db).OnTable(t.TableName).DropTable()
+		return t.db.driver.DropTable("", t.TableName)
 	}
 	return model.ErrDBNotFound
 }
