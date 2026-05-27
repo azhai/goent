@@ -108,14 +108,10 @@ func (b *DeleteBuilder) Reset() {
 
 // SetTable sets the table for the DeleteBuilder
 // It formats the full table name including schema using the driver
-func (b *DeleteBuilder) SetTable(table TableInfo, driver model.Driver) *DeleteBuilder {
+func (b *DeleteBuilder) SetTable(table *TableInfo, driver model.Driver) *DeleteBuilder {
 	c := &b.core
 	c.Table = table.Table()
-	var schema string
-	if c.Table.Schema != nil {
-		schema = *c.Table.Schema
-	}
-	c.fullName = driver.FormatTableName(schema, c.Table.Name)
+	c.fullName = table.GetFormattedName()
 	return b
 }
 
@@ -337,14 +333,10 @@ func (b *Builder) sortedChanges() []*Field {
 
 // SetTable sets the table for the query builder
 // It formats the full table name including schema using the driver
-func (b *Builder) SetTable(table TableInfo, driver model.Driver) *Builder {
+func (b *Builder) SetTable(table *TableInfo, driver model.Driver) *Builder {
 	c := &b.core
 	c.Table = table.Table()
-	var schema string
-	if c.Table.Schema != nil {
-		schema = *c.Table.Schema
-	}
-	c.fullName = driver.FormatTableName(schema, c.Table.Name)
+	c.fullName = table.GetFormattedName()
 	return b
 }
 

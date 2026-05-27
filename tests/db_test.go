@@ -93,6 +93,19 @@ func FetchStatus() goent.FetchFunc {
 	}
 }
 
+// InsertValues returns a slice of values for bulk insert (excluding auto-increment primary key).
+func (t *Status) InsertValues() []any {
+	return []any{
+		t.Name,
+	}
+}
+
+// InsertChanges writes field values into the changes map for single insert without reflection.
+func (t *Status) InsertChanges(tableInfo *goent.TableInfo, changes map[*goent.Field]any) (string, any, int) {
+	changes[tableInfo.Field("name")] = t.Name
+	return "id", nil, 0
+}
+
 // User is a user in the system.
 type User struct {
 	Id        int    `goe:"pk"`

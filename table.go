@@ -36,6 +36,24 @@ type TableInfo struct {
 	modelType     reflect.Type // modelType is the reflect.Type of the table's model struct.
 	driver        model.Driver // driver is the database driver for this table.
 	db            *DB          // db is the database connection for this table.
+
+	// formattedName is the cached driver-formatted full table name (e.g. "public"."status").
+	formattedName string
+	// modelTable is the cached model.Table to avoid allocation on each SetTable call.
+	modelTable *model.Table
+	// cachedConn is the cached Connection to avoid allocation on each Prepare call.
+	cachedConn model.Connection
+	// cachedCfg is the cached DatabaseConfig pointer to avoid repeated GetDatabaseConfig calls.
+	cachedCfg *model.DatabaseConfig
+
+	// fetchByPK is the cached FetchFunc for FindByPK fast path.
+	fetchByPK FetchFunc
+	// connByPK is the cached Connection for FindByPK fast path.
+	connByPK model.Connection
+	// cfgByPK is the cached DatabaseConfig for FindByPK fast path.
+	cfgByPK *model.DatabaseConfig
+	// argsByPK is the cached arguments slice for FindByPK fast path.
+	argsByPK []any
 }
 
 // String returns the table name as a string representation.
@@ -45,15 +63,19 @@ func (info TableInfo) String() string {
 }
 
 // Table returns a model.Table representation with schema and table name.
-func (info TableInfo) Table() *model.Table {
+func (info *TableInfo) Table() *model.Table {
+	if info.modelTable != nil {
+		return info.modelTable
+	}
 	var schemaName *string
 	if info.SchemaName != "" {
 		schemaName = &info.SchemaName
 	}
-	return &model.Table{
+	info.modelTable = &model.Table{
 		Schema: schemaName,
 		Name:   info.TableName,
 	}
+	return info.modelTable
 }
 
 // ColumnInfo returns the Column metadata for a given column name.
@@ -133,6 +155,37 @@ func (info TableInfo) getFullName() string {
 		return info.SchemaName + "." + info.TableName
 	}
 	return info.TableName
+}
+
+// GetFormattedName returns the driver-formatted full table name, caching the result.
+func (info *TableInfo) GetFormattedName() string {
+	if info.formattedName != "" {
+		return info.formattedName
+	}
+	if info.driver != nil {
+		info.formattedName = info.driver.FormatTableName(info.SchemaName, info.TableName)
+	} else {
+		info.formattedName = info.getFullName()
+	}
+	return info.formattedName
+}
+
+// GetConnection returns a cached Connection, creating one if necessary.
+func (info *TableInfo) GetConnection() model.Connection {
+	if info.cachedConn != nil {
+		return info.cachedConn
+	}
+	info.cachedConn = info.driver.NewConnection()
+	return info.cachedConn
+}
+
+// GetConfig returns a cached DatabaseConfig pointer.
+func (info *TableInfo) GetConfig() *model.DatabaseConfig {
+	if info.cachedCfg != nil {
+		return info.cachedCfg
+	}
+	info.cachedCfg = info.driver.GetDatabaseConfig()
+	return info.cachedCfg
 }
 
 func (info *TableInfo) GetSelectByPKSql() string {
@@ -221,6 +274,7 @@ func SimpleTable[T any](db *DB, tableName, SchemaName string) *Table[T] {
 			TableName:   tableName,
 			SchemaName:  SchemaName,
 			simpleTable: true,
+			driver:      db.driver,
 		},
 	}
 }
@@ -675,6 +729,59 @@ func (t *Table[T]) UpdateContext(ctx context.Context) *StateUpdate[T] {
 //	users, err := db.User.Select("id", "name", "email").All()
 func (t *Table[T]) Select(fields ...any) *StateSelect[T, T] {
 	return t.SelectContext(context.Background(), fields...)
+}
+
+// FindByPK selects a single row by primary key using a fast path that bypasses Builder creation.
+// This is the most optimized path for simple primary key lookups - no Builder, no StateSelect,
+// no object allocation beyond the result struct. Uses cached SQL and cached FetchFunc.
+// Only works for tables with a single primary key column.
+func (t *Table[T]) FindByPK(id int64) (*T, error) {
+	return t.FindByPKContext(context.Background(), id)
+}
+
+// FindByPKContext selects a single row by primary key with a specific context.
+func (t *Table[T]) FindByPKContext(ctx context.Context, id int64) (*T, error) {
+	sql := t.GetSelectByPKSql()
+	if sql == "" {
+		return nil, model.ErrNoPrimaryKey
+	}
+	if t.fetchByPK == nil {
+		t.fetchByPK = t.newFetchByPKFunc()
+		t.connByPK = t.db.driver.NewConnection()
+		t.cfgByPK = t.db.driver.GetDatabaseConfig()
+		t.argsByPK = []any{id}
+	} else {
+		t.argsByPK[0] = id
+	}
+	qr := model.Query{RawSql: sql, Arguments: t.argsByPK}
+	row := t.connByPK.QueryRowContext(ctx, &qr)
+	if row == nil {
+		return nil, model.ErrNoRows
+	}
+	target := new(T)
+	if err := row.Scan(t.fetchByPK(target)...); err != nil {
+		return nil, err
+	}
+	return target, nil
+}
+
+// newFetchByPKFunc creates a FetchFunc for the FindByPK fast path.
+// It uses GenScanDest if available, otherwise falls back to reflection.
+func (t *Table[T]) newFetchByPKFunc() FetchFunc {
+	if _, ok := any(new(T)).(GenScanDest); ok {
+		return func(target any) []any {
+			return target.(GenScanDest).ScanDest()
+		}
+	}
+	fields := t.GetSortedFields()
+	return func(target any) []any {
+		valueOf := reflect.ValueOf(target).Elem()
+		dest := make([]any, len(fields))
+		for i, fld := range fields {
+			dest[i] = valueOf.Field(fld.FieldId).Addr().Interface()
+		}
+		return dest
+	}
 }
 
 // SelectContext creates a new StateSelect with a specific context.

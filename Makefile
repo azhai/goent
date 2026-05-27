@@ -24,7 +24,8 @@ BINFILES = $(SINGLETON) $(COMMANDS)
 
 one:
 	@echo "Compile one ($(GOOS)/$(GOARCH)) ..."
-	for one in $(BINFILES); do \
+	CGO_ENABLED=1 $(GOBUILD) -o ./bin/$(SINGLETON) ./
+	for one in $(COMMANDS); do \
 		CGO_ENABLED=1 $(GOBUILD) -o ./bin/$$one ./cmd/$$one; \
 	done
 

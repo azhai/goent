@@ -23,14 +23,14 @@ type StateUpdate[T any] struct {
 //	err := db.User.Where("id = ?", 1).Update().Set(change).Exec()
 func (s *StateUpdate[T]) Exec() error {
 	defer PutBuilder(s.builder)
-	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
+	s.builder.SetTable(&s.table.TableInfo, s.table.db.driver)
 	sql, args := s.builder.Build(true)
 	if sql == "" {
 		return fmt.Errorf("goent: StateUpdate.Exec built empty SQL (Type=%d, Changes=%d, Where=%v, args=%v)",
 			s.builder.Type, len(s.builder.Changes), !s.builder.core.Where.IsEmpty(), args)
 	}
 	qr := model.CreateQuery(sql, args)
-	conn, cfg := s.Prepare(s.table.db.driver)
+	conn, cfg := s.PrepareWithCache(&s.table.TableInfo)
 	return qr.WrapExec(s.ctx, conn, cfg)
 }
 
@@ -152,13 +152,13 @@ func (s *StateUpdate[T]) Join(joinType model.JoinType, info TableInfo, on Condit
 //	err := db.User.Update().LeftJoin("role_id", refer).Set(change).Exec()
 func (s *StateUpdate[T]) LeftJoin(fkey string, refer *Field) *StateUpdate[T] {
 	info := GetTableInfo(refer.TableAddr)
-	
+
 	// Check if the column exists in the main table
 	col := s.table.ColumnInfo(fkey)
 	if col == nil {
 		panic("column " + fkey + " not found in table " + s.table.TableName)
 	}
-	
+
 	leftField := s.table.sortedFields[col.FieldId]
 	return s.Join(model.LeftJoin, *info, EqualsField(leftField, refer))
 }

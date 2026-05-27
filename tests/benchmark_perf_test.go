@@ -1,12 +1,15 @@
 package goent_test
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sync"
 	"testing"
 
 	"github.com/azhai/goent"
+	"github.com/azhai/goent/utils"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // =============================================
@@ -304,6 +307,22 @@ func BenchmarkSelectOne(b *testing.B) {
 	}
 }
 
+func BenchmarkFindByPK(b *testing.B) {
+	db, err := Setup()
+	if err != nil {
+		b.Skipf("Skipping: %v", err)
+		return
+	}
+	db.Status.Delete().Exec()
+	s := &Status{Name: "Test"}
+	db.Status.Insert().One(s)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		_, _ = db.Status.FindByPK(s.ID)
+	}
+}
+
 func BenchmarkSelectFilter(b *testing.B) {
 	db, err := Setup()
 	if err != nil {
@@ -553,4 +572,51 @@ func BenchmarkDeleteBuilderPoolStress(b *testing.B) {
 		}()
 	}
 	wg.Wait()
+}
+
+// =============================================
+// Raw pgxpool comparison for select-one
+// =============================================
+
+func getDSN() string {
+	env := utils.NewEnvWithFile("../.env")
+	dsn := env.Get("POSTGRES_DSN")
+	if dsn == "" {
+		dsn = env.Get("DB_DSN")
+	}
+	return dsn
+}
+
+func BenchmarkRawPgxPoolSelectOne(b *testing.B) {
+	dsn := getDSN()
+	if dsn == "" {
+		b.Skip("Skipping: no DSN")
+		return
+	}
+	pool, err := pgxpool.New(context.Background(), dsn)
+	if err != nil {
+		b.Skipf("Skipping: %v", err)
+		return
+	}
+	defer pool.Close()
+
+	// Insert a test row
+	var id int64
+	err = pool.QueryRow(context.Background(),
+		"INSERT INTO status (name) VALUES ($1) RETURNING id", "Test").Scan(&id)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	sql := "SELECT * FROM status WHERE id = $1"
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		var s Status
+		err := pool.QueryRow(context.Background(), sql, id).Scan(&s.ID, &s.Name)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
 }

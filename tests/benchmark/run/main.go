@@ -24,9 +24,10 @@ const (
 	selectOne    = "select-one"
 	selectPage   = "select-page"
 
-	rawName   = "raw"
-	goentName = "goent"
-	goeName   = "goe"
+	rawName     = "raw"
+	rawPgxName  = "raw-pgx"
+	goentName   = "goent"
+	goeName     = "goe"
 )
 
 var (
@@ -36,6 +37,7 @@ var (
 
 func loadBenchmarks() {
 	benchmarksMap[rawName] = benchmark.NewRawBenchmark()
+	benchmarksMap[rawPgxName] = benchmark.NewRawPgxPoolBenchmark()
 	benchmarksMap[goentName] = benchmark.NewGoentBenchmark()
 	benchmarksMap[goeName] = benchmark.NewGoeBenchmark()
 }

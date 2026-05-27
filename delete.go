@@ -29,7 +29,7 @@ func (s *StateDelete[T]) Match(obj T) *StateDelete[T] {
 // Exec executes the DELETE query
 // It builds and runs the DELETE statement with the specified conditions
 func (s *StateDelete[T]) Exec() error {
-	s.builder.SetTable(s.table.TableInfo, s.table.db.driver)
+	s.builder.SetTable(&s.table.TableInfo, s.table.db.driver)
 	sql, args := s.builder.Build()
 	if sql == "" {
 		defer PutDeleteBuilder(s.builder)
@@ -38,7 +38,7 @@ func (s *StateDelete[T]) Exec() error {
 	}
 	qr := model.CreateQuery(sql, args)
 	defer PutDeleteBuilder(s.builder)
-	conn, cfg := s.Prepare(s.table.db.driver)
+	conn, cfg := s.PrepareWithCache(&s.table.TableInfo)
 	return qr.WrapExec(s.ctx, conn, cfg)
 }
 
@@ -50,7 +50,7 @@ func (s *StateDelete[T]) ByPK(id int64) error {
 	if sql == "" {
 		return model.ErrNoPrimaryKey
 	}
-	conn, cfg := s.Prepare(s.table.db.driver)
+	conn, cfg := s.PrepareWithCache(&s.table.TableInfo)
 	qr := model.CreateQuery(sql, []any{id})
 	return qr.WrapExec(s.ctx, conn, cfg)
 }
@@ -135,6 +135,15 @@ func (s *StateDeleteWhere) Prepare(drv model.Driver) (model.Connection, *model.D
 	return s.conn, drv.GetDatabaseConfig()
 }
 
+// PrepareWithCache returns a connection and config, using cached values from TableInfo
+// when no transaction is set, or the transaction connection when one is set.
+func (s *StateDeleteWhere) PrepareWithCache(info *TableInfo) (model.Connection, *model.DatabaseConfig) {
+	if s.conn != nil {
+		return s.conn, info.GetConfig()
+	}
+	return info.GetConnection(), info.GetConfig()
+}
+
 // StateWhere represents a query state with WHERE clause building capabilities
 // It provides methods for constructing WHERE clauses for various query types
 type StateWhere struct {
@@ -175,6 +184,15 @@ func (s *StateWhere) Prepare(drv model.Driver) (model.Connection, *model.Databas
 		s.conn = drv.NewConnection()
 	}
 	return s.conn, drv.GetDatabaseConfig()
+}
+
+// PrepareWithCache returns a connection and config, using cached values from TableInfo
+// when no transaction is set, or the transaction connection when one is set.
+func (s *StateWhere) PrepareWithCache(info *TableInfo) (model.Connection, *model.DatabaseConfig) {
+	if s.conn != nil {
+		return s.conn, info.GetConfig()
+	}
+	return info.GetConnection(), info.GetConfig()
 }
 
 // MatchData matches the non-zero fields of the given object to a dictionary of column names and values

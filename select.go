@@ -35,7 +35,7 @@ func NewStateSelectFrom[T, R any](state *StateWhere, table *Table[T]) *StateSele
 		state = NewStateWhere(ctx)
 	}
 	state.builder.Type = model.SelectQuery
-	state.builder.SetTable(table.TableInfo, table.db.driver)
+	state.builder.SetTable(&table.TableInfo, table.db.driver)
 	sorted := table.GetSortedFields()
 	visitFields := make([]*Field, len(sorted))
 	copy(visitFields, sorted)
@@ -98,7 +98,7 @@ func (s *StateSelect[T, R]) FetchRow(qr model.Query, to FetchFunc) (*R, error) {
 	if to == nil {
 		to = s.getFetchFunc()
 	}
-	conn, cfg := s.Prepare(s.table.db.driver)
+	conn, cfg := s.PrepareWithCache(&s.table.TableInfo)
 	row, err := qr.WrapQueryRow(s.ctx, conn, cfg)
 	if err != nil || row == nil {
 		return nil, err
@@ -124,7 +124,9 @@ func (s *StateSelect[T, R]) One() (obj *R, err error) {
 // ByPK selects a single row by primary key using cached SQL.
 // This is an optimized path that bypasses query building for simple primary key lookups.
 // Only works for tables with a single primary key column.
+// For maximum performance, use Table.FindByPK() instead which also avoids Builder allocation.
 func (s *StateSelect[T, R]) ByPK(id int64) (*R, error) {
+	defer PutBuilder(s.builder)
 	sql := s.table.GetSelectByPKSql()
 	if sql == "" {
 		return nil, model.ErrNoPrimaryKey
@@ -141,7 +143,7 @@ func (s *StateSelect[T, R]) IterRows(to FetchFunc) iter.Seq2[*R, error] {
 	}
 	qr := model.CreateQuery(s.builder.Build(false))
 	builder := s.builder
-	conn, cfg := s.Prepare(s.table.db.driver)
+	conn, cfg := s.PrepareWithCache(&s.table.TableInfo)
 	hd := NewHandler(s.ctx, conn, cfg)
 	seq := FetchResult[R](hd, qr, to)
 	return func(yield func(*R, error) bool) {
@@ -379,13 +381,13 @@ func (s *StateSelect[T, R]) Join(joinType model.JoinType, info TableInfo, on Con
 func (s *StateSelect[T, R]) LeftJoin(fkey string, refer *Field) *StateSelect[T, R] {
 	info := GetTableInfo(refer.TableAddr)
 	var leftField *Field
-	
+
 	// Try to find the column in the main table first
 	col := s.table.ColumnInfo(fkey)
 	if col != nil {
 		leftField = s.table.sortedFields[col.FieldId]
 	}
-	
+
 	// If not found in main table, try the last joined table
 	if leftField == nil && len(s.builder.Joins) > 0 {
 		lastJoin := s.builder.Joins[len(s.builder.Joins)-1]
@@ -398,15 +400,15 @@ func (s *StateSelect[T, R]) LeftJoin(fkey string, refer *Field) *StateSelect[T, 
 			leftField = leftTableInfo.sortedFields[col.FieldId]
 		}
 	}
-	
+
 	if leftField == nil {
 		panic("column " + fkey + " not found in main table or last join table")
 	}
-	
+
 	if info == nil {
 		panic("failed to get table info for join")
 	}
-	
+
 	s.Join(model.LeftJoin, *info, EqualsField(leftField, refer))
 	s.builder.VisitFields = append(s.builder.VisitFields, info.GetSortedFields()...)
 	return s

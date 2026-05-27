@@ -53,3 +53,15 @@ func (t *Book) UpdatePairs() []goent.Pair {
 		{Key: "publicized_at", Value: t.PublicizedAt},
 	}
 }
+
+// InsertValues returns a slice of values for bulk insert (excluding auto-increment primary key).
+func (t *Book) InsertValues() []any {
+	return []any{
+		t.ISBN,
+		t.Title,
+		t.Author,
+		t.Genre,
+		t.Quantity,
+		t.PublicizedAt,
+	}
+}

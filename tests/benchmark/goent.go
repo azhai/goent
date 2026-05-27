@@ -149,7 +149,7 @@ func (o *GoentBenchmark) FindByID(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		for range tools.FindOneLoop {
-			_, err = o.db.Book.Select().ByPK(book.ID)
+			_, err = o.db.Book.FindByPK(book.ID)
 
 			b.StopTimer()
 			if err != nil {
