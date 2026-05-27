@@ -24,7 +24,7 @@ func TestDelete(t *testing.T) {
 		{
 			desc: "Delete_Animal",
 			testCase: func(t *testing.T) {
-				// 清理旧数据
+				// Clean up old data
 				db.Animal.Delete().Exec()
 				t.Cleanup(func() {
 					db.Animal.Delete().Exec()
@@ -121,7 +121,7 @@ func TestDelete(t *testing.T) {
 		{
 			desc: "Delete_Animal_Filter",
 			testCase: func(t *testing.T) {
-				// 清理旧数据
+				// Clean up old data
 				db.Animal.Delete().Exec()
 				t.Cleanup(func() {
 					db.Animal.Delete().Exec()

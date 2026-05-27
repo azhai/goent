@@ -394,7 +394,7 @@ func TestUpdate(t *testing.T) {
 		{
 			desc: "Update_PersonJobs_Tx_Rollback",
 			testCase: func(t *testing.T) {
-				// 在事务外插入初始数据，这些数据不会随事务回滚
+				// Insert initial data outside transaction (won't roll back)
 				persons := []*Person{
 					{Name: "Jhon"},
 					{Name: "Laura"},
@@ -418,7 +418,7 @@ func TestUpdate(t *testing.T) {
 					db.JobTitle.Delete().Exec()
 				})
 
-				// 在事务外插入初始的 personJobs 数据（2条记录对应 jobs[0]）
+				// Insert initial personJobs data outside transaction (2 records for jobs[0])
 				personJobs := []*PersonJobTitle{
 					{PersonId: persons[0].Id, JobTitleId: jobs[0].Id, CreatedAt: time.Now()},
 					{PersonId: persons[1].Id, JobTitleId: jobs[0].Id, CreatedAt: time.Now()},
@@ -436,7 +436,7 @@ func TestUpdate(t *testing.T) {
 				}
 				defer tx.Rollback()
 
-				// 在事务内插入第3条记录（person[2] -> jobs[1]）
+				// Insert 3rd record inside transaction (person[2] -> jobs[1])
 				pj3 := &PersonJobTitle{
 					PersonId:   persons[2].Id,
 					JobTitleId: jobs[1].Id,
@@ -446,7 +446,7 @@ func TestUpdate(t *testing.T) {
 					t.Fatalf("Expected insert personJob, got error: %v", err)
 				}
 
-				// 验证事务内 jobs[0] 的计数为 2（初始的2条，pj3 指向 jobs[1]）
+				// Verify jobs[0] count is 2 inside transaction (initial 2 records, pj3 points to jobs[1])
 				count1, err := db.PersonJobTitle.Filter(
 					goent.Equals(db.PersonJobTitle.Field("job_title_id"), jobs[0].Id),
 				).OnTransaction(tx).Count("person_id")
@@ -457,7 +457,7 @@ func TestUpdate(t *testing.T) {
 					t.Errorf("Expected %v records for job[0], got: %v", 2, count1)
 				}
 
-				// 更新 person[2] 的 job 从 jobs[1] 到 jobs[0]
+				// Update person[2]'s job from jobs[1] to jobs[0]
 				if err := db.PersonJobTitle.Update().OnTransaction(tx).
 					Set(goent.Pair{Key: "job_title_id", Value: jobs[0].Id}).
 					Filter(
@@ -469,7 +469,7 @@ func TestUpdate(t *testing.T) {
 					t.Fatalf("Expected a update, got error: %v", err)
 				}
 
-				// 验证更新后 - jobs[0] 的计数应为 3
+				// Verify after update - jobs[0] count should be 3
 				count2, err := db.PersonJobTitle.Filter(
 					goent.Equals(db.PersonJobTitle.Field("job_title_id"), jobs[0].Id),
 				).OnTransaction(tx).Count("person_id")
@@ -480,12 +480,12 @@ func TestUpdate(t *testing.T) {
 					t.Errorf("Expected %v records for job[0], got: %v", 3, count2)
 				}
 
-				// 回滚事务
+				// Rollback transaction
 				if err := tx.Rollback(); err != nil {
 					t.Fatalf("Expected Rollback, got error: %v", err)
 				}
 
-				// 回滚后，计数应恢复为 2
+				// After rollback, count should be 2
 				count3, err := db.PersonJobTitle.Filter(
 					goent.Equals(db.PersonJobTitle.Field("job_title_id"), jobs[0].Id),
 				).Count("person_id")
@@ -500,7 +500,7 @@ func TestUpdate(t *testing.T) {
 		{
 			desc: "Update_Animal_Db_Tx_Commit",
 			testCase: func(t *testing.T) {
-				// 清理旧数据
+				// Clean up old data
 				db.Animal.Delete().Exec()
 				db.Weather.Delete().Exec()
 				db.Habitat.Delete().Exec()
@@ -528,7 +528,7 @@ func TestUpdate(t *testing.T) {
 					as := Animal{
 						Name: "Dog",
 					}
-					// 嵌套事务，回滚
+					// Nested transaction, rollback
 					goent.RunTransaction(tx, func(tx2 model.Transaction) error {
 						if err := db.Animal.Insert().OnTransaction(tx2).One(&as); err != nil {
 							return err
@@ -538,12 +538,12 @@ func TestUpdate(t *testing.T) {
 						}
 						return errors.New("rollback")
 					})
-					// 嵌套事务回滚后，外层事务看不到 Dog
+					// After nested transaction rollback, outer transaction cannot see Dog
 					if _, err := db.Animal.Select().OnTransaction(tx).Match(as).One(); !errors.Is(err, model.ErrNoRows) {
 						t.Fatalf("Expected model.ErrNoRows, got: %v", err)
 					}
 
-					// 嵌套事务，提交
+					// Nested transaction, commit
 					goent.RunTransaction(tx, func(tx3 model.Transaction) error {
 						if err := db.Animal.Insert().OnTransaction(tx3).One(&as); err != nil {
 							return err
@@ -554,7 +554,7 @@ func TestUpdate(t *testing.T) {
 						return nil
 					})
 
-					// 嵌套事务提交后，外层事务可以看到 Dog
+					// After nested transaction commit, outer transaction can see Dog
 					if _, err := db.Animal.Select().OnTransaction(tx).Match(as).One(); err != nil {
 						return err
 					}
@@ -574,7 +574,7 @@ func TestUpdate(t *testing.T) {
 						return err
 					}
 
-					// 事务内查询，应该能找到
+					// Query inside transaction, should find it
 					if _, err := db.Animal.Select().OnTransaction(tx).Match(Animal{Id: a.Id}).One(); err != nil {
 						return err
 					}
@@ -586,7 +586,7 @@ func TestUpdate(t *testing.T) {
 					t.Fatalf("Expected tx, got error: %v", err)
 				}
 
-				// 事务提交后，查询应该能找到更新的记录
+				// After transaction commit, query should find updated record
 				aselect, err := db.Animal.Select().Match(Animal{Id: a.Id}).One()
 				if err != nil {
 					t.Fatalf("Expected find, got error: %v", err)
@@ -603,7 +603,7 @@ func TestUpdate(t *testing.T) {
 		{
 			desc: "Update_PersonJobs",
 			testCase: func(t *testing.T) {
-				// 清理旧数据
+				// Clean up old data
 				db.Person.Delete().Exec()
 				db.JobTitle.Delete().Exec()
 				db.PersonJobTitle.Delete().Exec()
@@ -639,7 +639,7 @@ func TestUpdate(t *testing.T) {
 					t.Fatalf("Expected insert personJobs, got error: %v", err)
 				}
 
-				// 验证初始计数：jobs[0] 有 2 条记录
+				// Verify initial count: jobs[0] has 2 records
 				count1, err := db.PersonJobTitle.Filter(
 					goent.Equals(db.PersonJobTitle.Field("job_title_id"), jobs[0].Id),
 				).Count("person_id")
@@ -650,7 +650,7 @@ func TestUpdate(t *testing.T) {
 					t.Errorf("Expected %v records for job[0], got: %v", 2, count1)
 				}
 
-				// 更新 person[2] 的 job 从 jobs[1] 到 jobs[0]
+				// Update person[2]'s job from jobs[1] to jobs[0]
 				if err := db.PersonJobTitle.Update().Set(goent.Pair{Key: "job_title_id", Value: jobs[0].Id}).
 					Filter(
 						goent.And(
@@ -661,7 +661,7 @@ func TestUpdate(t *testing.T) {
 					t.Fatalf("Expected a update, got error: %v", err)
 				}
 
-				// 验证更新后：jobs[0] 有 3 条记录
+				// Verify after update: jobs[0] has 3 records
 				count2, err := db.PersonJobTitle.Filter(
 					goent.Equals(db.PersonJobTitle.Field("job_title_id"), jobs[0].Id),
 				).Count("person_id")
