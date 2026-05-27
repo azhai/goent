@@ -39,6 +39,7 @@ type Foreign struct {
 	Reference  *Field      // Reference field in the related table
 	Middle     *ThirdParty // Intermediate table for many-to-many relationships
 	Where      Condition   // WHERE clause for filtering
+	RefType    string      // Type name of the referenced struct (e.g. "Contributor" for AssigneeID)
 
 	mountFieldIdx int // Cached field index for MountField (0 = not cached)
 }
@@ -164,6 +165,9 @@ func queryForeignReflect[T any](ctx context.Context, foreign *Foreign, table *Ta
 	if len(rows) == 0 {
 		return nil
 	}
+	if foreign.Reference == nil {
+		return nil
+	}
 	refInfo := GetTableInfo(foreign.Reference.TableAddr)
 	if refInfo == nil {
 		return nil
@@ -180,20 +184,60 @@ func queryForeignReflect[T any](ctx context.Context, foreign *Foreign, table *Ta
 	}
 }
 
+// fieldInt64 returns the int64 value of a reflect.Value, dereferencing pointers.
+// Returns (0, false) for nil pointers.
+func fieldInt64(v reflect.Value) (int64, bool) {
+	if v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return 0, false
+		}
+		v = v.Elem()
+	}
+	return v.Int(), true
+}
+
+// mapRowsByField indexes rows by an int64 field (FK or PK), returning a map of field value to row slice.
+// Pointer fields are dereferenced; nil pointers are skipped.
+func mapRowsByField[T any](rows []*T, col *Column) map[int64][]*T {
+	reg := make(map[int64][]*T, len(rows))
+	for _, row := range rows {
+		valueOf := reflect.ValueOf(row).Elem()
+		fieldOf := valueOf.Field(col.FieldId)
+		if key, ok := fieldInt64(fieldOf); ok && key != 0 {
+			reg[key] = append(reg[key], row)
+		}
+	}
+	return reg
+}
+
+// mapRowsByPK indexes rows by their primary key, returning a map of PK value to row.
+// Also initializes foreign slice fields on each row.
+func mapRowsByPK[T any](rows []*T, table *Table[T], foreign *Foreign) map[int64]*T {
+	reg := make(map[int64]*T, len(rows))
+	pkCol := table.ColumnInfo(table.PrimaryKeys[0].ColumnName)
+	if pkCol == nil {
+		return reg
+	}
+	for _, row := range rows {
+		valueOf := reflect.ValueOf(row).Elem()
+		pkField := valueOf.Field(pkCol.FieldId)
+		if id := pkField.Int(); id != 0 {
+			reg[id] = row
+		}
+		if foreign != nil {
+			initForeignSlice(row, foreign)
+		}
+	}
+	return reg
+}
+
 // querySome2OneReflect performs M2O/O2O query using reflection instead of generics for the refer table.
 func querySome2OneReflect[T any](ctx context.Context, foreign *Foreign, table *Table[T], refInfo *TableInfo, rows []*T) error {
 	col := table.ColumnInfo(foreign.ForeignKey)
 	if col == nil {
 		return model.NewForeignKeyNotFoundError(foreign.ForeignKey)
 	}
-	reg := make(map[int64][]*T, len(rows))
-	for _, row := range rows {
-		valueOf := reflect.ValueOf(row).Elem()
-		fieldOf := valueOf.Field(col.FieldId)
-		if key := fieldOf.Int(); key != 0 {
-			reg[key] = append(reg[key], row)
-		}
-	}
+	reg := mapRowsByField(rows, col)
 	pkIds := slices.Sorted(maps.Keys(reg))
 	filter := And(foreign.Where, InBatch(foreign.Reference, pkIds, 500))
 
@@ -230,7 +274,13 @@ func setForeignField(row any, mountField string, value any) {
 // initForeignSlice initializes a foreign relationship slice field to an empty slice.
 func initForeignSlice(row any, foreign *Foreign) {
 	if setter, ok := row.(GenSetForeign); ok {
-		setter.SetForeign(foreign.MountField, nil)
+		// Create an empty slice of the correct type using reflection so SetForeign
+		// receives a non-nil empty slice instead of nil, matching the non-GenSetForeign path.
+		elem := reflect.ValueOf(row).Elem()
+		idx := foreign.getMountFieldIdx(elem)
+		field := fieldByCachedIdx(elem, idx)
+		emptySlice := reflect.MakeSlice(field.Type(), 0, 0).Interface()
+		setter.SetForeign(foreign.MountField, emptySlice)
 		return
 	}
 	elem := reflect.ValueOf(row).Elem()
@@ -243,17 +293,7 @@ func initForeignSlice(row any, foreign *Foreign) {
 
 // queryOne2ManyReflect performs O2M query using reflection.
 func queryOne2ManyReflect[T any](ctx context.Context, foreign *Foreign, table *Table[T], refInfo *TableInfo, rows []*T) error {
-	pkCol := table.ColumnInfo(table.PrimaryKeys[0].ColumnName)
-	reg := make(map[int64]*T, len(rows))
-	for _, row := range rows {
-		valueOf := reflect.ValueOf(row).Elem()
-		if pkCol != nil {
-			if id := valueOf.Field(pkCol.FieldId).Int(); id != 0 {
-				reg[id] = row
-			}
-		}
-		initForeignSlice(row, foreign)
-	}
+	reg := mapRowsByPK(rows, table, foreign)
 
 	pkName := foreign.Reference.ColumnName
 	pkIds := slices.Sorted(maps.Keys(reg))
@@ -265,7 +305,7 @@ func queryOne2ManyReflect[T any](ctx context.Context, foreign *Foreign, table *T
 	}
 	for id, refRows := range data {
 		if row, ok := reg[id]; ok {
-			sliceType := reflect.SliceOf(reflect.PtrTo(refInfo.modelType))
+			sliceType := reflect.SliceOf(reflect.PointerTo(refInfo.modelType))
 			sliceVal := reflect.MakeSlice(sliceType, len(refRows), len(refRows))
 			for i, r := range refRows {
 				sliceVal.Index(i).Set(r)
@@ -281,19 +321,9 @@ func queryMany2ManyReflect[T any](ctx context.Context, foreign *Foreign, table *
 	if foreign.Middle == nil {
 		return model.ErrMiddleTableNotSet
 	}
-	pkCol := table.ColumnInfo(table.PrimaryKeys[0].ColumnName)
-	reg := make(map[int64]*T, len(rows))
-	for _, row := range rows {
-		valueOf := reflect.ValueOf(row).Elem()
-		if pkCol != nil {
-			if id := valueOf.Field(pkCol.FieldId).Int(); id != 0 {
-				reg[id] = row
-			}
-		}
-		initForeignSlice(row, foreign)
-	}
+	reg := mapRowsByPK(rows, table, foreign)
 
-	middleData, err := QueryMiddleTable(foreign, table, rows, foreign.Middle.Left, foreign.Middle.Right)
+	middleData, err := QueryMiddleTableContext(ctx, foreign, table, rows, foreign.Middle.Left, foreign.Middle.Right)
 	if err != nil {
 		return err
 	}
@@ -343,17 +373,20 @@ func selectReferMap(ctx context.Context, refInfo *TableInfo, filter Condition, p
 	}
 	defer rows.Close()
 
-	pkCol := refInfo.ColumnInfo(pkName)
 	result := make(map[int64]reflect.Value)
+	pkCol := refInfo.ColumnInfo(pkName)
+	if pkCol == nil {
+		return result, nil
+	}
 	for rows.Next() {
 		val := reflect.New(refInfo.modelType)
-		dest := AppendDestTable(*refInfo, val.Elem())
+		dest := AppendDestTable(refInfo, val.Elem())
 		if err = rows.Scan(dest...); err != nil {
 			return nil, err
 		}
-		if pkCol != nil {
-			pkField := val.Elem().Field(pkCol.FieldId)
-			result[pkField.Int()] = val
+		pkField := val.Elem().Field(pkCol.FieldId)
+		if id := pkField.Int(); id != 0 {
+			result[id] = val
 		}
 	}
 	return result, rows.Err()
@@ -375,17 +408,20 @@ func selectReferRank(ctx context.Context, refInfo *TableInfo, filter Condition, 
 	}
 	defer rows.Close()
 
-	pkCol := refInfo.ColumnInfo(pkName)
 	result := make(map[int64][]reflect.Value)
+	pkCol := refInfo.ColumnInfo(pkName)
+	if pkCol == nil {
+		return result, nil
+	}
 	for rows.Next() {
 		val := reflect.New(refInfo.modelType)
-		dest := AppendDestTable(*refInfo, val.Elem())
+		dest := AppendDestTable(refInfo, val.Elem())
 		if err = rows.Scan(dest...); err != nil {
 			return nil, err
 		}
-		if pkCol != nil {
-			pkField := val.Elem().Field(pkCol.FieldId)
-			result[pkField.Int()] = append(result[pkField.Int()], val)
+		pkField := val.Elem().Field(pkCol.FieldId)
+		if id := pkField.Int(); id != 0 {
+			result[id] = append(result[id], val)
 		}
 	}
 	return result, rows.Err()
@@ -402,14 +438,7 @@ func QuerySome2One[T, R any](foreign *Foreign, table *Table[T], refer *Table[R],
 	if len(rows) == 0 {
 		return nil, nil
 	}
-	reg := make(map[int64][]*T, len(rows))
-	for _, row := range rows {
-		valueOf := reflect.ValueOf(row).Elem()
-		fieldOf := valueOf.Field(col.FieldId)
-		if key := fieldOf.Int(); key != 0 {
-			reg[key] = append(reg[key], row)
-		}
-	}
+	reg := mapRowsByField(rows, col)
 	pkName := foreign.Reference.ColumnName
 	pkIds := slices.Sorted(maps.Keys(reg))
 	filter := And(foreign.Where, InBatch(foreign.Reference, pkIds, 500))
@@ -439,22 +468,7 @@ func QueryOne2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R],
 	if len(rows) == 0 {
 		return nil, nil
 	}
-	pkCol := table.ColumnInfo(table.PrimaryKeys[0].ColumnName)
-	reg := make(map[int64]*T, len(rows))
-	for _, row := range rows {
-		valueOf := reflect.ValueOf(row).Elem()
-		if pkCol != nil {
-			if id := valueOf.Field(pkCol.FieldId).Int(); id != 0 {
-				reg[id] = row
-			}
-		}
-		elem := reflect.ValueOf(row).Elem()
-		idx := foreign.getMountFieldIdx(elem)
-		field := fieldByCachedIdx(elem, idx)
-		if field.CanSet() {
-			field.Set(reflect.MakeSlice(field.Type(), 0, 0))
-		}
-	}
+	reg := mapRowsByPK(rows, table, foreign)
 
 	pkName := foreign.Reference.ColumnName
 	pkIds := slices.Sorted(maps.Keys(reg))
@@ -487,22 +501,7 @@ func QueryMany2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R]
 	if len(rows) == 0 {
 		return nil, nil
 	}
-	pkCol := table.ColumnInfo(table.PrimaryKeys[0].ColumnName)
-	reg := make(map[int64]*T, len(rows))
-	for _, row := range rows {
-		valueOf := reflect.ValueOf(row).Elem()
-		if pkCol != nil {
-			if id := valueOf.Field(pkCol.FieldId).Int(); id != 0 {
-				reg[id] = row
-			}
-		}
-		elem := reflect.ValueOf(row).Elem()
-		idx := foreign.getMountFieldIdx(elem)
-		field := fieldByCachedIdx(elem, idx)
-		if field.CanSet() {
-			field.Set(reflect.MakeSlice(field.Type(), 0, 0))
-		}
-	}
+	reg := mapRowsByPK(rows, table, foreign)
 
 	middleData, err := QueryMiddleTable(foreign, table, rows, foreign.Middle.Left, foreign.Middle.Right)
 	if err != nil {
@@ -547,18 +546,26 @@ func QueryMany2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R]
 // The rows parameter contains the records whose primary keys are used to query the junction table.
 // It returns a map of left-side IDs to slices of right-side IDs.
 func QueryMiddleTable[T any](foreign *Foreign, table *Table[T], rows []*T, leftCol, rightCol string) (map[int64][]int64, error) {
+	return QueryMiddleTableContext(context.Background(), foreign, table, rows, leftCol, rightCol)
+}
+
+// QueryMiddleTableContext queries the middle junction table with a specific context.
+func QueryMiddleTableContext[T any](ctx context.Context, foreign *Foreign, table *Table[T], rows []*T, leftCol, rightCol string) (map[int64][]int64, error) {
 	if foreign.Middle == nil {
 		return nil, model.ErrMiddleTableNotSet
 	}
 
 	pkCol := table.ColumnInfo(table.PrimaryKeys[0].ColumnName)
+	if pkCol == nil {
+		return nil, nil
+	}
+
 	pkIds := make([]int64, 0, len(rows))
 	for _, row := range rows {
 		valueOf := reflect.ValueOf(row).Elem()
-		if pkCol != nil {
-			if id := valueOf.Field(pkCol.FieldId).Int(); id != 0 {
-				pkIds = append(pkIds, id)
-			}
+		pkField := valueOf.Field(pkCol.FieldId)
+		if id := pkField.Int(); id != 0 {
+			pkIds = append(pkIds, id)
 		}
 	}
 	if len(pkIds) == 0 {
@@ -580,7 +587,7 @@ func QueryMiddleTable[T any](foreign *Foreign, table *Table[T], rows []*T, leftC
 	}
 
 	sqlQuery, args := builder.Build(false)
-	dbRows, err := table.db.RawQueryContext(context.Background(), sqlQuery, args...)
+	dbRows, err := table.db.RawQueryContext(ctx, sqlQuery, args...)
 	if err != nil {
 		return nil, err
 	}

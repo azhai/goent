@@ -78,8 +78,6 @@ func IsPostgresDSN(dsn string) bool {
 	return strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://")
 }
 
-
-
 func detectDriver(dsn string) DBConfig {
 	isPg := IsPostgresDSN(dsn)
 	driver := "sqlite"
@@ -98,10 +96,6 @@ func resolveDriver(dsn, dbType string) DBConfig {
 	}
 	return detectDriver(dsn)
 }
-
-
-
-
 
 func DefaultDSN(dbType string) string {
 	if dbType == "pgsql" || dbType == "postgres" {
@@ -153,5 +147,3 @@ func (w *TableWork) TxExec(sqlStr string, args ...any) error {
 func quote(name string) string {
 	return `"` + name + `"`
 }
-
-

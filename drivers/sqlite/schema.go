@@ -141,7 +141,7 @@ func (p *SQLiteSchemaDriver) GetPrimaryKey(ctx context.Context, table string) ([
 		var cid int
 		var name, typ string
 		var notNull int
-		var dfltValue interface{}
+		var dfltValue any
 		var pk int
 		if err := rows.Scan(&cid, &name, &typ, &notNull, &dfltValue, &pk); err != nil {
 			continue
@@ -225,7 +225,7 @@ func (p *SQLiteSchemaDriver) IsColumnNullable(ctx context.Context, table, column
 		var cid int
 		var name, typ string
 		var notNull int
-		var dfltValue interface{}
+		var dfltValue any
 		var pk int
 		if err := rows.Scan(&cid, &name, &typ, &notNull, &dfltValue, &pk); err != nil {
 			continue

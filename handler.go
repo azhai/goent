@@ -56,7 +56,7 @@ type FetchCreator func(TableInfo, []*Field, []*Foreign) FetchFunc
 
 // CreateFetchFunc creates a FetchFunc based on the specified fields and foreign relationships.
 // It handles both aggregate function results and regular table field scanning.
-func CreateFetchFunc(tblInfo TableInfo, fields []*Field, foreigns []*Foreign) FetchFunc {
+func CreateFetchFunc(tblInfo *TableInfo, fields []*Field, foreigns []*Foreign) FetchFunc {
 	ctx := &fetchContext{tblInfo: tblInfo, fields: fields, foreigns: foreigns}
 	if len(fields) > 0 {
 		ctx.destSize = len(fields)
@@ -195,18 +195,18 @@ type fieldScanInfo struct {
 // It caches the field ID, table address, and classification flags
 // so that buildDest can avoid repeated field lookups per row.
 type fieldDestInfo struct {
-	fieldId    int       // Field index in the struct
-	tableAddr  uintptr   // Table address this field belongs to
-	isWildcard bool      // Whether this is a "*" column selector
-	isMain     bool      // Whether this field belongs to the main table
-	mountIdx   int       // Mount index for foreign fields (0 = not foreign)
+	fieldId    int     // Field index in the struct
+	tableAddr  uintptr // Table address this field belongs to
+	isWildcard bool    // Whether this is a "*" column selector
+	isMain     bool    // Whether this field belongs to the main table
+	mountIdx   int     // Mount index for foreign fields (0 = not foreign)
 }
 
 // fetchContext holds precomputed context for fetching and scanning query results.
 // It caches field scan info, destination info, and foreign key offsets
 // to minimize reflection overhead during row scanning.
 type fetchContext struct {
-	tblInfo        TableInfo
+	tblInfo        *TableInfo
 	fields         []*Field
 	foreigns       []*Foreign
 	scanInfos      []fieldScanInfo
@@ -288,7 +288,7 @@ func (ctx *fetchContext) buildDest(valueOf reflect.Value) []any {
 	for _, di := range ctx.destInfos {
 		if di.isWildcard {
 			if info := GetTableInfo(di.tableAddr); info != nil {
-				dest = append(dest, AppendDestTable(*info, valueOf)...)
+				dest = append(dest, AppendDestTable(info, valueOf)...)
 			}
 		} else if !di.isMain && di.tableAddr != 0 {
 			if fv, ok := foreignValues[di.tableAddr]; ok {
@@ -324,13 +324,13 @@ func CreateForeignDest(valueOf reflect.Value, foreign *Foreign) []any {
 		if dest, ok := fieldOf.Interface().(GenScanDest); ok {
 			return dest.ScanDest()
 		}
-		return AppendDestTable(*frnInfo, fieldOf.Elem())
+		return AppendDestTable(frnInfo, fieldOf.Elem())
 	}
 	return nil
 }
 
 // AppendDestTable returns a slice of pointers to the fields of a struct
-func AppendDestTable(info TableInfo, valueOf reflect.Value) []any {
+func AppendDestTable(info *TableInfo, valueOf reflect.Value) []any {
 	if dest, ok := valueOf.Addr().Interface().(GenScanDest); ok {
 		return dest.ScanDest()
 	}
@@ -362,4 +362,5 @@ func FlattenDest(valueOf reflect.Value) []any {
 	}
 	return dest
 }
+
 // }

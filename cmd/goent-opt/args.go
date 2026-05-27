@@ -71,8 +71,8 @@ func (DbImportArgs) Examples() []string {
 
 type IDCompactArgs struct {
 	OptDSN
-	Gap   int64 `arg:"--gap" default:"1024" help:"Minimum ID gap to trigger compaction (must be >= 1)"`
-	DryRun bool `arg:"--dry-run" help:"Preview changes without modifying data"`
+	Gap    int64 `arg:"--gap" default:"1024" help:"Minimum ID gap to trigger compaction (must be >= 1)"`
+	DryRun bool  `arg:"--dry-run" help:"Preview changes without modifying data"`
 }
 
 func (IDCompactArgs) Description() string {

@@ -55,8 +55,6 @@ type TableInfo struct {
 	connByPK model.Connection
 	// cfgByPK is the cached DatabaseConfig for FindByPK fast path.
 	cfgByPK *model.DatabaseConfig
-	// argsByPK is the cached arguments slice for FindByPK fast path.
-	argsByPK []any
 	// cachedPkeys is the cached sorted primary key column names.
 	cachedPkeys []string
 	// insertOneSql is the cached INSERT SQL for single-record inserts.
@@ -280,6 +278,8 @@ type Table[T any] struct {
 	fetchAll FetchFunc
 	// fetchAllOnce ensures fetchAll is initialized only once (concurrent-safe).
 	fetchAllOnce sync.Once
+	// fetchByPKOnce ensures fetchByPK/connByPK/cfgByPK are initialized only once.
+	fetchByPKOnce sync.Once
 }
 
 // SimpleTable creates a new Table instance for a simple table without foreign keys.
@@ -357,11 +357,19 @@ func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schem
 		if fieldKind == reflect.Slice {
 			if utils.HasTagValue(geoTag, "o2m") {
 				fkCol, _ := utils.GetTagValue(geoTag, "fk")
+				// Find the element type name for reference matching
+				refType := ""
+				elemType := fieldOf.Type.Elem()
+				if elemType.Kind() == reflect.Pointer {
+					elemType = elemType.Elem()
+				}
+				refType = elemType.Name()
 				info.Foreigns[columnName] = &Foreign{
 					Type:       O2M,
 					MountField: fieldOf.Name,
 					ForeignKey: fkCol,
 					Reference:  nil,
+					RefType:    refType,
 				}
 				continue
 			} else if utils.HasTagValue(geoTag, "m2m") {
@@ -376,12 +384,20 @@ func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schem
 						Right: rightCol,
 					}
 				}
+				// Find the element type name for reference matching
+				refType := ""
+				elemType := fieldOf.Type.Elem()
+				if elemType.Kind() == reflect.Pointer {
+					elemType = elemType.Elem()
+				}
+				refType = elemType.Name()
 				info.Foreigns[columnName] = &Foreign{
 					Type:       M2M,
 					MountField: fieldOf.Name,
 					ForeignKey: "",
 					Reference:  nil,
 					Middle:     middleInfo,
+					RefType:    refType,
 				}
 				continue
 			}
@@ -439,11 +455,27 @@ func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schem
 				mountField = strings.TrimSuffix(columnName, "_id")
 				mountField = utils.ToTitleCase(mountField)
 			}
+			// Find the type name of the mount field for reference matching
+			refType := ""
+			if mf, ok := modelValue.Type().FieldByName(mountField); ok {
+				t := mf.Type
+				if t.Kind() == reflect.Pointer {
+					t = t.Elem()
+				}
+				if t.Kind() == reflect.Slice {
+					t = t.Elem()
+					if t.Kind() == reflect.Pointer {
+						t = t.Elem()
+					}
+				}
+				refType = t.Name()
+			}
 			info.Foreigns[columnName] = &Foreign{
 				Type:       fkType,
 				MountField: mountField,
 				ForeignKey: columnName,
 				Reference:  nil,
+				RefType:    refType,
 			}
 		}
 		if !utils.HasTagValue(geoTag, "pk") && !strings.EqualFold(fieldOf.Name, "id") &&
@@ -781,10 +813,15 @@ func (t *Table[T]) getInsertOneSql() (string, []*Field) {
 
 // insertOneFastPath executes the INSERT using cached SQL, bypassing Builder.
 func (t *Table[T]) insertOneFastPath(ctx context.Context, sql string, fields []*Field, obj *T) error {
-	valueOf := reflect.ValueOf(obj).Elem()
-	args := make([]any, len(fields))
-	for i, fld := range fields {
-		args[i] = valueOf.Field(fld.FieldId).Interface()
+	var args []any
+	if gen, ok := any(obj).(GenInsertValues); ok {
+		args = gen.InsertValues()
+	} else {
+		valueOf := reflect.ValueOf(obj).Elem()
+		args = make([]any, len(fields))
+		for i, fld := range fields {
+			args[i] = valueOf.Field(fld.FieldId).Interface()
+		}
 	}
 
 	conn := t.GetConnection()
@@ -796,6 +833,7 @@ func (t *Table[T]) insertOneFastPath(ctx context.Context, sql string, fields []*
 			return model.ErrNoRows
 		}
 		pkFid := t.PrimaryKeys[0].Column.FieldId
+		valueOf := reflect.ValueOf(obj).Elem()
 		fieldOf := valueOf.Field(pkFid)
 		return row.Scan(fieldOf.Addr().Interface())
 	}
@@ -806,6 +844,7 @@ func (t *Table[T]) insertOneFastPath(ctx context.Context, sql string, fields []*
 	}
 	// SQLite: get last insert rowid
 	if t.PrimaryKeys[0].IsAutoIncr {
+		valueOf := reflect.ValueOf(obj).Elem()
 		return t.getLastInsertIdFastPath(ctx, conn, valueOf)
 	}
 	return nil
@@ -886,15 +925,13 @@ func (t *Table[T]) FindByPKContext(ctx context.Context, id int64) (*T, error) {
 	if sql == "" {
 		return nil, model.ErrNoPrimaryKey
 	}
-	if t.fetchByPK == nil {
+	t.fetchByPKOnce.Do(func() {
 		t.fetchByPK = t.newFetchByPKFunc()
 		t.connByPK = t.db.driver.NewConnection()
 		t.cfgByPK = t.db.driver.GetDatabaseConfig()
-		t.argsByPK = []any{id}
-	} else {
-		t.argsByPK[0] = id
-	}
-	qr := model.Query{RawSql: sql, Arguments: t.argsByPK}
+	})
+	args := []any{id}
+	qr := model.Query{RawSql: sql, Arguments: args}
 	row := t.connByPK.QueryRowContext(ctx, &qr)
 	if row == nil {
 		return nil, model.ErrNoRows

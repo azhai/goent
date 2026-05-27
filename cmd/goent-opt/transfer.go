@@ -78,8 +78,8 @@ func exportData(ctx context.Context, cfg DBConfig, table, dataPath string) (int6
 
 	var count int64
 	for rows.Next() {
-		values := make([]interface{}, len(colTypes))
-		valuePtrs := make([]interface{}, len(colTypes))
+		values := make([]any, len(colTypes))
+		valuePtrs := make([]any, len(colTypes))
 		for i := range values {
 			valuePtrs[i] = &values[i]
 		}
@@ -87,7 +87,7 @@ func exportData(ctx context.Context, cfg DBConfig, table, dataPath string) (int6
 			return count, err
 		}
 
-		record := make(map[string]interface{})
+		record := make(map[string]any)
 		for i, ct := range colTypes {
 			val := values[i]
 			switch v := val.(type) {
@@ -137,8 +137,6 @@ func (w *TableWork) importSchemaSQL(sqlContent string) error {
 	return nil
 }
 
-
-
 func (w *TableWork) importData(cfg DBConfig, dataPath string) (int64, error) {
 	isPg := cfg.IsPg
 	f, err := os.Open(dataPath)
@@ -168,14 +166,14 @@ func (w *TableWork) importData(cfg DBConfig, dataPath string) (int64, error) {
 
 	reader := bufio.NewReader(f)
 	var count int64
-	var batch []map[string]interface{}
+	var batch []map[string]any
 	batchSize := 500
 
 	for {
 		line, err := reader.ReadString('\n')
 		line = strings.TrimSpace(line)
 		if line != "" {
-			var record map[string]interface{}
+			var record map[string]any
 			if jsonErr := json.Unmarshal([]byte(line), &record); jsonErr != nil {
 				fmt.Printf("    Warning: skipping invalid JSON line: %v\n", jsonErr)
 				continue
@@ -207,9 +205,9 @@ func (w *TableWork) importData(cfg DBConfig, dataPath string) (int64, error) {
 	return count, nil
 }
 
-func (w *TableWork) insertBatch(insertSQL string, colTypes []string, batch []map[string]interface{}) error {
+func (w *TableWork) insertBatch(insertSQL string, colTypes []string, batch []map[string]any) error {
 	for _, record := range batch {
-		values := make([]interface{}, len(colTypes))
+		values := make([]any, len(colTypes))
 		for i, col := range colTypes {
 			val, ok := record[col]
 			if !ok {
@@ -270,7 +268,7 @@ func getTableColumnTypes(ctx context.Context, cfg DBConfig, table string) ([]str
 	return names, nil
 }
 
-func convertValue(val interface{}) interface{} {
+func convertValue(val any) any {
 	switch v := val.(type) {
 	case json.Number:
 		if i, err := v.Int64(); err == nil {
@@ -285,7 +283,7 @@ func convertValue(val interface{}) interface{} {
 			return int64(v)
 		}
 		return v
-	case map[string]interface{}, []interface{}:
+	case map[string]any, []any:
 		data, _ := json.Marshal(v)
 		return string(data)
 	default:

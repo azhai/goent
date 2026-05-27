@@ -76,12 +76,12 @@ func seedData(db *models.Database) error {
 
 func createOrder(db *models.Database, orderNo string) (*models.Order, error) {
 	obj, err := db.Order.Select("id", "status", "total").Match(models.Order{OrderNo: orderNo}).One()
-	fmt.Printf("createOrder: obj=%v, err=%v, err==ErrNoRows=%v\n", obj, err, err == model.ErrNoRows)
+	// fmt.Printf("createOrder: obj=%v, err=%v, err==ErrNoRows=%v\n", obj, err, err == model.ErrNoRows)
 	if err != nil && err != model.ErrNoRows || obj != nil && obj.ID > 0 {
 		return nil, err
 	}
 	order := DataOrder(orderNo)
-	fmt.Printf("createOrder: inserting order=%+v\n", order)
+	// fmt.Printf("createOrder: inserting order=%+v\n", order)
 	if err = db.Order.Insert().One(order); err != nil {
 		return nil, err
 	}

@@ -272,7 +272,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		os.Exit(1)
 	}
-	
+
 	// Clean up data before tests
 	if db != nil && db.DriverName() == "PostgreSQL" {
 		sql := `
@@ -283,9 +283,9 @@ func TestMain(m *testing.M) {
 		`
 		_ = db.DB.RawExecContext(context.Background(), sql)
 	}
-	
+
 	code := m.Run()
-	
+
 	// Clean up after tests
 	if db != nil {
 		if db.DriverName() == "PostgreSQL" {
@@ -308,7 +308,7 @@ func Setup() (*Database, error) {
 	if db != nil {
 		return db, nil
 	}
-	
+
 	dbType := env.GetStr("DB_TYPE", "sqlite")
 	dbDSN := env.Get("DB_DSN")
 	logFile := env.Get("DB_LOG_FILE")

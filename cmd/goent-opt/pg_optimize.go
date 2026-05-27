@@ -194,8 +194,6 @@ func runPgOptimize(args *PgOptimizeArgs) {
 	fmt.Println("Done!")
 }
 
-
-
 func writeDefaultRules(path string) error {
 	content := `# PostgreSQL Index Optimization Rules
 # ====================================

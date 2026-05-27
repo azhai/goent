@@ -128,6 +128,17 @@ func travelSchemas(db *DB, dbId int, valueOf reflect.Value) ([]string, error) {
 					break
 				}
 			}
+			// Fallback: try matching by RefType (e.g. AssigneeID -> Assignee field -> Contributor type)
+			if foreign.Reference == nil && foreign.RefType != "" {
+				for otherAddr, otherInfo := range tableRegistry {
+					if otherAddr == info.TableAddr {
+						continue
+					}
+					if foreign, ok = otherInfo.setForeignReference(foreign, foreign.RefType); ok {
+						break
+					}
+				}
+			}
 		}
 	}
 

@@ -158,59 +158,11 @@ func (b *DeleteBuilder) buildWhere(full bool) []any {
 }
 
 func (b *DeleteBuilder) buildTemplate(cond Condition, args *[]any, startIdx int, full bool) int {
-	c := &b.core
-	fi, vi := 0, 0
-	template := cond.Template
-	name, last := "", len(template)-1
-	for idx := 0; idx <= last; idx++ {
-		curr := template[idx]
-		if idx < last && curr == '%' && template[idx+1] == 's' {
-			if fi < len(cond.Fields) {
-				if full {
-					name = cond.Fields[fi].String()
-				} else {
-					name = cond.Fields[fi].Simple()
-				}
-				c.buf.WriteString(name)
-				fi++
-			}
-			idx++
-		} else if curr == '?' {
-			if vi < len(cond.Values) {
-				val := cond.Values[vi]
-				startIdx = b.appendValueParam(val, startIdx, args)
-				vi++
-			}
-		} else {
-			c.buf.WriteByte(curr)
-		}
-	}
-	return startIdx
+	return b.core.buildTemplate(cond, args, startIdx, full)
 }
 
 func (b *DeleteBuilder) appendValueParam(val *Value, startIdx int, args *[]any) int {
-	c := &b.core
-	if len(val.Args) > 0 {
-		c.buf.WriteByte('(')
-		for j, arg := range val.Args {
-			startIdx++
-			if j > 0 {
-				c.buf.WriteByte(',')
-			}
-			c.writeParam(startIdx)
-			*args = append(*args, arg)
-		}
-		c.buf.WriteByte(')')
-	} else if val.Length > 0 {
-		startIdx++
-		c.writeParam(startIdx)
-		if val.single != nil {
-			*args = append(*args, val.single)
-		} else {
-			*args = append(*args, val.Args[0])
-		}
-	}
-	return startIdx
+	return b.core.appendValueParam(val, startIdx, args)
 }
 
 func (b *DeleteBuilder) Build() (sql string, args []any) {
@@ -304,6 +256,7 @@ func (b *Builder) ResetForSave() {
 	clear(b.Changes)
 	b.InsertValues = nil
 	b.VisitFields = nil
+	b.visitFieldsShared = false
 	b.core.Limit = -1
 	b.Returning = ""
 	b.ForUpdate = false
@@ -611,7 +564,45 @@ func (b *Builder) buildJoins() []any {
 
 // buildTemplate delegates to the core's template building logic
 func (b *Builder) buildTemplate(cond Condition, args *[]any, startIdx int, full bool) int {
-	c := &b.core
+	return b.core.buildTemplate(cond, args, startIdx, full)
+}
+
+// writeParam writes a parameter placeholder ($N) directly to the buffer.
+// It avoids string concatenation by writing directly to the buffer.
+func (c *BuilderCore) writeParam(n int) {
+	c.buf.WriteByte('$')
+	c.buf.WriteString(strconv.Itoa(n))
+}
+
+// appendValueParam writes value parameters to the buffer.
+// Shared by both Builder and DeleteBuilder to avoid code duplication.
+func (c *BuilderCore) appendValueParam(val *Value, startIdx int, args *[]any) int {
+	if len(val.Args) > 0 {
+		c.buf.WriteByte('(')
+		for j, arg := range val.Args {
+			startIdx++
+			if j > 0 {
+				c.buf.WriteByte(',')
+			}
+			c.writeParam(startIdx)
+			*args = append(*args, arg)
+		}
+		c.buf.WriteByte(')')
+	} else if val.Length > 0 {
+		startIdx++
+		c.writeParam(startIdx)
+		if val.single != nil {
+			*args = append(*args, val.single)
+		} else if len(val.Args) > 0 {
+			*args = append(*args, val.Args[0])
+		}
+	}
+	return startIdx
+}
+
+// buildTemplate processes a condition template and writes it to the buffer.
+// Shared by both Builder and DeleteBuilder to avoid code duplication.
+func (c *BuilderCore) buildTemplate(cond Condition, args *[]any, startIdx int, full bool) int {
 	fi, vi := 0, 0
 	template := cond.Template
 	name, last := "", len(template)-1
@@ -631,7 +622,7 @@ func (b *Builder) buildTemplate(cond Condition, args *[]any, startIdx int, full 
 		} else if curr == '?' {
 			if vi < len(cond.Values) {
 				val := cond.Values[vi]
-				startIdx = b.appendValueParam(val, startIdx, args)
+				startIdx = c.appendValueParam(val, startIdx, args)
 				vi++
 			}
 		} else {
@@ -641,37 +632,9 @@ func (b *Builder) buildTemplate(cond Condition, args *[]any, startIdx int, full 
 	return startIdx
 }
 
-// writeParam writes a parameter placeholder ($N) directly to the buffer.
-// It avoids string concatenation by writing directly to the buffer.
-func (c *BuilderCore) writeParam(n int) {
-	c.buf.WriteByte('$')
-	c.buf.WriteString(strconv.Itoa(n))
-}
-
-// appendValueParam writes value parameters to the buffer for Builder.
+// appendValueParam delegates to the core's shared implementation.
 func (b *Builder) appendValueParam(val *Value, startIdx int, args *[]any) int {
-	c := &b.core
-	if len(val.Args) > 0 {
-		c.buf.WriteByte('(')
-		for j, arg := range val.Args {
-			startIdx++
-			if j > 0 {
-				c.buf.WriteByte(',')
-			}
-			c.writeParam(startIdx)
-			*args = append(*args, arg)
-		}
-		c.buf.WriteByte(')')
-	} else if val.Length > 0 {
-		startIdx++
-		c.writeParam(startIdx)
-		if val.single != nil {
-			*args = append(*args, val.single)
-		} else {
-			*args = append(*args, val.Args[0])
-		}
-	}
-	return startIdx
+	return b.core.appendValueParam(val, startIdx, args)
 }
 
 // BuildWhere builds the WHERE clause for the Builder

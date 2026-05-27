@@ -24,10 +24,10 @@ const (
 	selectOne    = "select-one"
 	selectPage   = "select-page"
 
-	rawName     = "raw"
-	rawPgxName  = "raw-pgx"
-	goentName   = "goent"
-	goeName     = "goe"
+	rawName    = "raw"
+	rawPgxName = "raw-pgx"
+	goentName  = "goent"
+	goeName    = "goe"
 )
 
 var (

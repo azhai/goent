@@ -91,12 +91,16 @@ func (s *StateSelect[T, R]) getFetchFunc() FetchFunc {
 			return genScanDestFetch[R]
 		}
 		// Use cached FetchFunc for simple Select (sameModel, no joins)
+		s.table.fetchAllOnce.Do(func() {
+			info := s.table.TableInfo
+			s.table.fetchAll = CreateFetchFunc(&info, info.GetSortedFields(), nil)
+		})
 		if s.table.fetchAll != nil {
 			return s.table.fetchAll
 		}
 	}
 	info, fields := s.table.TableInfo, s.builder.VisitFields
-	return CreateFetchFunc(info, fields, s.GetJoinForeigns())
+	return CreateFetchFunc(&info, fields, s.GetJoinForeigns())
 }
 
 func genScanDestFetch[R any](target any) []any {
@@ -142,13 +146,7 @@ func (s *StateSelect[T, R]) ByPK(id int64) (*R, error) {
 	if sql == "" {
 		return nil, model.ErrNoPrimaryKey
 	}
-	// Reuse cached args slice like FindByPK
-	if s.table.argsByPK == nil {
-		s.table.argsByPK = []any{id}
-	} else {
-		s.table.argsByPK[0] = id
-	}
-	qr := model.Query{RawSql: sql, Arguments: s.table.argsByPK}
+	qr := model.Query{RawSql: sql, Arguments: []any{id}}
 	return s.FetchRow(qr, nil)
 }
 

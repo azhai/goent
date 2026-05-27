@@ -28,7 +28,7 @@ func TestConcurrentLeftJoin(t *testing.T) {
 
 	// Insert test data
 	habitat := &Habitat{Name: "Forest"}
-	habitat.Id = uuid.New()  // Generate UUID for primary key
+	habitat.Id = uuid.New() // Generate UUID for primary key
 	err = db.Habitat.Insert().One(habitat)
 	if err != nil {
 		t.Fatalf("Expected insert habitat, got error: %v", err)

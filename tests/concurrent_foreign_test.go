@@ -27,7 +27,7 @@ func TestConcurrentForeignQuery(t *testing.T) {
 
 	// Insert habitat
 	habitat := &Habitat{Name: "Forest"}
-	habitat.Id = uuid.New()  // Generate UUID for primary key
+	habitat.Id = uuid.New() // Generate UUID for primary key
 	err = db.Habitat.Insert().One(habitat)
 	if err != nil {
 		t.Fatalf("Expected insert habitat, got error: %v", err)
@@ -206,7 +206,7 @@ func TestConcurrentM2O(t *testing.T) {
 	}
 
 	habitat := &Habitat{Name: "Ocean"}
-	habitat.Id = uuid.New()  // Generate UUID for primary key
+	habitat.Id = uuid.New() // Generate UUID for primary key
 	err = db.Habitat.Insert().One(habitat)
 	if err != nil {
 		t.Fatalf("Expected insert habitat, got error: %v", err)
