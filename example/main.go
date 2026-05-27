@@ -6,38 +6,15 @@ import (
 	"goent-example/models"
 
 	"github.com/azhai/goent"
+	"github.com/azhai/goent/drivers"
 	"github.com/azhai/goent/model"
 	"github.com/azhai/goent/utils"
 )
 
-type DatabaseConfig struct {
-	Type    string
-	DSN     string
-	LogFile string
-}
-
-func loadConfig(env *utils.Environ) *DatabaseConfig {
-	var logFile string
-	if _, ok := env.Lookup("DB_LOG_FILE"); ok {
-		logFile = env.Get("DB_LOG_FILE")
-	} else {
-		logFile = env.Get("LOG_FILE")
-	}
-	cfg := &DatabaseConfig{
-		Type:    env.GetStr("DB_TYPE", "sqlite"),
-		DSN:     env.GetStr("DB_DSN", "test.db"),
-		LogFile: logFile,
-	}
-	if cfg.DSN == "" {
-		cfg.DSN = DefaultDSN(cfg.Type)
-	}
-	return cfg
-}
-
 func main() {
 	env := utils.NewEnvWithFile("../.env")
-	cfg := loadConfig(env)
-	db, err := models.OpenDB(cfg.Type, cfg.DSN, cfg.LogFile)
+	cfg := drivers.LoadConfig(env, "test.db")
+	db, err := models.OpenDB(cfg)
 	if err != nil {
 		panic(err)
 	}

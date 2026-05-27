@@ -35,11 +35,10 @@ func NewStateSelectFrom[T, R any](state *StateWhere, table *Table[T]) *StateSele
 		state = NewStateWhere(ctx)
 	}
 	state.builder.Type = model.SelectQuery
-	state.builder.SetTable(&table.TableInfo, table.db.driver)
-	sorted := table.GetSortedFields()
-	visitFields := make([]*Field, len(sorted))
-	copy(visitFields, sorted)
-	state.builder.VisitFields = visitFields
+	state.builder.SetTable(&table.TableInfo)
+	// Share sortedFields directly; Select() will clone on first append.
+	state.builder.VisitFields = table.GetSortedFields()
+	state.builder.visitFieldsShared = true
 	return &StateSelect[T, R]{table: table, StateWhere: state}
 }
 
@@ -64,6 +63,14 @@ func (s *StateSelect[T, R]) CopyFrom(other *StateWhere) *StateSelect[T, R] {
 // Select specifies the fields to select from the table
 // It accepts field names as strings or Field objects
 func (s *StateSelect[T, R]) Select(fields ...any) *StateSelect[T, R] {
+	// Clone VisitFields if shared with table's sortedFields
+	if s.builder.visitFieldsShared {
+		orig := s.builder.VisitFields
+		clone := make([]*Field, len(orig))
+		copy(clone, orig)
+		s.builder.VisitFields = clone
+		s.builder.visitFieldsShared = false
+	}
 	var fld *Field
 	for _, one := range fields {
 		if col, ok := one.(string); ok {
@@ -83,6 +90,10 @@ func (s *StateSelect[T, R]) getFetchFunc() FetchFunc {
 		if _, ok := any(new(R)).(GenScanDest); ok {
 			return genScanDestFetch[R]
 		}
+		// Use cached FetchFunc for simple Select (sameModel, no joins)
+		if s.table.fetchAll != nil {
+			return s.table.fetchAll
+		}
 	}
 	info, fields := s.table.TableInfo, s.builder.VisitFields
 	return CreateFetchFunc(info, fields, s.GetJoinForeigns())
@@ -98,7 +109,7 @@ func (s *StateSelect[T, R]) FetchRow(qr model.Query, to FetchFunc) (*R, error) {
 	if to == nil {
 		to = s.getFetchFunc()
 	}
-	conn, cfg := s.PrepareWithCache(&s.table.TableInfo)
+	conn, cfg := s.Prepare(&s.table.TableInfo)
 	row, err := qr.WrapQueryRow(s.ctx, conn, cfg)
 	if err != nil || row == nil {
 		return nil, err
@@ -131,7 +142,13 @@ func (s *StateSelect[T, R]) ByPK(id int64) (*R, error) {
 	if sql == "" {
 		return nil, model.ErrNoPrimaryKey
 	}
-	qr := model.CreateQuery(sql, []any{id})
+	// Reuse cached args slice like FindByPK
+	if s.table.argsByPK == nil {
+		s.table.argsByPK = []any{id}
+	} else {
+		s.table.argsByPK[0] = id
+	}
+	qr := model.Query{RawSql: sql, Arguments: s.table.argsByPK}
 	return s.FetchRow(qr, nil)
 }
 
@@ -143,7 +160,7 @@ func (s *StateSelect[T, R]) IterRows(to FetchFunc) iter.Seq2[*R, error] {
 	}
 	qr := model.CreateQuery(s.builder.Build(false))
 	builder := s.builder
-	conn, cfg := s.PrepareWithCache(&s.table.TableInfo)
+	conn, cfg := s.Prepare(&s.table.TableInfo)
 	hd := NewHandler(s.ctx, conn, cfg)
 	seq := FetchResult[R](hd, qr, to)
 	return func(yield func(*R, error) bool) {
@@ -410,6 +427,14 @@ func (s *StateSelect[T, R]) LeftJoin(fkey string, refer *Field) *StateSelect[T, 
 	}
 
 	s.Join(model.LeftJoin, *info, EqualsField(leftField, refer))
+	// Clone VisitFields if shared before appending
+	if s.builder.visitFieldsShared {
+		orig := s.builder.VisitFields
+		clone := make([]*Field, len(orig))
+		copy(clone, orig)
+		s.builder.VisitFields = clone
+		s.builder.visitFieldsShared = false
+	}
 	s.builder.VisitFields = append(s.builder.VisitFields, info.GetSortedFields()...)
 	return s
 }

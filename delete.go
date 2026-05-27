@@ -29,7 +29,7 @@ func (s *StateDelete[T]) Match(obj T) *StateDelete[T] {
 // Exec executes the DELETE query
 // It builds and runs the DELETE statement with the specified conditions
 func (s *StateDelete[T]) Exec() error {
-	s.builder.SetTable(&s.table.TableInfo, s.table.db.driver)
+	s.builder.SetTable(&s.table.TableInfo)
 	sql, args := s.builder.Build()
 	if sql == "" {
 		defer PutDeleteBuilder(s.builder)
@@ -38,7 +38,7 @@ func (s *StateDelete[T]) Exec() error {
 	}
 	qr := model.CreateQuery(sql, args)
 	defer PutDeleteBuilder(s.builder)
-	conn, cfg := s.PrepareWithCache(&s.table.TableInfo)
+	conn, cfg := s.Prepare(&s.table.TableInfo)
 	return qr.WrapExec(s.ctx, conn, cfg)
 }
 
@@ -50,7 +50,7 @@ func (s *StateDelete[T]) ByPK(id int64) error {
 	if sql == "" {
 		return model.ErrNoPrimaryKey
 	}
-	conn, cfg := s.PrepareWithCache(&s.table.TableInfo)
+	conn, cfg := s.Prepare(&s.table.TableInfo)
 	qr := model.CreateQuery(sql, []any{id})
 	return qr.WrapExec(s.ctx, conn, cfg)
 }
@@ -128,16 +128,9 @@ func (s *StateDeleteWhere) OnTransaction(tx model.Transaction) *StateDeleteWhere
 	return s
 }
 
-func (s *StateDeleteWhere) Prepare(drv model.Driver) (model.Connection, *model.DatabaseConfig) {
-	if s.conn == nil {
-		s.conn = drv.NewConnection()
-	}
-	return s.conn, drv.GetDatabaseConfig()
-}
-
-// PrepareWithCache returns a connection and config, using cached values from TableInfo
-// when no transaction is set, or the transaction connection when one is set.
-func (s *StateDeleteWhere) PrepareWithCache(info *TableInfo) (model.Connection, *model.DatabaseConfig) {
+// Prepare returns a connection and config for query execution.
+// When no transaction is set, it uses cached Connection from TableInfo to avoid allocation.
+func (s *StateDeleteWhere) Prepare(info *TableInfo) (model.Connection, *model.DatabaseConfig) {
 	if s.conn != nil {
 		return s.conn, info.GetConfig()
 	}
@@ -179,16 +172,9 @@ func (s *StateWhere) OnTransaction(tx model.Transaction) *StateWhere {
 	return s
 }
 
-func (s *StateWhere) Prepare(drv model.Driver) (model.Connection, *model.DatabaseConfig) {
-	if s.conn == nil {
-		s.conn = drv.NewConnection()
-	}
-	return s.conn, drv.GetDatabaseConfig()
-}
-
-// PrepareWithCache returns a connection and config, using cached values from TableInfo
-// when no transaction is set, or the transaction connection when one is set.
-func (s *StateWhere) PrepareWithCache(info *TableInfo) (model.Connection, *model.DatabaseConfig) {
+// Prepare returns a connection and config for query execution.
+// When no transaction is set, it uses cached Connection from TableInfo to avoid allocation.
+func (s *StateWhere) Prepare(info *TableInfo) (model.Connection, *model.DatabaseConfig) {
 	if s.conn != nil {
 		return s.conn, info.GetConfig()
 	}

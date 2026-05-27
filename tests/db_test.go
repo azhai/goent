@@ -100,12 +100,6 @@ func (t *Status) InsertValues() []any {
 	}
 }
 
-// InsertChanges writes field values into the changes map for single insert without reflection.
-func (t *Status) InsertChanges(tableInfo *goent.TableInfo, changes map[*goent.Field]any) (string, any, int) {
-	changes[tableInfo.Field("name")] = t.Name
-	return "id", nil, 0
-}
-
 // User is a user in the system.
 type User struct {
 	Id        int    `goe:"pk"`

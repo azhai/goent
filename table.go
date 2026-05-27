@@ -1,11 +1,14 @@
 package goent
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/azhai/goent/model"
 	"github.com/azhai/goent/utils"
@@ -54,6 +57,14 @@ type TableInfo struct {
 	cfgByPK *model.DatabaseConfig
 	// argsByPK is the cached arguments slice for FindByPK fast path.
 	argsByPK []any
+	// cachedPkeys is the cached sorted primary key column names.
+	cachedPkeys []string
+	// insertOneSql is the cached INSERT SQL for single-record inserts.
+	insertOneSql string
+	// insertOneFields is the cached field list for INSERT (non-PK, non-default columns).
+	insertOneFields []*Field
+	// insertOneOnce ensures insertOneSql is initialized only once (concurrent-safe).
+	insertOneOnce sync.Once
 }
 
 // String returns the table name as a string representation.
@@ -110,18 +121,28 @@ func (info *TableInfo) Field(name string) *Field {
 
 // GetPrimaryInfo returns the primary key field ID, column name, and all primary key column names.
 // It only returns valid field ID and column name for single-column primary keys.
-func (info TableInfo) GetPrimaryInfo() (int, string, []string) {
-	pkFid, pkName := -1, ""
+// The pkeys slice is cached to avoid allocation on repeated calls.
+func (info *TableInfo) GetPrimaryInfo() (int, string, []string) {
+	if info.cachedPkeys != nil {
+		pkFid, pkName := -1, ""
+		if len(info.PrimaryKeys) == 1 {
+			pkFid = info.PrimaryKeys[0].Column.FieldId
+			pkName = info.PrimaryKeys[0].ColumnName
+		}
+		return pkFid, pkName, info.cachedPkeys
+	}
 	size := len(info.PrimaryKeys)
 	pkeys := make([]string, 0, size)
 	for _, pkey := range info.PrimaryKeys {
 		pkeys = append(pkeys, pkey.ColumnName)
 	}
+	sort.Strings(pkeys)
+	info.cachedPkeys = pkeys
+	pkFid, pkName := -1, ""
 	if size == 1 {
 		pkFid = info.PrimaryKeys[0].Column.FieldId
 		pkName = info.PrimaryKeys[0].ColumnName
 	}
-	sort.Strings(pkeys)
 	return pkFid, pkName, pkeys
 }
 
@@ -255,6 +276,10 @@ type Table[T any] struct {
 	Model *T
 	db    *DB
 	TableInfo
+	// fetchAll is the cached FetchFunc for simple Select (sameModel, no joins).
+	fetchAll FetchFunc
+	// fetchAllOnce ensures fetchAll is initialized only once (concurrent-safe).
+	fetchAllOnce sync.Once
 }
 
 // SimpleTable creates a new Table instance for a simple table without foreign keys.
@@ -396,6 +421,7 @@ func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schem
 		if strings.EqualFold(fieldOf.Name, "id") || utils.HasTagValue(geoTag, "pk") {
 			isAutoIncr := !utils.HasTagValue(geoTag, "not_incr") && strings.Contains(fieldOf.Type.Kind().String(), "int")
 			column.isAutoIncr = isAutoIncr
+			column.IsPK = true
 			info.PrimaryKeys = append(info.PrimaryKeys, &Index{
 				IsUnique:   true,
 				IsAutoIncr: isAutoIncr,
@@ -681,6 +707,121 @@ func (t *Table[T]) InsertContext(ctx context.Context) *StateInsert[T] {
 	return &StateInsert[T]{table: t, StateWhere: s}
 }
 
+// InsertOne inserts a single record using a fast path that bypasses Builder creation.
+// It uses cached SQL and pre-computed field positions to minimize allocations.
+// Falls back to the standard Insert().One() path for complex cases.
+func (t *Table[T]) InsertOne(obj *T) error {
+	return t.InsertOneContext(context.Background(), obj)
+}
+
+// InsertOneContext inserts a single record with a specific context using a fast path.
+func (t *Table[T]) InsertOneContext(ctx context.Context, obj *T) error {
+	// Try fast path: single auto-increment PK, no defaults on non-PK columns
+	if len(t.PrimaryKeys) == 1 && t.PrimaryKeys[0].IsAutoIncr {
+		if sql, fields := t.getInsertOneSql(); sql != "" {
+			return t.insertOneFastPath(ctx, sql, fields, obj)
+		}
+	}
+	// Fallback to standard path
+	return t.InsertContext(ctx).One(obj)
+}
+
+// getInsertOneSql returns the cached INSERT SQL and field list for the fast path.
+// Returns empty string if the fast path is not applicable.
+func (t *Table[T]) getInsertOneSql() (string, []*Field) {
+	t.insertOneOnce.Do(func() {
+		// Only cache for simple tables: single auto-incr PK, no default values on non-PK columns
+		pkName := t.PrimaryKeys[0].ColumnName
+		var fields []*Field
+		applicable := true
+		for _, col := range t.Columns {
+			if col.IsPK && col.isAutoIncr {
+				continue // Skip auto-increment PK
+			}
+			if col.HasDefault {
+				// Columns with defaults need runtime check, can't use fast path
+				applicable = false
+				break
+			}
+			fields = append(fields, t.sortedFields[col.FieldId])
+		}
+		if !applicable {
+			return // insertOneSql stays empty, marking fast path not applicable
+		}
+		// Build the INSERT SQL
+		var buf bytes.Buffer
+		buf.WriteString("INSERT INTO ")
+		buf.WriteString(t.GetFormattedName())
+		buf.WriteString(" (")
+		for i, fld := range fields {
+			if i > 0 {
+				buf.WriteString(", ")
+			}
+			buf.WriteString(fld.Simple())
+		}
+		buf.WriteString(") VALUES (")
+		for i := range fields {
+			if i > 0 {
+				buf.WriteString(", ")
+			}
+			buf.WriteByte('$')
+			buf.WriteString(strconv.Itoa(i + 1))
+		}
+		buf.WriteByte(')')
+		// Add RETURNING clause if supported
+		if t.db.driver.SupportsReturning() {
+			buf.WriteString(" RETURNING ")
+			buf.WriteString(pkName)
+		}
+		t.insertOneSql = buf.String()
+		t.insertOneFields = fields
+	})
+	return t.insertOneSql, t.insertOneFields
+}
+
+// insertOneFastPath executes the INSERT using cached SQL, bypassing Builder.
+func (t *Table[T]) insertOneFastPath(ctx context.Context, sql string, fields []*Field, obj *T) error {
+	valueOf := reflect.ValueOf(obj).Elem()
+	args := make([]any, len(fields))
+	for i, fld := range fields {
+		args[i] = valueOf.Field(fld.FieldId).Interface()
+	}
+
+	conn := t.GetConnection()
+	qr := model.Query{RawSql: sql, Arguments: args}
+
+	if t.db.driver.SupportsReturning() {
+		row := conn.QueryRowContext(ctx, &qr)
+		if row == nil {
+			return model.ErrNoRows
+		}
+		pkFid := t.PrimaryKeys[0].Column.FieldId
+		fieldOf := valueOf.Field(pkFid)
+		return row.Scan(fieldOf.Addr().Interface())
+	}
+
+	err := conn.ExecContext(ctx, &qr)
+	if err != nil {
+		return err
+	}
+	// SQLite: get last insert rowid
+	if t.PrimaryKeys[0].IsAutoIncr {
+		return t.getLastInsertIdFastPath(ctx, conn, valueOf)
+	}
+	return nil
+}
+
+func (t *Table[T]) getLastInsertIdFastPath(ctx context.Context, conn model.Connection, valueOf reflect.Value) error {
+	qr := model.Query{RawSql: "SELECT last_insert_rowid()"}
+	row := conn.QueryRowContext(ctx, &qr)
+	if row == nil {
+		return model.ErrNoRows
+	}
+	pkFid := t.PrimaryKeys[0].Column.FieldId
+	fieldOf := valueOf.Field(pkFid)
+	return row.Scan(fieldOf.Addr().Interface())
+}
+
 // Save creates a new StateSave for saving (insert or update) records to the table.
 //
 // Example:
@@ -793,6 +934,10 @@ func (t *Table[T]) SelectContext(ctx context.Context, fields ...any) *StateSelec
 		state.Select(fields...)
 	} else {
 		state.sameModel = true
+		// Cache the FetchFunc for simple Select (sameModel, no joins)
+		t.fetchAllOnce.Do(func() {
+			t.fetchAll = t.newFetchByPKFunc() // same logic: reflect over sortedFields
+		})
 	}
 	return state
 }

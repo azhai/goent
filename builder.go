@@ -107,8 +107,8 @@ func (b *DeleteBuilder) Reset() {
 }
 
 // SetTable sets the table for the DeleteBuilder
-// It formats the full table name including schema using the driver
-func (b *DeleteBuilder) SetTable(table *TableInfo, driver model.Driver) *DeleteBuilder {
+// It uses cached formatted name from TableInfo to avoid allocation.
+func (b *DeleteBuilder) SetTable(table *TableInfo) *DeleteBuilder {
 	c := &b.core
 	c.Table = table.Table()
 	c.fullName = table.GetFormattedName()
@@ -138,7 +138,8 @@ func (b *DeleteBuilder) buildHead() []any {
 func (b *DeleteBuilder) buildTail() []any {
 	c := &b.core
 	if c.Limit > 0 {
-		c.buf.WriteString(" LIMIT " + strconv.Itoa(c.Limit))
+		c.buf.WriteString(" LIMIT ")
+		c.buf.WriteString(strconv.Itoa(c.Limit))
 	}
 	return nil
 }
@@ -190,20 +191,19 @@ func (b *DeleteBuilder) buildTemplate(cond Condition, args *[]any, startIdx int,
 func (b *DeleteBuilder) appendValueParam(val *Value, startIdx int, args *[]any) int {
 	c := &b.core
 	if len(val.Args) > 0 {
-		c.buf.WriteString("(")
+		c.buf.WriteByte('(')
 		for j, arg := range val.Args {
 			startIdx++
 			if j > 0 {
-				c.buf.WriteString(", $" + strconv.Itoa(startIdx))
-			} else {
-				c.buf.WriteString("$" + strconv.Itoa(startIdx))
+				c.buf.WriteByte(',')
 			}
+			c.writeParam(startIdx)
 			*args = append(*args, arg)
 		}
 		c.buf.WriteByte(')')
 	} else if val.Length > 0 {
 		startIdx++
-		c.buf.WriteString("$" + strconv.Itoa(startIdx))
+		c.writeParam(startIdx)
 		if val.single != nil {
 			*args = append(*args, val.single)
 		} else {
@@ -243,6 +243,9 @@ type Builder struct {
 	Returning string // RETURNING clause for INSERT/UPDATE operations
 	RollUp    string // ROLL UP clause for GROUP BY operations
 	ForUpdate bool   // FOR UPDATE clause for transactional operations
+
+	cachedSortedChanges []*Field // Cached sorted changes to avoid re-sorting
+	visitFieldsShared   bool     // Whether VisitFields is shared (needs clone before append)
 
 	core BuilderCore // Shared core fields (composition, not embedding)
 }
@@ -291,6 +294,7 @@ func (b *Builder) Reset() {
 	b.Groups = nil
 	b.Offset = 0
 	b.RollUp = ""
+	b.visitFieldsShared = false
 	b.core.resetBuf()
 }
 
@@ -305,6 +309,7 @@ func (b *Builder) ResetForSave() {
 	b.ForUpdate = false
 	b.core.argNo = 0
 	b.core.resetHolders()
+	b.cachedSortedChanges = nil
 }
 
 // IsJoinQuery checks if the query is a join query
@@ -317,7 +322,12 @@ func (b *Builder) IsInsertQuery() bool {
 	return b.Type == model.InsertQuery || b.Type == model.InsertAllQuery
 }
 
+// sortedChanges returns the changes sorted by FieldId.
+// The result is cached after the first call and cleared by ResetForSave.
 func (b *Builder) sortedChanges() []*Field {
+	if b.cachedSortedChanges != nil {
+		return b.cachedSortedChanges
+	}
 	fields := make([]*Field, 0, len(b.Changes))
 	for f := range b.Changes {
 		fields = append(fields, f)
@@ -328,12 +338,13 @@ func (b *Builder) sortedChanges() []*Field {
 		}
 		return strings.Compare(a.ColumnName, b.ColumnName)
 	})
+	b.cachedSortedChanges = fields
 	return fields
 }
 
 // SetTable sets the table for the query builder
-// It formats the full table name including schema using the driver
-func (b *Builder) SetTable(table *TableInfo, driver model.Driver) *Builder {
+// It uses cached formatted name from TableInfo to avoid allocation.
+func (b *Builder) SetTable(table *TableInfo) *Builder {
 	c := &b.core
 	c.Table = table.Table()
 	c.fullName = table.GetFormattedName()
@@ -394,15 +405,18 @@ func (b *Builder) buildHead() []any {
 			panic("goent: buildHead called with empty table name for INSERT query - missing SetTable() call")
 		}
 		c.buf.WriteByte('(')
-		var columns []string
-		for _, f := range b.sortedChanges() {
+		for i, f := range b.sortedChanges() {
 			v := b.Changes[f]
 			c.argNo += 1
-			c.holders = append(c.holders, "$"+strconv.Itoa(c.argNo))
+			if i > 0 {
+				c.holders = append(c.holders, "$"+strconv.Itoa(c.argNo))
+				c.buf.WriteString(", ")
+			} else {
+				c.holders = append(c.holders, "$"+strconv.Itoa(c.argNo))
+			}
 			args = append(args, v)
-			columns = append(columns, f.Simple())
+			c.buf.WriteString(f.Simple())
 		}
-		c.buf.WriteString(strings.Join(columns, ", "))
 	case model.InsertAllQuery:
 		c.buf.WriteString("INSERT INTO ")
 		if c.fullName != "" {
@@ -435,7 +449,12 @@ func (b *Builder) buildDoing() []any {
 		return args
 	case model.InsertQuery:
 		c.buf.WriteString(") VALUES (")
-		c.buf.WriteString(strings.Join(c.holders, ", "))
+		for i, holder := range c.holders {
+			if i > 0 {
+				c.buf.WriteByte(',')
+			}
+			c.buf.WriteString(holder)
+		}
 		c.buf.WriteByte(')')
 	case model.InsertAllQuery:
 		if len(b.InsertValues) == 0 {
@@ -450,7 +469,12 @@ func (b *Builder) buildDoing() []any {
 				c.holders[j] = "$" + strconv.Itoa(c.argNo)
 			}
 			args = append(args, row...)
-			c.buf.WriteString(strings.Join(c.holders, ", "))
+			for j, holder := range c.holders {
+				if j > 0 {
+					c.buf.WriteByte(',')
+				}
+				c.buf.WriteString(holder)
+			}
 			if i != last {
 				c.buf.WriteString("), (")
 			}
@@ -467,7 +491,9 @@ func (b *Builder) buildDoing() []any {
 			if i > 0 {
 				c.buf.WriteString(", ")
 			}
-			c.buf.WriteString(f.Simple() + "=$" + strconv.Itoa(c.argNo))
+			c.buf.WriteString(f.Simple())
+			c.buf.WriteByte('=')
+			c.writeParam(c.argNo)
 			args = append(args, v)
 		}
 	case model.UpdateJoinQuery:
@@ -481,10 +507,14 @@ func (b *Builder) buildDoing() []any {
 				c.buf.WriteString(", ")
 			}
 			if fld, ok := v.(*Field); ok {
-				c.buf.WriteString(f.Simple() + "=" + fld.String())
+				c.buf.WriteString(f.Simple())
+				c.buf.WriteByte('=')
+				c.buf.WriteString(fld.String())
 			} else {
 				c.argNo += 1
-				c.buf.WriteString(f.Simple() + "=$" + strconv.Itoa(c.argNo))
+				c.buf.WriteString(f.Simple())
+				c.buf.WriteByte('=')
+				c.writeParam(c.argNo)
 				args = append(args, v)
 			}
 		}
@@ -501,23 +531,25 @@ func (b *Builder) buildTail() []any {
 
 	if b.Type == model.DeleteQuery {
 		if c.Limit > 0 {
-			c.buf.WriteString(" LIMIT " + strconv.Itoa(c.Limit))
+			c.buf.WriteString(" LIMIT ")
+			c.buf.WriteString(strconv.Itoa(c.Limit))
 		}
 	}
 
 	if b.Type == model.SelectQuery || b.Type == model.SelectJoinQuery {
 		if len(b.Groups) != 0 {
-			c.buf.WriteString(" ")
+			c.buf.WriteByte(' ')
 			gp := b.Groups[0]
-			c.buf.WriteString("GROUP BY " + gp.String())
+			c.buf.WriteString("GROUP BY ")
+			c.buf.WriteString(gp.String())
 			for _, gp = range b.Groups[1:] {
-				c.buf.WriteString("," + gp.String())
+				c.buf.WriteByte(',')
+				c.buf.WriteString(gp.String())
 			}
 		}
 
 		if len(b.Orders) != 0 {
-			c.buf.WriteString(" ")
-			c.buf.WriteString("ORDER BY ")
+			c.buf.WriteString(" ORDER BY ")
 			for i, ob := range b.Orders {
 				if i > 0 {
 					c.buf.WriteString(", ")
@@ -530,10 +562,12 @@ func (b *Builder) buildTail() []any {
 		}
 
 		if c.Limit > 0 {
-			c.buf.WriteString(" LIMIT " + strconv.Itoa(c.Limit))
+			c.buf.WriteString(" LIMIT ")
+			c.buf.WriteString(strconv.Itoa(c.Limit))
 		}
 		if b.Offset > 0 {
-			c.buf.WriteString(" OFFSET " + strconv.Itoa(b.Offset))
+			c.buf.WriteString(" OFFSET ")
+			c.buf.WriteString(strconv.Itoa(b.Offset))
 		}
 	}
 
@@ -607,23 +641,30 @@ func (b *Builder) buildTemplate(cond Condition, args *[]any, startIdx int, full 
 	return startIdx
 }
 
+// writeParam writes a parameter placeholder ($N) directly to the buffer.
+// It avoids string concatenation by writing directly to the buffer.
+func (c *BuilderCore) writeParam(n int) {
+	c.buf.WriteByte('$')
+	c.buf.WriteString(strconv.Itoa(n))
+}
+
+// appendValueParam writes value parameters to the buffer for Builder.
 func (b *Builder) appendValueParam(val *Value, startIdx int, args *[]any) int {
 	c := &b.core
 	if len(val.Args) > 0 {
-		c.buf.WriteString("(")
+		c.buf.WriteByte('(')
 		for j, arg := range val.Args {
 			startIdx++
 			if j > 0 {
-				c.buf.WriteString(", $" + strconv.Itoa(startIdx))
-			} else {
-				c.buf.WriteString("$" + strconv.Itoa(startIdx))
+				c.buf.WriteByte(',')
 			}
+			c.writeParam(startIdx)
 			*args = append(*args, arg)
 		}
 		c.buf.WriteByte(')')
 	} else if val.Length > 0 {
 		startIdx++
-		c.buf.WriteString("$" + strconv.Itoa(startIdx))
+		c.writeParam(startIdx)
 		if val.single != nil {
 			*args = append(*args, val.single)
 		} else {
@@ -673,20 +714,22 @@ func (b *Builder) Build(destroy bool) (sql string, args []any) {
 // It sets the builder's returning information for auto-increment primary keys
 // and returns a map of primary key column names to their values
 func CollectFields[T any](builder *Builder, table *Table[T], valueOf reflect.Value, ignores []string) (Dict, int) {
-	pkFid, pkName, pkeys := table.TableInfo.GetPrimaryInfo()
-	primary := make(Dict, len(pkeys))
+	pkFid, pkName, _ := table.TableInfo.GetPrimaryInfo()
+	var primary Dict
 	for _, col := range table.Columns {
 		if len(ignores) > 0 && slices.Contains(ignores, col.FieldName) {
 			continue
 		}
-		name := col.ColumnName
-		fieldOf := valueOf.FieldByName(col.FieldName)
-		if slices.Contains(pkeys, name) {
+		fieldOf := valueOf.Field(col.FieldId)
+		if col.IsPK {
+			if primary == nil {
+				primary = make(Dict, len(table.PrimaryKeys))
+			}
 			if !fieldOf.IsZero() {
-				primary[name] = fieldOf.Interface()
+				primary[col.ColumnName] = fieldOf.Interface()
 			} else if col.HasDefault && col.DefaultValue != "" {
 				setDefaultValue(fieldOf, col.DefaultValue)
-				primary[name] = fieldOf.Interface()
+				primary[col.ColumnName] = fieldOf.Interface()
 			}
 			continue
 		}
@@ -696,8 +739,7 @@ func CollectFields[T any](builder *Builder, table *Table[T], valueOf reflect.Val
 		if col.HasDefault && fieldOf.IsZero() {
 			continue
 		}
-		fld := table.Field(name)
-		builder.Changes[fld] = fieldOf.Interface()
+		builder.Changes[table.sortedFields[col.FieldId]] = fieldOf.Interface()
 	}
 	if pkName != "" && len(primary) == 0 {
 		for _, pk := range table.PrimaryKeys {

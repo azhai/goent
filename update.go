@@ -23,14 +23,14 @@ type StateUpdate[T any] struct {
 //	err := db.User.Where("id = ?", 1).Update().Set(change).Exec()
 func (s *StateUpdate[T]) Exec() error {
 	defer PutBuilder(s.builder)
-	s.builder.SetTable(&s.table.TableInfo, s.table.db.driver)
+	s.builder.SetTable(&s.table.TableInfo)
 	sql, args := s.builder.Build(true)
 	if sql == "" {
 		return fmt.Errorf("goent: StateUpdate.Exec built empty SQL (Type=%d, Changes=%d, Where=%v, args=%v)",
 			s.builder.Type, len(s.builder.Changes), !s.builder.core.Where.IsEmpty(), args)
 	}
 	qr := model.CreateQuery(sql, args)
-	conn, cfg := s.PrepareWithCache(&s.table.TableInfo)
+	conn, cfg := s.Prepare(&s.table.TableInfo)
 	return qr.WrapExec(s.ctx, conn, cfg)
 }
 

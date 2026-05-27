@@ -7,13 +7,9 @@ package models
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/azhai/goent"
-	"github.com/azhai/goent/drivers/pgsql"
-	"github.com/azhai/goent/drivers/sqlite"
-	"github.com/azhai/goent/model"
-	"github.com/azhai/goent/utils"
+	"github.com/azhai/goent/drivers"
 )
 
 var (
@@ -37,16 +33,11 @@ func CloseDB() {
 	}
 }
 
-func OpenDB(dbType, dbDSN, logFile string) (*Database, error) {
-	drv := connect(dbType, dbDSN)
-	if drv != nil && logFile != "" {
-		logger, err := utils.CreateDailyLogger(logFile, true)
-		if err = drv.AddLogger(logger, err); err != nil {
-			return nil, err
-		}
+func OpenDB(cfg drivers.DatabaseConfig) (*Database, error) {
+	drv, err := drivers.Connect(cfg)
+	if err != nil {
+		return nil, err
 	}
-
-	var err error
 	db, err = goent.Open[Database](drv)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to connect database: %v", err)
@@ -58,15 +49,4 @@ func OpenDB(dbType, dbDSN, logFile string) (*Database, error) {
 		return nil, fmt.Errorf("Failed to migrate database: %v", err)
 	}
 	return db, nil
-}
-
-func connect(dbType, dbDSN string) model.Driver {
-	if dbType == "pgsql" || dbType == "postgres" {
-		return pgsql.OpenDSN(dbDSN)
-	} else if dbType == "" && strings.HasPrefix(dbDSN, "postgres://") {
-		return pgsql.OpenDSN(dbDSN)
-	} else {
-		_ = utils.MakeDirForFile(dbDSN)
-		return sqlite.OpenDSN(dbDSN)
-	}
 }

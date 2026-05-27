@@ -14,6 +14,7 @@ type Column struct {
 	AllowNull    bool    // Whether the column allows NULL values
 	HasDefault   bool    // Whether the column has a default value
 	DefaultValue string  // The default value from struct tag
+	IsPK         bool    // Whether this column is a primary key
 	tableName    string  // Table name (internal)
 	schemaName   *string // Schema name (internal)
 	isAutoIncr   bool    // Whether the column is auto-increment

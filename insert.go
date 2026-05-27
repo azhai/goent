@@ -19,50 +19,24 @@ type StateInsert[T any] struct {
 func (s *StateInsert[T]) One(obj *T) error {
 	defer PutBuilder(s.builder)
 	s.builder.Type = model.InsertQuery
-	s.builder.SetTable(&s.table.TableInfo, s.table.db.driver)
+	s.builder.SetTable(&s.table.TableInfo)
 	s.builder.ResetForSave()
 
-	var valueOf reflect.Value
-	var retFid int
-	var returning string
-
-	// Try GenInsertChanges interface first to avoid reflection
-	if gen, ok := any(obj).(GenInsertChanges); ok {
-		pkName, pkValue, pkFid := gen.InsertChanges(&s.table.TableInfo, s.builder.Changes)
-		if pkName != "" && pkValue != nil {
-			s.builder.Changes[s.table.Field(pkName)] = pkValue
-		}
-		retFid = pkFid
-		if pkFid >= 0 && pkValue == nil {
-			for _, pk := range s.table.PrimaryKeys {
-				if pk.Column.HasDefault || pk.IsAutoIncr {
-					s.builder.Returning = pkName
-					break
-				}
-			}
-		}
-		returning = s.builder.Returning
-	} else {
-		valueOf = reflect.ValueOf(obj).Elem()
-		primary, fid := CollectFields(s.builder, s.table, valueOf, nil)
-		for name, val := range primary {
-			s.builder.Changes[s.table.Field(name)] = val
-		}
-		retFid = fid
-		returning = s.builder.Returning
+	valueOf := reflect.ValueOf(obj).Elem()
+	primary, retFid := CollectFields(s.builder, s.table, valueOf, nil)
+	for name, val := range primary {
+		s.builder.Changes[s.table.Field(name)] = val
 	}
 
+	returning := s.builder.Returning
 	sql, args := s.builder.Build(true)
 	if sql == "" {
 		return fmt.Errorf("goent: StateInsert.One built empty SQL (Type=%d, Changes=%d, args=%v)",
 			s.builder.Type, len(s.builder.Changes), args)
 	}
 	qr := model.CreateQuery(sql, args)
-	conn, cfg := s.PrepareWithCache(&s.table.TableInfo)
+	conn, cfg := s.Prepare(&s.table.TableInfo)
 	if retFid >= 0 && returning != "" && s.table.db.driver.SupportsReturning() {
-		if !valueOf.IsValid() {
-			valueOf = reflect.ValueOf(obj).Elem()
-		}
 		hd := NewHandler(s.ctx, conn, cfg)
 		return hd.ExecuteReturning(qr, valueOf, retFid)
 	}
@@ -71,9 +45,6 @@ func (s *StateInsert[T]) One(obj *T) error {
 		return err
 	}
 	if retFid >= 0 && returning != "" && s.table.PrimaryKeys[0].IsAutoIncr && !s.table.db.driver.SupportsReturning() {
-		if !valueOf.IsValid() {
-			valueOf = reflect.ValueOf(obj).Elem()
-		}
 		return s.getLastInsertId(valueOf, retFid)
 	}
 	return nil
@@ -81,7 +52,7 @@ func (s *StateInsert[T]) One(obj *T) error {
 
 func (s *StateInsert[T]) getLastInsertId(valueOf reflect.Value, retFid int) error {
 	qr := model.CreateQuery("SELECT last_insert_rowid()", nil)
-	conn, cfg := s.PrepareWithCache(&s.table.TableInfo)
+	conn, cfg := s.Prepare(&s.table.TableInfo)
 	row, err := qr.WrapQueryRow(s.ctx, conn, cfg)
 	if err != nil {
 		return err
@@ -96,7 +67,7 @@ func (s *StateInsert[T]) getLastInsertId(valueOf reflect.Value, retFid int) erro
 
 func (s *StateInsert[T]) queryLastInsertId() (int64, error) {
 	qr := model.CreateQuery("SELECT last_insert_rowid()", nil)
-	conn, cfg := s.PrepareWithCache(&s.table.TableInfo)
+	conn, cfg := s.Prepare(&s.table.TableInfo)
 	row, err := qr.WrapQueryRow(s.ctx, conn, cfg)
 	if err != nil {
 		return 0, err
@@ -120,7 +91,7 @@ func (s *StateInsert[T]) All(retPK bool, data []*T) error {
 		return s.One(data[0])
 	}
 	s.builder.Type = model.InsertAllQuery
-	s.builder.SetTable(&s.table.TableInfo, s.table.db.driver)
+	s.builder.SetTable(&s.table.TableInfo)
 	s.builder.ResetForSave()
 
 	isAutoIncr := false
@@ -167,7 +138,7 @@ func (s *StateInsert[T]) All(retPK bool, data []*T) error {
 
 	returning := s.builder.Returning
 	qr := model.CreateQuery(s.builder.Build(true))
-	conn, cfg := s.PrepareWithCache(&s.table.TableInfo)
+	conn, cfg := s.Prepare(&s.table.TableInfo)
 	if pkFid >= 0 && returning != "" && isAutoIncr && s.table.db.driver.SupportsReturning() {
 		valueOf := reflect.ValueOf(data)
 		hd := NewHandler(s.ctx, conn, cfg)
@@ -236,7 +207,7 @@ func (s *StateSave[T]) getQuery(primary Dict) model.Query {
 // It automatically handles insert/update logic based on primary key presence
 func (s *StateSave[T]) One(obj *T) error {
 	defer PutBuilder(s.builder)
-	s.builder.SetTable(&s.table.TableInfo, s.table.db.driver)
+	s.builder.SetTable(&s.table.TableInfo)
 	s.builder.ResetForSave()
 
 	// Fast path: use UpdatePairs for single PK update (no reflection needed)
@@ -251,7 +222,7 @@ func (s *StateSave[T]) One(obj *T) error {
 	valueOf := reflect.ValueOf(obj).Elem()
 	primary, retFid := CollectFields(s.builder, s.table, valueOf, s.table.Ignores)
 	qr := s.Take(1).getQuery(primary)
-	conn, cfg := s.PrepareWithCache(&s.table.TableInfo)
+	conn, cfg := s.Prepare(&s.table.TableInfo)
 	if s.builder.Returning != "" {
 		hd := NewHandler(s.ctx, conn, cfg)
 		return hd.ExecuteReturning(qr, valueOf, retFid)
@@ -263,7 +234,7 @@ func (s *StateSave[T]) One(obj *T) error {
 // It extracts primary keys from the map to determine insert/update logic
 func (s *StateSave[T]) Map(value Dict) error {
 	defer PutBuilder(s.builder)
-	s.builder.SetTable(&s.table.TableInfo, s.table.db.driver)
+	s.builder.SetTable(&s.table.TableInfo)
 	s.builder.ResetForSave()
 
 	primary := make(Dict, len(s.table.PrimaryKeys))
@@ -280,7 +251,7 @@ func (s *StateSave[T]) Map(value Dict) error {
 	}
 
 	qr := s.getQuery(primary)
-	conn, cfg := s.PrepareWithCache(&s.table.TableInfo)
+	conn, cfg := s.Prepare(&s.table.TableInfo)
 	return qr.WrapExec(s.ctx, conn, cfg)
 }
 

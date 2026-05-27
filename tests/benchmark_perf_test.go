@@ -273,6 +273,21 @@ func BenchmarkInsertOne(b *testing.B) {
 	}
 }
 
+func BenchmarkInsertOneFastPath(b *testing.B) {
+	db, err := Setup()
+	if err != nil {
+		b.Skipf("Skipping: %v", err)
+		return
+	}
+	db.Status.Delete().Exec()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		s := &Status{Name: "Test"}
+		_ = db.Status.InsertOne(s)
+	}
+}
+
 func BenchmarkInsertBatch(b *testing.B) {
 	db, err := Setup()
 	if err != nil {
