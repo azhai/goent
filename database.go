@@ -203,7 +203,17 @@ func (db *DB) BeginTransactionContext(ctx context.Context, isolation sql.Isolati
 	if tx, err = db.NewTransactionContext(ctx, isolation); err != nil {
 		return
 	}
-	return RunTransaction(tx, exec)
+	defer func() {
+		if r := recover(); r != nil {
+			_ = tx.Rollback()
+			panic(r)
+		}
+	}()
+	if err = exec(tx); err != nil {
+		_ = tx.Rollback()
+		return
+	}
+	return tx.Commit()
 }
 
 // DropTables drops all registered tables from the database

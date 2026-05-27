@@ -327,7 +327,12 @@ func checkFields(b body) {
 				if att.Default == "" {
 					alter = true
 				}
-				if *column.defaultValue != setDefault(att.Default)[8:] {
+				defaultExpr := setDefault(att.Default)
+				defaultSuffix := ""
+				if len(defaultExpr) >= 8 {
+					defaultSuffix = defaultExpr[8:]
+				}
+				if *column.defaultValue != defaultSuffix {
 					alter = true
 				}
 			}
@@ -362,20 +367,81 @@ func alterSqlite(b body) {
 	newTable.EscapingName = keywordHandler(newTable.Name)
 	sqlBuilder := &strings.Builder{}
 
-	insertColumns, selectColumns := tableAttributes(b.table)
+	insertColumns, selectExprs := tableAttributesWithDB(b)
 	sqlBuilder.WriteString("BEGIN TRANSACTION; PRAGMA foreign_keys=OFF; \n")
 	createTable(&newTable, b.dataMap, sqlBuilder, b.tables, true)
 	sqlBuilder.WriteString(
 		fmt.Sprintf("INSERT INTO %v (%v) SELECT %v FROM %v;\n",
 			newTable.EscapingTableName(),
 			insertColumns,
-			selectColumns,
+			selectExprs,
 			b.table.EscapingTableName()))
 	sqlBuilder.WriteString("DROP TABLE " + b.table.EscapingTableName() + ";\n")
 	sqlBuilder.WriteString(fmt.Sprintf("ALTER TABLE %v RENAME TO %v;\n", newTable.EscapingTableName(), b.table.EscapingName))
 	sqlBuilder.WriteString("PRAGMA foreign_keys=ON; COMMIT;")
 
 	b.sql.WriteString(sqlBuilder.String())
+}
+
+// tableAttributesWithDB builds insert column names from the model and select expressions
+// that map to the actual database columns. For columns that exist in the DB, use the DB
+// column name; for new columns not yet in the DB, use the default value expression.
+func tableAttributesWithDB(b body) (string, string) {
+	insertCols := &strings.Builder{}
+	selectExprs := &strings.Builder{}
+
+	// Helper to append a column pair
+	appendPair := func(modelColName string, dbColName string, defaultVal string) {
+		if insertCols.Len() > 0 {
+			insertCols.WriteString(",")
+			selectExprs.WriteString(",")
+		}
+		insertCols.WriteString(modelColName)
+		if dbColName != "" {
+			selectExprs.WriteString(dbColName)
+		} else {
+			// New column not in DB: use default value
+			selectExprs.WriteString(defaultVal)
+		}
+	}
+
+	// Primary keys
+	for _, p := range b.table.PrimaryKeys {
+		dbColName := ""
+		if c, ok := b.dbTable.columns[p.Name]; ok {
+			dbColName = c.columnName
+		}
+		appendPair(p.EscapingName, dbColName, setDefault(p.Default))
+	}
+
+	// Attributes
+	for _, a := range b.table.Attributes {
+		dbColName := ""
+		if c, ok := b.dbTable.columns[a.Name]; ok {
+			dbColName = c.columnName
+		}
+		appendPair(a.EscapingName, dbColName, setDefault(a.Default))
+	}
+
+	// OneToSomes
+	for _, a := range b.table.OneToSomes {
+		dbColName := ""
+		if c, ok := b.dbTable.columns[a.Name]; ok {
+			dbColName = c.columnName
+		}
+		appendPair(a.EscapingName, dbColName, setDefault(a.Default))
+	}
+
+	// ManyToSomes
+	for _, a := range b.table.ManyToSomes {
+		dbColName := ""
+		if c, ok := b.dbTable.columns[a.Name]; ok {
+			dbColName = c.columnName
+		}
+		appendPair(a.EscapingName, dbColName, setDefault(a.Default))
+	}
+
+	return insertCols.String(), selectExprs.String()
 }
 
 func tableAttributes(t *model.TableMigrate) (string, string) {

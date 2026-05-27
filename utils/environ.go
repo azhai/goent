@@ -22,20 +22,32 @@ type Environ struct {
 }
 
 // NewEnv creates a new Environ instance and loads environment variables from the default .env file
-// It initializes the environment manager with variables from the default .env file
+// It panics if the file cannot be opened or read
 func NewEnv() *Environ {
-	return NewEnvWithFile(".env")
+	return MustLoadEnvFile(".env")
 }
 
-// NewEnvWithFile creates a new Environ instance and loads environment variables from the specified file
-// It initializes the storage map and attempts to Load the file
-// If the file cannot be opened or read, the error is ignored
+// NewEnvWithFile is an alias for MustWithFile, kept for backward compatibility
 func NewEnvWithFile(filename string) *Environ {
-	env := &Environ{storage: make(map[string]Entry)}
-	if err := env.Load(os.Open(filename)); err != nil {
+	return MustLoadEnvFile(filename)
+}
+
+// MustLoadEnvFile creates a new Environ instance and loads environment variables from the specified file
+// It panics if the file cannot be opened or read
+func MustLoadEnvFile(filename string) *Environ {
+	env, err := LoadEnvFile(filename)
+	if err != nil {
 		panic(err)
 	}
 	return env
+}
+
+// LoadEnvFile creates a new Environ instance and loads environment variables from the specified file
+// It returns an error if the file cannot be opened or read
+func LoadEnvFile(filename string) (*Environ, error) {
+	env := &Environ{storage: make(map[string]Entry)}
+	err := env.Load(os.Open(filename))
+	return env, err
 }
 
 // Load loads environment variables from a file and stores them in the internal storage

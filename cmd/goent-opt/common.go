@@ -44,8 +44,7 @@ func OpenDB(cfg DBConfig) (*Database, error) {
 		_ = utils.MakeDirForFile(cfg.DSN)
 		drv = sqlite.OpenDSN(cfg.DSN)
 	}
-	logFile := resolveLogFile(NewEnvSafe())
-	db, err := goent.Open[Database](drv, logFile)
+	db, err := goent.Open[Database](drv)
 	if err != nil {
 		return nil, err
 	}

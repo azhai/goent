@@ -394,6 +394,41 @@ func TestUpdate(t *testing.T) {
 		{
 			desc: "Update_PersonJobs_Tx_Rollback",
 			testCase: func(t *testing.T) {
+				// 在事务外插入初始数据，这些数据不会随事务回滚
+				persons := []*Person{
+					{Name: "Jhon"},
+					{Name: "Laura"},
+					{Name: "Luana"},
+				}
+				if err := db.Person.Insert().All(true, persons); err != nil {
+					t.Fatalf("Expected insert persons, got error: %v", err)
+				}
+				t.Cleanup(func() {
+					db.Person.Delete().Exec()
+				})
+
+				jobs := []*JobTitle{
+					{Name: "Developer"},
+					{Name: "Designer"},
+				}
+				if err := db.JobTitle.Insert().All(true, jobs); err != nil {
+					t.Fatalf("Expected insert jobs, got error: %v", err)
+				}
+				t.Cleanup(func() {
+					db.JobTitle.Delete().Exec()
+				})
+
+				// 在事务外插入初始的 personJobs 数据（2条记录对应 jobs[0]）
+				personJobs := []*PersonJobTitle{
+					{PersonId: persons[0].Id, JobTitleId: jobs[0].Id, CreatedAt: time.Now()},
+					{PersonId: persons[1].Id, JobTitleId: jobs[0].Id, CreatedAt: time.Now()},
+				}
+				if err := db.PersonJobTitle.Insert().All(false, personJobs); err != nil {
+					t.Fatalf("Expected insert personJobs, got error: %v", err)
+				}
+				t.Cleanup(func() {
+					db.PersonJobTitle.Delete().Exec()
+				})
 
 				tx, err := db.NewTransaction()
 				if err != nil {
@@ -401,119 +436,80 @@ func TestUpdate(t *testing.T) {
 				}
 				defer tx.Rollback()
 
-				persons := []*Person{
-					{Name: "Jhon"},
-					{Name: "Laura"},
-					{Name: "Luana"},
+				// 在事务内插入第3条记录（person[2] -> jobs[1]）
+				pj3 := &PersonJobTitle{
+					PersonId:   persons[2].Id,
+					JobTitleId: jobs[1].Id,
+					CreatedAt:  time.Now(),
 				}
-				err = db.Person.Insert().OnTransaction(tx).All(true, persons)
+				if err := db.PersonJobTitle.Insert().OnTransaction(tx).One(pj3); err != nil {
+					t.Fatalf("Expected insert personJob, got error: %v", err)
+				}
+
+				// 验证事务内 jobs[0] 的计数为 2（初始的2条，pj3 指向 jobs[1]）
+				count1, err := db.PersonJobTitle.Filter(
+					goent.Equals(db.PersonJobTitle.Field("job_title_id"), jobs[0].Id),
+				).OnTransaction(tx).Count("person_id")
 				if err != nil {
-					tx.Rollback()
-					t.Fatalf("Expected insert persons, got error: %v", err)
+					t.Fatalf("Expected a count, got error: %v", err)
+				}
+				if count1 != 2 {
+					t.Errorf("Expected %v records for job[0], got: %v", 2, count1)
 				}
 
-				jobs := []*JobTitle{
-					{Name: "Developer"},
-					{Name: "Designer"},
-				}
-				err = db.JobTitle.Insert().OnTransaction(tx).All(true, jobs)
-				if err != nil {
-					tx.Rollback()
-					t.Fatalf("Expected insert jobs, got error: %v", err)
-				}
-
-				personJobs := []*PersonJobTitle{
-					{PersonId: persons[0].Id, JobTitleId: jobs[0].Id, CreatedAt: time.Now()},
-					{PersonId: persons[1].Id, JobTitleId: jobs[0].Id, CreatedAt: time.Now()},
-					{PersonId: persons[2].Id, JobTitleId: jobs[1].Id, CreatedAt: time.Now()},
-				}
-				err = db.PersonJobTitle.Insert().OnTransaction(tx).All(false, personJobs)
-				if err != nil {
-					tx.Rollback()
-					t.Fatalf("Expected insert personJobs, got error: %v", err)
-				}
-
-				pj := []struct {
-					JobTitle string
-					Person   string
-				}{}
-				for row, err := range db.Person.Select().OnTransaction(tx).
-					LeftJoin("id", db.PersonJobTitle.Field("person_id")).
-					LeftJoin("job_title_id", db.JobTitle.Field("id")).
-					Filter(goent.Equals(db.JobTitle.Field("id"), jobs[0].Id)).IterRows(nil) {
-
-					if err != nil {
-						t.Fatalf("Expected a select, got error: %v", err)
-					}
-					pj = append(pj, struct {
-						JobTitle string
-						Person   string
-					}{Person: row.Name})
-				}
-
-				if len(pj) != 2 {
-					t.Errorf("Expected %v, got : %v", 2, len(pj))
-				}
-				err = db.PersonJobTitle.Update().OnTransaction(tx).Set(goent.Pair{Key: "job_title_id", Value: jobs[0].Id}).
+				// 更新 person[2] 的 job 从 jobs[1] 到 jobs[0]
+				if err := db.PersonJobTitle.Update().OnTransaction(tx).
+					Set(goent.Pair{Key: "job_title_id", Value: jobs[0].Id}).
 					Filter(
 						goent.And(
 							goent.Equals(db.PersonJobTitle.Field("person_id"), persons[2].Id),
 							goent.Equals(db.PersonJobTitle.Field("job_title_id"), jobs[1].Id),
 						),
-					).Exec()
-
-				if err != nil {
-					tx.Rollback()
+					).Exec(); err != nil {
 					t.Fatalf("Expected a update, got error: %v", err)
 				}
 
-				pj = nil
-				for row, err := range db.Person.Select().OnTransaction(tx).
-					LeftJoin("id", db.PersonJobTitle.Field("person_id")).
-					LeftJoin("job_title_id", db.JobTitle.Field("id")).
-					Filter(goent.Equals(db.JobTitle.Field("id"), jobs[0].Id)).IterRows(nil) {
-
-					if err != nil {
-						t.Fatalf("Expected a select, got error: %v", err)
-					}
-					pj = append(pj, struct {
-						JobTitle string
-						Person   string
-					}{Person: row.Name})
-				}
-
-				if len(pj) != 3 {
-					t.Errorf("Expected %v, got : %v", 3, len(pj))
-				}
-
-				err = tx.Rollback()
+				// 验证更新后 - jobs[0] 的计数应为 3
+				count2, err := db.PersonJobTitle.Filter(
+					goent.Equals(db.PersonJobTitle.Field("job_title_id"), jobs[0].Id),
+				).OnTransaction(tx).Count("person_id")
 				if err != nil {
+					t.Fatalf("Expected a count, got error: %v", err)
+				}
+				if count2 != 3 {
+					t.Errorf("Expected %v records for job[0], got: %v", 3, count2)
+				}
+
+				// 回滚事务
+				if err := tx.Rollback(); err != nil {
 					t.Fatalf("Expected Rollback, got error: %v", err)
 				}
 
-				pj = nil
-				for row, err := range db.Person.Select().
-					LeftJoin("id", db.PersonJobTitle.Field("person_id")).
-					LeftJoin("job_title_id", db.JobTitle.Field("id")).
-					Filter(goent.Equals(db.JobTitle.Field("id"), jobs[0].Id)).IterRows(nil) {
-
-					if err != nil {
-						t.Fatalf("Expected a select, got error: %v", err)
-					}
-					pj = append(pj, struct {
-						JobTitle string
-						Person   string
-					}{Person: row.Name})
+				// 回滚后，计数应恢复为 2
+				count3, err := db.PersonJobTitle.Filter(
+					goent.Equals(db.PersonJobTitle.Field("job_title_id"), jobs[0].Id),
+				).Count("person_id")
+				if err != nil {
+					t.Fatalf("Expected a count, got error: %v", err)
 				}
-
-				if len(pj) != 0 {
-					t.Errorf("Expected %v, got : %v", 0, len(pj))
+				if count3 != 2 {
+					t.Errorf("Expected %v records for job[0] after rollback, got: %v", 2, count3)
 				}
 			},
 		},
 		{
 			desc: "Update_Animal_Db_Tx_Commit",
 			testCase: func(t *testing.T) {
+				// 清理旧数据
+				db.Animal.Delete().Exec()
+				db.Weather.Delete().Exec()
+				db.Habitat.Delete().Exec()
+				t.Cleanup(func() {
+					db.Animal.Delete().Exec()
+					db.Weather.Delete().Exec()
+					db.Habitat.Delete().Exec()
+				})
+
 				a := Animal{
 					Name: "Cat",
 				}
@@ -524,62 +520,63 @@ func TestUpdate(t *testing.T) {
 					Id:   uuid.New(),
 					Name: "City",
 				}
-				err = db.BeginTransaction(func(tx model.Transaction) error {
-					if err = db.Animal.Insert().OnTransaction(tx).One(&a); err != nil {
-						t.Fatalf("Expected a insert animal, got error: %v", err)
+				err := db.BeginTransaction(func(tx model.Transaction) error {
+					if err := db.Animal.Insert().OnTransaction(tx).One(&a); err != nil {
+						return err
 					}
 
 					as := Animal{
 						Name: "Dog",
 					}
+					// 嵌套事务，回滚
 					goent.RunTransaction(tx, func(tx2 model.Transaction) error {
-						if err = db.Animal.Insert().OnTransaction(tx2).One(&as); err != nil {
-							t.Fatalf("Expected a insert animal, got error: %v", err)
+						if err := db.Animal.Insert().OnTransaction(tx2).One(&as); err != nil {
+							return err
 						}
-						if _, err = db.Animal.Select().OnTransaction(tx2).Match(as).One(); err != nil {
-							t.Fatalf("Expected a find animal, got error: %v", err)
+						if _, err := db.Animal.Select().OnTransaction(tx2).Match(as).One(); err != nil {
+							return err
 						}
-						return errors.New("")
+						return errors.New("rollback")
 					})
-					if _, err = db.Animal.Select().OnTransaction(tx).Match(as).One(); !errors.Is(err, model.ErrNoRows) {
-						t.Fatalf("Expected a goent.ErrNoRows, got: %v", err)
+					// 嵌套事务回滚后，外层事务看不到 Dog
+					if _, err := db.Animal.Select().OnTransaction(tx).Match(as).One(); !errors.Is(err, model.ErrNoRows) {
+						t.Fatalf("Expected model.ErrNoRows, got: %v", err)
 					}
 
+					// 嵌套事务，提交
 					goent.RunTransaction(tx, func(tx3 model.Transaction) error {
-						if err = db.Animal.Insert().OnTransaction(tx3).One(&as); err != nil {
-							t.Fatalf("Expected a insert animal, got error: %v", err)
+						if err := db.Animal.Insert().OnTransaction(tx3).One(&as); err != nil {
+							return err
 						}
-						if _, err = db.Animal.Select().OnTransaction(tx3).Match(as).One(); err != nil {
-							t.Fatalf("Expected a find animal, got error: %v", err)
+						if _, err := db.Animal.Select().OnTransaction(tx3).Match(as).One(); err != nil {
+							return err
 						}
 						return nil
 					})
 
-					if _, err = db.Animal.Select().OnTransaction(tx).Match(as).One(); err != nil {
-						t.Fatalf("Expected a find, got: %v", err)
+					// 嵌套事务提交后，外层事务可以看到 Dog
+					if _, err := db.Animal.Select().OnTransaction(tx).Match(as).One(); err != nil {
+						return err
 					}
 
-					err = db.Weather.Insert().OnTransaction(tx).One(&w)
-					if err != nil {
-						t.Fatalf("Expected a insert weather, got error: %v", err)
+					if err := db.Weather.Insert().OnTransaction(tx).One(&w); err != nil {
+						return err
 					}
 
 					h.WeatherId = w.Id
-					err = db.Habitat.Insert().OnTransaction(tx).One(&h)
-					if err != nil {
-						t.Fatalf("Expected a insert habitat, got error: %v", err)
+					if err := db.Habitat.Insert().OnTransaction(tx).One(&h); err != nil {
+						return err
 					}
 
 					a.HabitatId = &h.Id
 					a.Name = "Update Cat"
-					err = db.Animal.Save().OnTransaction(tx).One(&a)
-					if err != nil {
-						t.Fatalf("Expected a update, got error: %v", err)
+					if err := db.Animal.Save().OnTransaction(tx).One(&a); err != nil {
+						return err
 					}
 
-					_, err = db.Animal.Select().Match(Animal{Id: a.Id}).One()
-					if !errors.Is(err, model.ErrNoRows) {
-						t.Fatalf("Expected a goent.ErrNoRows, got error: %v", err)
+					// 事务内查询，应该能找到
+					if _, err := db.Animal.Select().OnTransaction(tx).Match(Animal{Id: a.Id}).One(); err != nil {
+						return err
 					}
 
 					return nil
@@ -589,8 +586,8 @@ func TestUpdate(t *testing.T) {
 					t.Fatalf("Expected tx, got error: %v", err)
 				}
 
-				var aselect *Animal
-				aselect, err = db.Animal.Select().Match(Animal{Id: a.Id}).One()
+				// 事务提交后，查询应该能找到更新的记录
+				aselect, err := db.Animal.Select().Match(Animal{Id: a.Id}).One()
 				if err != nil {
 					t.Fatalf("Expected find, got error: %v", err)
 				}
@@ -606,13 +603,22 @@ func TestUpdate(t *testing.T) {
 		{
 			desc: "Update_PersonJobs",
 			testCase: func(t *testing.T) {
+				// 清理旧数据
+				db.Person.Delete().Exec()
+				db.JobTitle.Delete().Exec()
+				db.PersonJobTitle.Delete().Exec()
+				t.Cleanup(func() {
+					db.Person.Delete().Exec()
+					db.JobTitle.Delete().Exec()
+					db.PersonJobTitle.Delete().Exec()
+				})
+
 				persons := []*Person{
 					{Name: "Jhon"},
 					{Name: "Laura"},
 					{Name: "Luana"},
 				}
-				err = db.Person.Insert().All(true, persons)
-				if err != nil {
+				if err := db.Person.Insert().All(true, persons); err != nil {
 					t.Fatalf("Expected insert persons, got error: %v", err)
 				}
 
@@ -620,8 +626,7 @@ func TestUpdate(t *testing.T) {
 					{Name: "Developer"},
 					{Name: "Designer"},
 				}
-				err = db.JobTitle.Insert().All(true, jobs)
-				if err != nil {
+				if err := db.JobTitle.Insert().All(true, jobs); err != nil {
 					t.Fatalf("Expected insert jobs, got error: %v", err)
 				}
 
@@ -630,56 +635,41 @@ func TestUpdate(t *testing.T) {
 					{PersonId: persons[1].Id, JobTitleId: jobs[0].Id, CreatedAt: time.Now()},
 					{PersonId: persons[2].Id, JobTitleId: jobs[1].Id, CreatedAt: time.Now()},
 				}
-				err = db.PersonJobTitle.Insert().All(true, personJobs)
-				if err != nil {
+				if err := db.PersonJobTitle.Insert().All(false, personJobs); err != nil {
 					t.Fatalf("Expected insert personJobs, got error: %v", err)
 				}
 
-				pj := []struct {
-					JobTitle string
-					Person   string
-				}{}
-				for row, err := range db.Person.Select().
-					LeftJoin("id", db.PersonJobTitle.Field("person_id")).
-					LeftJoin("job_title_id", db.JobTitle.Field("id")).
-					Filter(goent.Equals(db.JobTitle.Field("id"), jobs[0].Id)).IterRows(nil) {
-
-					if err != nil {
-						t.Fatalf("Expected a select, got error: %v", err)
-					}
-					pj = append(pj, struct {
-						JobTitle string
-						Person   string
-					}{Person: row.Name})
-				}
-
-				if len(pj) != 2 {
-					t.Errorf("Expected %v, got : %v", 2, len(pj))
-				}
-
-				err = db.PersonJobTitle.Update().Set(goent.Pair{Key: "job_title_id", Value: jobs[0].Id}).Filter(
-					goent.And(goent.Equals(db.PersonJobTitle.Field("person_id"), persons[2].Id), goent.Equals(db.PersonJobTitle.Field("job_title_id"), jobs[1].Id))).Exec()
+				// 验证初始计数：jobs[0] 有 2 条记录
+				count1, err := db.PersonJobTitle.Filter(
+					goent.Equals(db.PersonJobTitle.Field("job_title_id"), jobs[0].Id),
+				).Count("person_id")
 				if err != nil {
+					t.Fatalf("Expected a count, got error: %v", err)
+				}
+				if count1 != 2 {
+					t.Errorf("Expected %v records for job[0], got: %v", 2, count1)
+				}
+
+				// 更新 person[2] 的 job 从 jobs[1] 到 jobs[0]
+				if err := db.PersonJobTitle.Update().Set(goent.Pair{Key: "job_title_id", Value: jobs[0].Id}).
+					Filter(
+						goent.And(
+							goent.Equals(db.PersonJobTitle.Field("person_id"), persons[2].Id),
+							goent.Equals(db.PersonJobTitle.Field("job_title_id"), jobs[1].Id),
+						),
+					).Exec(); err != nil {
 					t.Fatalf("Expected a update, got error: %v", err)
 				}
 
-				pj = nil
-				for row, err := range db.Person.Select().
-					LeftJoin("id", db.PersonJobTitle.Field("person_id")).
-					LeftJoin("job_title_id", db.JobTitle.Field("id")).
-					Filter(goent.Equals(db.JobTitle.Field("id"), jobs[0].Id)).IterRows(nil) {
-
-					if err != nil {
-						t.Fatalf("Expected a select, got error: %v", err)
-					}
-					pj = append(pj, struct {
-						JobTitle string
-						Person   string
-					}{Person: row.Name})
+				// 验证更新后：jobs[0] 有 3 条记录
+				count2, err := db.PersonJobTitle.Filter(
+					goent.Equals(db.PersonJobTitle.Field("job_title_id"), jobs[0].Id),
+				).Count("person_id")
+				if err != nil {
+					t.Fatalf("Expected a count, got error: %v", err)
 				}
-
-				if len(pj) != 3 {
-					t.Errorf("Expected %v, got : %v", 3, len(pj))
+				if count2 != 3 {
+					t.Errorf("Expected %v records for job[0], got: %v", 3, count2)
 				}
 			},
 		},

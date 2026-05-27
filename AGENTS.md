@@ -17,21 +17,26 @@ GoEnt provides a type-safe ORM with the following key features:
 
 ```
 goent/
-├── builder.go          # SQL query builder core
-├── where.go            # WHERE clause construction
-├── select.go           # SELECT query operations
-├── insert.go           # INSERT query operations
-├── update.go           # UPDATE query operations
-├── delete.go           # DELETE query operations
+├── builder.go          # SQL query builder core (Builder, BuilderCore, DeleteBuilder, pools)
+├── clause.go           # SQL clause types (Pair, Order, Group, JoinTable)
+├── field.go            # Field and Value types for column/value references
+├── condition.go        # Condition type and WHERE clause functions (And, Or, Equals, In, etc.)
+├── select.go           # SELECT query operations (StateSelect, Pagination)
+├── insert.go           # INSERT query operations (StateInsert, StateSave)
+├── update.go           # UPDATE query operations (StateUpdate)
+├── delete.go           # DELETE query operations (StateDelete, StateWhere, StateDeleteWhere)
 ├── table.go            # Table metadata, field mapping, and TableQuery[T]
 ├── handler.go          # Query execution and result handling
 ├── foreign.go          # Foreign key relationship handling (O2O, O2M, M2O, M2M)
-├── attribute.go        # Attribute/field definitions
-├── column.go           # Column metadata
-├── goent.go            # Main entry point and Open function
-├── database.go         # Database connection and transaction management
-├── migrate.go          # Migration orchestration
-├── migrator.go         # Migration implementation
+├── column.go           # Column and Index metadata
+├── result.go           # ResultFunc types and FetchSingleResult/FetchArrayResult
+├── open.go             # Database initialization (Open, travelSchemas)
+├── body.go             # Internal types (body, pk, att, attributeStrings, stringInfos)
+├── reflect.go          # Reflection-based field/relation initialization (InitField, createRelation)
+├── database.go         # Database connection, transaction management, and registry
+├── migrate.go          # Migration orchestration (AutoMigrate, dbMigrator, relationInfo)
+├── migrator.go         # Migration helpers (type resolution, attribute/index migration)
+├── schema_ops.go       # Schema operations (SchemaOps)
 ├── aggregate.go        # Aggregate functions (Count, Sum, Avg, etc.)
 ├── model/              # Core model definitions
 │   ├── model.go        # Data structures for queries and migrations
@@ -54,17 +59,19 @@ goent/
 
 ### Builder Pattern
 
-The `Builder` struct in `builder.go` is the core of query construction:
-- `Type`: Query type (SELECT, INSERT, UPDATE, DELETE)
-- `Table`: Target table info
-- `Columns`: Selected columns
-- `Where`: WHERE conditions
-- `Changes`: SET clause for UPDATE
-- `Joins`: JOIN clauses
-- `Orders`: ORDER BY clauses
-- `Groups`: GROUP BY clauses
-- `Limit`, `Offset`: Pagination
-- `Returning`: RETURNING clause for INSERT
+The `Builder` struct in `builder.go` is the core of query construction. It uses composition with `BuilderCore`:
+
+- **BuilderCore** contains shared fields: `Table`, `fullName`, `Where`, `Limit`, `argNo`, `holders`, `buf`
+- **Builder** composes `BuilderCore` and adds: `Type`, `Joins`, `InsertValues`, `VisitFields`, `Changes`, `Orders`, `Groups`, `Offset`, `Returning`, `RollUp`, `ForUpdate`
+- **DeleteBuilder** composes `BuilderCore` independently for DELETE-only operations
+
+Both `Builder` and `DeleteBuilder` have their own `sync.Pool` for object reuse.
+
+Key design decisions:
+- No `sync.Mutex` on Builder/DeleteBuilder — they are single-goroutine after pool retrieval
+- Buffer size limit (4KB) prevents memory bloat from large SQL queries
+- `holders` slice is reused when small (`cap <= 64`), discarded when large
+- `BuilderCore` fields are unexported; use `CoreWhere()`, `CoreLimit()`, `CoreTable()` accessors for inspection
 
 ### Table and Field Mapping
 
@@ -393,7 +400,7 @@ db.Default.Insert().One(&d)
 1. **Do not use `Query` struct directly** - Use the `Builder` pattern instead
 2. **Do not use `Attribute` type directly** - Use `Field` and `Condition` instead
 3. **Always use pointers for Insert/Update/Save** - `One(obj *T)` not `One(obj T)`
-4. **Foreign key columns must maintain original order** - Don't remove from Attributes
+4. **Foreign key columns must maintain original order** - Don't remove from Columns
 5. **`last_insert_rowid()` only works for auto-increment columns** - Not for default values
 6. **Use `not_incr` tag for non-auto-increment primary keys** - UUID, string, or composite keys
 7. **`[]byte` is recognized as a valid slice type** - Not treated as a relationship field
@@ -403,7 +410,7 @@ db.Default.Insert().One(&d)
 11. **Use code generator for best performance** - Generated code is 15-27x faster than reflection
 12. **Automatic use of generated code** - GoEnt automatically uses generated `ScanDest()` methods when available, providing performance improvements without manual changes
 13. **`Table.Filter()`/`Table.Where()` return `TableQuery[T]`** - Each call creates a new independent state, safe for concurrent use
-14. **Builder internal methods are private** - `buildHead`, `buildDoing`, `buildWhere`, `buildTail`, `buildJoins` are unexported
+14. **Builder `core` fields are unexported** - Use `CoreWhere()`, `CoreLimit()`, `CoreTable()` accessors; internal build methods are also unexported
 15. **`With()` eager-loads foreign relationships** - Supports O2O, O2M, M2O, M2M; runs a separate query after `All()`, passing results directly to foreign key query functions
 16. **`InBatch()` splits large IN clauses** - Avoids SQLite 999 and PostgreSQL 65535 parameter limits
 17. **`GenSetForeign` interface for zero-reflection assignment** - Generated code can implement `SetForeign(name, value)` to bypass reflection

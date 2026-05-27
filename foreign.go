@@ -333,7 +333,7 @@ func selectReferMap(ctx context.Context, refInfo *TableInfo, filter Condition, p
 	defer PutBuilder(builder)
 	builder.Type = model.SelectQuery
 	builder.SetTable(*refInfo, refInfo.driver)
-	builder.Where = filter
+	builder.core.Where = filter
 	builder.VisitFields = refInfo.GetSortedFields()
 
 	sqlQuery, args := builder.Build(false)
@@ -365,7 +365,7 @@ func selectReferRank(ctx context.Context, refInfo *TableInfo, filter Condition, 
 	defer PutBuilder(builder)
 	builder.Type = model.SelectQuery
 	builder.SetTable(*refInfo, refInfo.driver)
-	builder.Where = filter
+	builder.core.Where = filter
 	builder.VisitFields = refInfo.GetSortedFields()
 
 	sqlQuery, args := builder.Build(false)
@@ -573,7 +573,7 @@ func QueryMiddleTable[T any](foreign *Foreign, table *Table[T], rows []*T, leftC
 	defer PutBuilder(builder)
 	builder.Type = model.SelectQuery
 	builder.SetTable(table.TableInfo, table.db.driver)
-	builder.Where, builder.Limit = filter, len(pkIds)
+	builder.core.Where, builder.core.Limit = filter, len(pkIds)
 	builder.VisitFields = []*Field{
 		{ColumnName: leftCol},
 		{ColumnName: rightCol},

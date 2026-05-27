@@ -259,7 +259,27 @@ func init() {
 }
 
 func TestMain(m *testing.M) {
+	// Setup database connection before tests
+	var err error
+	db, err = Setup()
+	if err != nil {
+		os.Exit(1)
+	}
+	
+	// Clean up data before tests
+	if db != nil && db.DriverName() == "PostgreSQL" {
+		sql := `
+		TRUNCATE TABLE public.animals, public.person_job_title, public.person, public.job_title,
+		public.weather, public.info, public.status, public.default, public.exam, public.page,
+		public.select, public.animal_food, auth.user, auth.role, auth.user_role,
+		food.food, food.habitat, flag.flag, drop.drop RESTART IDENTITY CASCADE;
+		`
+		_ = db.DB.RawExecContext(context.Background(), sql)
+	}
+	
 	code := m.Run()
+	
+	// Clean up after tests
 	if db != nil {
 		if db.DriverName() == "PostgreSQL" {
 			sql := `
@@ -277,6 +297,11 @@ func TestMain(m *testing.M) {
 }
 
 func Setup() (*Database, error) {
+	// Reuse existing connection if available
+	if db != nil {
+		return db, nil
+	}
+	
 	dbType := env.GetStr("DB_TYPE", "sqlite")
 	dbDSN := env.Get("DB_DSN")
 	logFile := env.Get("DB_LOG_FILE")
@@ -312,7 +337,7 @@ func SetupPgx(dbDSN, logFile string) (*Database, error) {
 
 func setupPostgres(drv model.Driver, logFile string) (*Database, error) {
 	var err error
-	db, err = goent.Open[Database](drv, logFile)
+	db, err = goent.Open[Database](drv)
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +378,7 @@ func SetupSqlite(dbDSN, logFile string) (*Database, error) {
 	}
 
 	var err error
-	db, err = goent.Open[Database](sqlite.Open(dbDSN, sqlite.NewConfig(cfg)), "")
+	db, err = goent.Open[Database](sqlite.Open(dbDSN, sqlite.NewConfig(cfg)))
 	if err != nil {
 		return nil, err
 	}
@@ -422,13 +447,13 @@ func TestRace(t *testing.T) {
 			if driver == "sqlite" {
 				filename := filepath.Join(os.TempDir(), "goent_race.db")
 				raceDb, err = goent.Open[Database](sqlite.Open(filename, sqlite.NewConfig(
-					sqlite.Config{})), "")
+					sqlite.Config{})))
 			} else {
 				dsn := env.Get("DB_DSN")
 				if dsn == "" {
 					dsn = "user=postgres password=postgres host=localhost port=5432 database=postgres"
 				}
-				raceDb, err = goent.Open[Database](pgsql.Open(dsn, pgsql.NewConfig(pgsql.Config{})), "")
+				raceDb, err = goent.Open[Database](pgsql.Open(dsn, pgsql.NewConfig(pgsql.Config{})))
 			}
 			if err == nil && raceDb != nil {
 				goent.Close(raceDb)

@@ -28,7 +28,7 @@ func NewGoentBenchmark() Benchmark {
 
 func (o *GoentBenchmark) Init() (err error) {
 	driver := pgsql.OpenDSN(tools.PostgresDSN)
-	o.db, err = goent.Open[GoentDatabase](driver, "")
+	o.db, err = goent.Open[GoentDatabase](driver)
 	// if err == nil {
 	// 	err = goent.AutoMigrate(o.db)
 	// }

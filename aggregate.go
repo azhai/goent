@@ -9,11 +9,11 @@ func NewSelectFunc[T, R any](state *StateWhere, table *Table[T], col, fun string
 	}
 	s := NewStateSelectFrom[T, R](NewStateWhere(ctx), table)
 	if state != nil {
-		s.builder.Where = state.builder.Where
+		s.builder.core.Where = state.builder.core.Where
 		s.builder.Joins = state.builder.Joins
 		s.builder.Orders = state.builder.Orders
 		s.builder.Groups = state.builder.Groups
-		s.builder.Limit = state.builder.Limit
+		s.builder.core.Limit = state.builder.core.Limit
 		s.builder.Offset = state.builder.Offset
 		s.builder.RollUp = state.builder.RollUp
 		s.conn = state.conn

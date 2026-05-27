@@ -183,7 +183,7 @@ func (s *StateSave[T]) getQuery(primary Dict) model.Query {
 	if len(primary) > 0 {
 		s.builder.Type = model.UpdateQuery
 		fld := &Field{TableAddr: s.table.TableAddr}
-		s.builder.Where = EqualsMap(fld, primary)
+		s.builder.core.Where = EqualsMap(fld, primary)
 	} else {
 		s.builder.Type = model.InsertQuery
 	}
@@ -267,7 +267,7 @@ func (s *StateSave[T]) Take(i int) *StateSave[T] {
 		return s // PostgreSQL does not support LIMIT in UPDATE
 	}
 	if i >= TakeNoLimit {
-		s.builder.Limit = i
+		s.builder.core.Limit = i
 	}
 	return s
 }

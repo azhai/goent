@@ -11,7 +11,7 @@ import (
 
 func setupSelectBuilder(b *goent.Builder) {
 	b.Type = 1
-	b.SetTable(db.Animal.TableInfo, db.DB.Driver())
+	b.SetTableName("animal")
 }
 
 // TestConcurrentBuilderPool tests that Builder pool is thread-safe
@@ -153,14 +153,14 @@ func TestBuilderReset(t *testing.T) {
 			if b2.ForUpdate != false {
 				t.Errorf("ForUpdate should be false, got %v", b2.ForUpdate)
 			}
-			if b2.Table != nil {
-				t.Errorf("Table should be nil, got %v", b2.Table)
+			if b2.CoreTable() != nil {
+				t.Errorf("Table should be nil, got %v", b2.CoreTable())
 			}
-			if b2.Where.Template != "" {
-				t.Errorf("Where.Template should be empty, got %s", b2.Where.Template)
+			if b2.CoreWhere().Template != "" {
+				t.Errorf("Where.Template should be empty, got %s", b2.CoreWhere().Template)
 			}
-			if b2.Limit != -1 {
-				t.Errorf("Limit should be -1, got %d", b2.Limit)
+			if b2.CoreLimit() != -1 {
+				t.Errorf("Limit should be -1, got %d", b2.CoreLimit())
 			}
 			goent.PutBuilder(b2)
 		} else {
@@ -182,8 +182,8 @@ func TestBuilderMultipleReuse(t *testing.T) {
 			if len(b.Changes) != 0 {
 				t.Errorf("Iteration %d: Changes should be empty, got %d", i, len(b.Changes))
 			}
-			if b.Limit != -1 {
-				t.Errorf("Iteration %d: Limit should be -1, got %d", i, b.Limit)
+			if b.CoreLimit() != -1 {
+				t.Errorf("Iteration %d: Limit should be -1, got %d", i, b.CoreLimit())
 			}
 			goent.PutBuilder(b)
 		} else {
@@ -305,14 +305,16 @@ func TestBuilderBufferResetCorrectly(t *testing.T) {
 	builder := goent.NewBuilder()
 	if b, ok := builder.(*goent.Builder); ok {
 		setupSelectBuilder(b)
-		sql1, _ := b.Build(false)
+		sql1, _ := b.Build(true)
 
+		// Reset and build again — should produce identical SQL
+		b.Reset()
 		setupSelectBuilder(b)
-		sql2, _ := b.Build(false)
+		sql2, _ := b.Build(true)
 
 		// SQL should be identical (same query type)
 		if sql1 != sql2 {
-			t.Error("SQL should be identical for same query type")
+			t.Errorf("SQL should be identical for same query type, got %q vs %q", sql1, sql2)
 		}
 
 		// Clean up
@@ -379,14 +381,14 @@ func TestDeleteBuilderReset(t *testing.T) {
 	goent.PutDeleteBuilder(builder)
 
 	builder2 := goent.GetDeleteBuilder()
-	if builder2.Table != nil {
-		t.Errorf("Table should be nil, got %v", builder2.Table)
+	if builder2.CoreTable() != nil {
+		t.Errorf("Table should be nil, got %v", builder2.CoreTable())
 	}
-	if builder2.Where.Template != "" {
-		t.Errorf("Where.Template should be empty, got %s", builder2.Where.Template)
+	if builder2.CoreWhere().Template != "" {
+		t.Errorf("Where.Template should be empty, got %s", builder2.CoreWhere().Template)
 	}
-	if builder2.Limit != -1 {
-		t.Errorf("Limit should be -1, got %d", builder2.Limit)
+	if builder2.CoreLimit() != -1 {
+		t.Errorf("Limit should be -1, got %d", builder2.CoreLimit())
 	}
 	goent.PutDeleteBuilder(builder2)
 }

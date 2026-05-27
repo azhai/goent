@@ -24,20 +24,24 @@ func TestDelete(t *testing.T) {
 		{
 			desc: "Delete_Animal",
 			testCase: func(t *testing.T) {
+				// 清理旧数据
+				db.Animal.Delete().Exec()
+				t.Cleanup(func() {
+					db.Animal.Delete().Exec()
+				})
+
 				a := Animal{
 					Name: "Cat",
 				}
-				err = db.Animal.Insert().One(&a)
-				if err != nil {
+				if err := db.Animal.Insert().One(&a); err != nil {
 					t.Fatalf("Expected a insert animal, got error: %v", err)
 				}
 
-				err = db.Animal.Delete().Match(a).Exec()
-				if err != nil {
+				if err := db.Animal.Delete().Match(a).Exec(); err != nil {
 					t.Fatalf("Expected a delete, got error: %v", err)
 				}
 
-				_, err = db.Animal.Select().Match(a).One()
+				_, err := db.Animal.Select().Match(a).One()
 				if !errors.Is(err, model.ErrNoRows) {
 					t.Fatalf("Expected a goent.ErrNoRows, got error: %v", err)
 				}
@@ -117,6 +121,12 @@ func TestDelete(t *testing.T) {
 		{
 			desc: "Delete_Animal_Filter",
 			testCase: func(t *testing.T) {
+				// 清理旧数据
+				db.Animal.Delete().Exec()
+				t.Cleanup(func() {
+					db.Animal.Delete().Exec()
+				})
+
 				animals := []*Animal{
 					{Name: "Cat"},
 					{Name: "Dog"},
@@ -127,13 +137,11 @@ func TestDelete(t *testing.T) {
 					{Name: "Snake"},
 					{Name: "Whale"},
 				}
-				err = db.Animal.Insert().All(true, animals)
-				if err != nil {
+				if err := db.Animal.Insert().All(true, animals); err != nil {
 					t.Fatalf("Expected insert animals, got error: %v", err)
 				}
 
-				err = db.Animal.Delete().Filter(goent.Like(db.Animal.Field("name"), "%Cat%")).Exec()
-				if err != nil {
+				if err := db.Animal.Delete().Filter(goent.Like(db.Animal.Field("name"), "%Cat%")).Exec(); err != nil {
 					t.Fatalf("Expected a delete, got error: %v", err)
 				}
 
@@ -199,26 +207,16 @@ func TestDelete(t *testing.T) {
 					t.Fatalf("Expected a delete, got error: %v", err)
 				}
 
-				pj := []struct {
-					JobTitle string
-					Person   string
-				}{}
-				for row, err := range db.Person.Select().OnTransaction(tx).
-					LeftJoin("id", db.PersonJobTitle.Field("person_id")).
-					LeftJoin("job_title_id", db.JobTitle.Field("id")).
-					Filter(goent.Equals(db.JobTitle.Field("id"), jobs[0].Id)).IterRows(nil) {
-
-					if err != nil {
-						t.Fatalf("Expected a select, got error: %v", err)
-					}
-					pj = append(pj, struct {
-						JobTitle string
-						Person   string
-					}{Person: row.Name})
+				// Verify deletion by counting remaining records for jobs[0]
+				count, err := db.PersonJobTitle.Filter(
+					goent.Equals(db.PersonJobTitle.Field("job_title_id"), jobs[0].Id),
+				).OnTransaction(tx).Count("person_id")
+				if err != nil {
+					tx.Rollback()
+					t.Fatalf("Expected a count, got error: %v", err)
 				}
-
-				if len(pj) != 2 {
-					t.Errorf("Expected %v, got : %v", 2, len(pj))
+				if count != 2 {
+					t.Errorf("Expected %v records for job[0], got: %v", 2, count)
 				}
 
 				err = tx.Commit()

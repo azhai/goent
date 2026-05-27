@@ -34,7 +34,7 @@ func (s *StateDelete[T]) Exec() error {
 	if sql == "" {
 		defer PutDeleteBuilder(s.builder)
 		return fmt.Errorf("goent: StateDelete.Exec built empty SQL (fullName=%q, Where=%v, args=%v)",
-			s.builder.fullName, !s.builder.Where.IsEmpty(), args)
+			s.builder.core.fullName, !s.builder.core.Where.IsEmpty(), args)
 	}
 	qr := model.CreateQuery(sql, args)
 	defer PutDeleteBuilder(s.builder)
@@ -88,7 +88,7 @@ func (s *StateDelete[T]) Take(i int) *StateDelete[T] {
 		return s // PostgreSQL does not support LIMIT in DELETE
 	}
 	if i >= TakeNoLimit {
-		s.builder.Limit = i
+		s.builder.core.Limit = i
 	}
 	return s
 }
@@ -113,31 +113,13 @@ func MatchDeleteWhere[T any](s *StateDeleteWhere, table *Table[T], obj T) *State
 	return s.Filter(MatchFilter(table, obj))
 }
 
-func applyFilter(w *Condition, conds ...Condition) Condition {
-	if len(conds) == 0 || len(conds) == 1 && conds[0].IsEmpty() {
-		return *w
-	}
-	if !w.IsEmpty() {
-		conds = append(conds, *w)
-	}
-	return And(conds...)
-}
-
-func applyWhere(w *Condition, where string, args ...any) Condition {
-	cond := Expr(where, args...)
-	if !w.IsEmpty() {
-		return And(*w, cond)
-	}
-	return cond
-}
-
 func (s *StateDeleteWhere) Filter(conds ...Condition) *StateDeleteWhere {
-	s.builder.Where = applyFilter(&s.builder.Where, conds...)
+	s.builder.core.Where = applyFilter(&s.builder.core.Where, conds...)
 	return s
 }
 
 func (s *StateDeleteWhere) Where(where string, args ...any) *StateDeleteWhere {
-	s.builder.Where = applyWhere(&s.builder.Where, where, args...)
+	s.builder.core.Where = applyWhere(&s.builder.core.Where, where, args...)
 	return s
 }
 
@@ -174,12 +156,12 @@ func MatchWhere[T any](s *StateWhere, table *Table[T], obj T) *StateWhere {
 }
 
 func (s *StateWhere) Filter(conds ...Condition) *StateWhere {
-	s.builder.Where = applyFilter(&s.builder.Where, conds...)
+	s.builder.core.Where = applyFilter(&s.builder.core.Where, conds...)
 	return s
 }
 
 func (s *StateWhere) Where(where string, args ...any) *StateWhere {
-	s.builder.Where = applyWhere(&s.builder.Where, where, args...)
+	s.builder.core.Where = applyWhere(&s.builder.core.Where, where, args...)
 	return s
 }
 

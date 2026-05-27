@@ -351,7 +351,7 @@ type dbTable struct {
 }
 
 // getTableColumns queries column metadata for a table during migration.
-func getTableColumns(conn *pgxpool.Pool, tableName string) (dbTable, error) {
+func getTableColumns(conn *pgxpool.Pool, schema, tableName string) (dbTable, error) {
 	sqlTableInfos := `SELECT
 	column_name, CASE
 	WHEN data_type = 'character varying'
@@ -366,10 +366,10 @@ func getTableColumns(conn *pgxpool.Pool, tableName string) (dbTable, error) {
 	WHEN is_nullable = 'YES'
 	THEN True
 	ELSE False END AS is_nullable
-	FROM information_schema.columns WHERE table_name = $1;
+	FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2;
 	`
 
-	rows, err := conn.Query(context.Background(), sqlTableInfos, tableName)
+	rows, err := conn.Query(context.Background(), sqlTableInfos, schema, tableName)
 	if err != nil {
 		return dbTable{}, err
 	}
@@ -403,15 +403,16 @@ type databaseIndex struct {
 }
 
 // getTableIndexes queries index metadata for a table during migration.
-func getTableIndexes(conn *pgxpool.Pool, tableName string) (map[string]*databaseIndex, error) {
+func getTableIndexes(conn *pgxpool.Pool, schema, tableName string) (map[string]*databaseIndex, error) {
 	sqlQuery := `SELECT DISTINCT ci.relname, i.indisunique as is_unique, c.relname, a.attname FROM pg_index i
 	JOIN pg_attribute a ON i.indexrelid = a.attrelid
 	JOIN pg_class ci ON ci.oid = i.indexrelid
 	JOIN pg_class c ON c.oid = i.indrelid
-	where i.indisprimary = false AND c.relname = $1;
+	JOIN pg_namespace n ON n.oid = c.relnamespace
+	WHERE i.indisprimary = false AND n.nspname = $1 AND c.relname = $2;
 	`
 
-	rows, err := conn.Query(context.Background(), sqlQuery, tableName)
+	rows, err := conn.Query(context.Background(), sqlQuery, schema, tableName)
 	if err != nil {
 		return nil, err
 	}
@@ -435,16 +436,17 @@ func getTableIndexes(conn *pgxpool.Pool, tableName string) (map[string]*database
 }
 
 // checkFkUnique checks if a foreign key column has a unique constraint.
-func checkFkUnique(conn *pgxpool.Pool, table, attribute string) (string, bool) {
+func checkFkUnique(conn *pgxpool.Pool, schema, table, attribute string) (string, bool) {
 	sql := `SELECT ci.relname, i.indisunique as is_unique FROM pg_index i
 	JOIN pg_attribute a ON i.indexrelid = a.attrelid
 	JOIN pg_class ci ON ci.oid = i.indexrelid
 	JOIN pg_class c ON c.oid = i.indrelid
-	where i.indisprimary = false AND c.relname = $1 AND a.attname = $2;`
+	JOIN pg_namespace n ON n.oid = c.relnamespace
+	WHERE i.indisprimary = false AND n.nspname = $1 AND c.relname = $2 AND a.attname = $3;`
 
 	var b bool
 	var s string
-	row := conn.QueryRow(context.Background(), sql, table, attribute)
+	row := conn.QueryRow(context.Background(), sql, schema, table, attribute)
 	row.Scan(&s, &b)
 	return s, b
 }

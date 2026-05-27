@@ -121,7 +121,11 @@ func (dr *Driver) DropColumn(schema, table, column string) error {
 }
 
 func checkTableChanges(table *model.TableMigrate, dataMap map[string]dataType, sql *strings.Builder, conn *pgxpool.Pool) error {
-	dbTbl, err := getTableColumns(conn, table.Name)
+	schema := "public"
+	if table.Schema != nil && *table.Schema != "" {
+		schema = *table.Schema
+	}
+	dbTbl, err := getTableColumns(conn, schema, table.Name)
 	if err != nil {
 		return err
 	}
@@ -261,7 +265,11 @@ type table struct {
 }
 
 func checkIndex(indexes []model.IndexMigrate, table *model.TableMigrate, sql *strings.Builder, conn *pgxpool.Pool) error {
-	dis, err := getTableIndexes(conn, table.Name)
+	schema := "public"
+	if table.Schema != nil && *table.Schema != "" {
+		schema = *table.Schema
+	}
+	dis, err := getTableIndexes(conn, schema, table.Name)
 	if err != nil {
 		return err
 	}
@@ -295,6 +303,10 @@ func checkIndex(indexes []model.IndexMigrate, table *model.TableMigrate, sql *st
 }
 
 func checkFields(conn *pgxpool.Pool, dbTable dbTable, table *model.TableMigrate, dataMap map[string]dataType, sql *strings.Builder) {
+	schema := "public"
+	if table.Schema != nil && *table.Schema != "" {
+		schema = *table.Schema
+	}
 	for _, att := range table.PrimaryKeys {
 		if column := dbTable.columns[att.Name]; column != nil {
 			if primaryKeyIsForeignKey(table, att.Name) {
@@ -308,7 +320,7 @@ func checkFields(conn *pgxpool.Pool, dbTable dbTable, table *model.TableMigrate,
 			if column.dataType != dataType {
 				if att.AutoIncrement {
 					sql.WriteString(alterColumn(table, att.EscapingName, fmt.Sprintf("%v USING %v::%v", checkTypeAutoIncrement(dataType), att.EscapingName, checkTypeAutoIncrement(dataType)), dataMap))
-					sql.WriteString(fmt.Sprintf("CREATE SEQUENCE %v_%v_seq OWNED BY %v.%v;\n", table.Name, att.Name, table.Name, att.Name))
+					sql.WriteString(fmt.Sprintf("CREATE SEQUENCE %v_%v_seq OWNED BY %v.%v;\n", table.Name, att.Name, table.EscapingTableName(), att.EscapingName))
 					sql.WriteString(alterColumnDefault(table, att.EscapingName, fmt.Sprintf("nextval('%v_%v_seq'::regclass)", table.Name, att.Name)))
 				} else {
 					sql.WriteString(alterColumn(table, att.EscapingName, dataType, dataMap))
@@ -387,7 +399,7 @@ func checkFields(conn *pgxpool.Pool, dbTable dbTable, table *model.TableMigrate,
 
 	for _, att := range table.OneToSomes {
 		if column, exist := dbTable.columns[att.Name]; exist {
-			if _, unique := checkFkUnique(conn, table.Name, att.Name); !unique {
+			if _, unique := checkFkUnique(conn, schema, table.Name, att.Name); !unique {
 				if foreignKeyIsPrimarykey(table, att.Name) {
 					continue
 				}
@@ -410,7 +422,7 @@ func checkFields(conn *pgxpool.Pool, dbTable dbTable, table *model.TableMigrate,
 
 	for _, att := range table.ManyToSomes {
 		if column, exist := dbTable.columns[att.Name]; exist {
-			if c, unique := checkFkUnique(conn, table.Name, att.Name); unique {
+			if c, unique := checkFkUnique(conn, schema, table.Name, att.Name); unique {
 				sql.WriteString(fmt.Sprintf("ALTER TABLE %v DROP CONSTRAINT %v;\n", table.EscapingTableName(), keywordHandler(c)))
 			}
 			if column.nullable != att.Nullable {

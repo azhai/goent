@@ -6,17 +6,67 @@
 package models
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/azhai/goent"
 	"github.com/azhai/goent/drivers/pgsql"
+	"github.com/azhai/goent/drivers/sqlite"
+	"github.com/azhai/goent/model"
+	"github.com/azhai/goent/utils"
+)
+
+var (
+	db     *Database
+	initDb = false
 )
 
 // Database represents the database connection.
 type Database struct {
-	// PublicSchema `goe:"public"`
+	PublicSchema `goe:"public;prefix:t_"`
 	*goent.DB
 }
 
-// Connect opens a database connection.
-func Connect(dbDSN, logFile string) (*Database, error) {
-	return goent.Open[Database](pgsql.OpenDSN(dbDSN), logFile)
+func GetDB() *Database {
+	return db
+}
+
+func CloseDB() {
+	if db != nil {
+		_ = goent.Close(db)
+	}
+}
+
+func OpenDB(dbType, dbDSN, logFile string) (*Database, error) {
+	drv := connect(dbType, dbDSN)
+	if drv != nil && logFile != "" {
+		logger, err := utils.CreateDailyLogger(logFile, true)
+		if err = drv.AddLogger(logger, err); err != nil {
+			return nil, err
+		}
+	}
+
+	var err error
+	db, err = goent.Open[Database](drv)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to connect database: %v", err)
+	}
+	if initDb {
+		err = goent.AutoMigrate(db)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("Failed to migrate database: %v", err)
+	}
+	return db, nil
+}
+
+func connect(dbType, dbDSN string) model.Driver {
+	if dbType == "pgsql" || dbType == "postgres" {
+		return pgsql.OpenDSN(dbDSN)
+	} else if dbType == "" && strings.HasPrefix(dbDSN, "postgres://") {
+		return pgsql.OpenDSN(dbDSN)
+	} else {
+		_ = utils.MakeDirForFile(dbDSN)
+		return sqlite.OpenDSN(dbDSN)
+	}
 }

@@ -2,144 +2,8 @@ package goent
 
 import (
 	"fmt"
-	"reflect"
+	"slices"
 )
-
-// Field represents a database field with its table reference and column name
-// It is used to reference columns in queries and conditions
-type Field struct {
-	TableAddr  uintptr // Table address for table identification
-	FieldId    int     // Field ID for quick lookup
-	ColumnName string  // Database column name
-	AliasName  string  // Alias name for the field
-	Function   string  // SQL function to apply to the field
-}
-
-// SameTable checks if two fields belong to the same table
-// It compares the TableAddr of both fields
-func SameTable(field, another *Field) bool {
-	return field.TableAddr == another.TableAddr
-}
-
-// Func applies a SQL function to the field (e.g., "UPPER", "LOWER", "COUNT")
-// It sets the function to be applied when the field is used in queries
-//
-// Example:
-//
-//	field := goent.Expr("UPPER(name)").(*goent.Field)
-//	users, _ := db.User.Filter(goent.Equals(field, "JOHN")).Select().All()
-func (f *Field) Func(name, alias string) *Field {
-	return &Field{
-		TableAddr: f.TableAddr, FieldId: -1,
-		ColumnName: f.ColumnName,
-		AliasName:  alias, Function: name,
-	}
-}
-
-// GetFid returns the field ID, resolving it from the table metadata if needed
-// It looks up the field ID from the table registry if not already set
-func (f *Field) GetFid() int {
-	if f.FieldId < 0 && f.ColumnName != "*" {
-		col, _ := GetTableColumn(f.TableAddr, f.ColumnName)
-		if col != nil {
-			f.FieldId = col.FieldId
-		}
-	}
-	return f.FieldId
-}
-
-// Simple returns the column name with any SQL function applied
-// It does not include the table name
-func (f *Field) Simple() string {
-	if f.Function != "" {
-		return fmt.Sprintf(f.Function, f.ColumnName)
-	}
-	return f.ColumnName
-}
-
-// String returns the qualified field name (table.column) with any SQL function applied
-// It includes the table name for unambiguous reference
-func (f *Field) String() string {
-	res, err := GetTableFieldName(f.TableAddr, f.ColumnName)
-	if err != nil {
-		return ""
-	}
-	if f.Function != "" {
-		return fmt.Sprintf(f.Function, res)
-	}
-	return res
-}
-
-// Value represents a value or list of values for use in query conditions
-// It handles both single values and slices for IN conditions
-type Value struct {
-	Args   []any // Slice of values for IN conditions
-	Length int   // Length of the value slice
-	single any   // Single value storage to avoid slice allocation
-}
-
-// NewValue creates a new Value from a Go value
-// It handles both single values and slices
-//
-// Example:
-//
-//	value := NewValue([]int{1, 2, 3}) // creates IN (1, 2, 3)
-//	value := NewValue(42)              // creates single value
-func NewValue(value any) *Value {
-	switch v := value.(type) {
-	default:
-		return NewValueReflect(value)
-	case nil:
-		return &Value{Args: nil, Length: 0}
-	case []any:
-		return &Value{Args: v, Length: len(v)}
-	case []int64:
-		args := make([]any, len(v))
-		for i, x := range v {
-			args[i] = x
-		}
-		return &Value{Args: args, Length: len(v)}
-	case []int:
-		args := make([]any, len(v))
-		for i, x := range v {
-			args[i] = x
-		}
-		return &Value{Args: args, Length: len(v)}
-	case []string:
-		args := make([]any, len(v))
-		for i, x := range v {
-			args[i] = x
-		}
-		return &Value{Args: args, Length: len(v)}
-	case []float64:
-		args := make([]any, len(v))
-		for i, x := range v {
-			args[i] = x
-		}
-		return &Value{Args: args, Length: len(v)}
-	case int64:
-		return &Value{single: v, Length: 1}
-	case int:
-		return &Value{single: v, Length: 1}
-	case float64:
-		return &Value{single: v, Length: 1}
-	case bool:
-		return &Value{single: v, Length: 1}
-	}
-}
-
-func NewValueReflect(value any) *Value {
-	valueOf := reflect.ValueOf(value)
-	if valueOf.Kind() != reflect.Slice {
-		return &Value{single: value, Length: 1}
-	}
-	size := valueOf.Len()
-	args := make([]any, size)
-	for i := range args {
-		args[i] = valueOf.Index(i).Interface()
-	}
-	return &Value{Args: args, Length: size}
-}
 
 // Condition represents a SQL WHERE condition with a template and associated fields/values
 // It is used to build WHERE clauses in queries
@@ -386,11 +250,6 @@ func GreaterField(left, right *Field) Condition {
 
 // GreaterEquals creates a condition that checks if a field is greater than or equal to a value
 // It generates a greater than or equal comparison
-//
-// Example:
-//
-//	// get all animals that was created in or after this year
-//	Filter(goent.GreaterEquals(db.Animal.Field("create_at"), time.Parse(time.DateOnly, "2026-01-01")))
 func GreaterEquals(left *Field, value any) Condition {
 	return Condition{Template: "%s >= ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }
@@ -403,10 +262,6 @@ func GreaterEqualsField(left, right *Field) Condition {
 
 // Less creates a condition that checks if a field is less than a value
 // It generates a less than comparison
-//
-// Example: get all animals that was updated before this year
-//
-//	Filter(goent.Less(db.Animal.Field("update_at"), time.Parse(time.DateOnly, "2026-01-01")))
 func Less(left *Field, value any) Condition {
 	return Condition{Template: "%s < ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }
@@ -419,10 +274,6 @@ func LessField(left, right *Field) Condition {
 
 // LessEquals creates a condition that checks if a field is less than or equal to a value
 // It generates a less than or equal comparison
-//
-// Example: get all animals that was updated in or before this year
-//
-//	Filter(goent.LessEquals(db.Animal.Field("update_at"), time.Parse(time.DateOnly, "2026-01-01")))
 func LessEquals(left *Field, value any) Condition {
 	return Condition{Template: "%s <= ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }
@@ -502,10 +353,6 @@ func NotIn(left *Field, value any) Condition {
 
 // Like creates a condition that checks if a field matches a LIKE pattern
 // It generates a LIKE clause for pattern matching
-//
-// Example: get all animals that has a "at" in his name
-//
-//	goent.Like(db.Animal.Field("name"), "%at%")
 func Like(left *Field, value string) Condition {
 	return Condition{Template: "%s LIKE ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
 }
@@ -526,4 +373,31 @@ func ILike(left *Field, value string) Condition {
 // It generates a NOT ILIKE clause for case-insensitive pattern matching
 func NotILike(left *Field, value string) Condition {
 	return Condition{Template: "%s NOT ILIKE ?", Fields: []*Field{left}, Values: []*Value{NewValue(value)}}
+}
+
+// applyFilter combines existing conditions with new conditions using AND logic
+func applyFilter(w *Condition, conds ...Condition) Condition {
+	if len(conds) == 0 || len(conds) == 1 && conds[0].IsEmpty() {
+		return *w
+	}
+	if !w.IsEmpty() {
+		conds = append(conds, *w)
+	}
+	return And(conds...)
+}
+
+// applyWhere combines existing conditions with a raw WHERE clause
+func applyWhere(w *Condition, where string, args ...any) Condition {
+	cond := Expr(where, args...)
+	if !w.IsEmpty() {
+		return And(*w, cond)
+	}
+	return cond
+}
+
+// isConditionDuplicated checks if a condition already exists in a slice
+func isConditionDuplicated(conds []Condition, target Condition) bool {
+	return slices.ContainsFunc(conds, func(c Condition) bool {
+		return c.Template == target.Template && len(c.Fields) == len(target.Fields) && len(c.Values) == len(target.Values)
+	})
 }

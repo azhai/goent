@@ -27,7 +27,7 @@ func (s *StateUpdate[T]) Exec() error {
 	sql, args := s.builder.Build(true)
 	if sql == "" {
 		return fmt.Errorf("goent: StateUpdate.Exec built empty SQL (Type=%d, Changes=%d, Where=%v, args=%v)",
-			s.builder.Type, len(s.builder.Changes), !s.builder.Where.IsEmpty(), args)
+			s.builder.Type, len(s.builder.Changes), !s.builder.core.Where.IsEmpty(), args)
 	}
 	qr := model.CreateQuery(sql, args)
 	conn, cfg := s.Prepare(s.table.db.driver)
@@ -45,7 +45,7 @@ func (s *StateUpdate[T]) ByPK(id int64) error {
 	if pkField == nil {
 		return model.ErrNoPrimaryKey
 	}
-	s.builder.Where = Equals(pkField, id)
+	s.builder.core.Where = Equals(pkField, id)
 	return s.Exec()
 }
 
@@ -122,7 +122,7 @@ func (s *StateUpdate[T]) Take(i int) *StateUpdate[T] {
 		return s // PostgreSQL does not support LIMIT in UPDATE
 	}
 	if i >= TakeNoLimit {
-		s.builder.Limit = i
+		s.builder.core.Limit = i
 	}
 	return s
 }
@@ -152,5 +152,13 @@ func (s *StateUpdate[T]) Join(joinType model.JoinType, info TableInfo, on Condit
 //	err := db.User.Update().LeftJoin("role_id", refer).Set(change).Exec()
 func (s *StateUpdate[T]) LeftJoin(fkey string, refer *Field) *StateUpdate[T] {
 	info := GetTableInfo(refer.TableAddr)
-	return s.Join(model.LeftJoin, *info, EqualsField(s.table.Field(fkey), refer))
+	
+	// Check if the column exists in the main table
+	col := s.table.ColumnInfo(fkey)
+	if col == nil {
+		panic("column " + fkey + " not found in table " + s.table.TableName)
+	}
+	
+	leftField := s.table.sortedFields[col.FieldId]
+	return s.Join(model.LeftJoin, *info, EqualsField(leftField, refer))
 }

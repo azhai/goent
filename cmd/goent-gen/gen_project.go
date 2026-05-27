@@ -59,8 +59,8 @@ func GenerateConnFile(buf *bytes.Buffer, cfg *reverse.ReverseConfig, pkgName str
 	fmt.Fprintf(buf, "}\n\n")
 
 	fmt.Fprintf(buf, "// Connect opens a database connection.\n")
-	fmt.Fprintf(buf, "func Connect(dbDSN, logFile string) (*Database, error) {\n")
-	fmt.Fprintf(buf, "\treturn goent.Open[Database](%s.OpenDSN(dbDSN), logFile)\n", cfg.DriverType)
+	fmt.Fprintf(buf, "func Connect(dbDSN string) (*Database, error) {\n")
+	fmt.Fprintf(buf, "\treturn goent.Open[Database](%s.OpenDSN(dbDSN))\n", cfg.DriverType)
 	fmt.Fprintf(buf, "}\n\n")
 
 	return nil

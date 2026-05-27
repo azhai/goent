@@ -448,7 +448,7 @@ func (q *TableQuery[T]) Select() *StateSelect[T, T] {
 // Delete creates a StateDelete from this query's conditions.
 func (q *TableQuery[T]) Delete() *StateDelete[T] {
 	s := NewStateDeleteWhere(q.state.ctx)
-	s.builder.Where = q.state.builder.Where
+	s.builder.core.Where = q.state.builder.core.Where
 	s.conn = q.state.conn
 	return &StateDelete[T]{table: q.table, StateDeleteWhere: s}
 }
@@ -693,19 +693,7 @@ func (t *Table[T]) SelectContext(ctx context.Context, fields ...any) *StateSelec
 // getColumnTypeName returns the string representation of a column type.
 // It handles pointer, slice, array, and custom types.
 func getColumnTypeName(t reflect.Type) string {
-	if t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-	if t.Kind() == reflect.Slice {
-		return "[]" + t.Elem().Kind().String()
-	}
-	if t.PkgPath() != "" {
-		return t.PkgPath() + "." + t.Name()
-	}
-	if t.Kind() == reflect.Array {
-		return fmt.Sprintf("[%d]%s", t.Len(), t.Elem().Kind().String())
-	}
-	return t.Kind().String()
+	return resolveTypeName(t)
 }
 
 func isTableTypeField(t reflect.Type) bool {

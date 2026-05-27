@@ -43,21 +43,21 @@ func NewStateSelectFrom[T, R any](state *StateWhere, table *Table[T]) *StateSele
 	return &StateSelect[T, R]{table: table, StateWhere: state}
 }
 
-// CopyFrom copies the query builder state from another builder and connection
+// CopyFrom copies the query builder state from another StateWhere and connection
 // It copies joins, conditions, orders, groups, limits, and offset
-func (s *StateSelect[T, R]) CopyFrom(ob *Builder, conn model.Connection) *StateSelect[T, R] {
+func (s *StateSelect[T, R]) CopyFrom(other *StateWhere) *StateSelect[T, R] {
+	ob := other.builder
 	// copy joins
-	// s.builder.VisitFields = ob.VisitFields
 	s.builder.Joins = ob.Joins
 	// copy operations
-	s.builder.Where = ob.Where
+	s.builder.core.Where = ob.core.Where
 	s.builder.Orders = ob.Orders
 	s.builder.Groups = ob.Groups
-	s.builder.Limit = ob.Limit
+	s.builder.core.Limit = ob.core.Limit
 	s.builder.Offset = ob.Offset
 	s.builder.RollUp = ob.RollUp
 	// copy connection/transaction
-	s.conn = conn
+	s.conn = other.conn
 	return s
 }
 
@@ -159,7 +159,7 @@ func (s *StateSelect[T, R]) IterRows(to FetchFunc) iter.Seq2[*R, error] {
 // If With() was called, it also eager-loads the specified foreign relationships
 func (s *StateSelect[T, R]) All() (res []*R, err error) {
 	var obj *R
-	size := max(s.builder.Limit, 0)
+	size := max(s.builder.core.Limit, 0)
 	res = make([]*R, 0, size)
 	for obj, err = range s.IterRows(nil) {
 		if err != nil {
@@ -181,7 +181,7 @@ func (s *StateSelect[T, R]) Map(key string) (map[int64]*R, error) {
 	if col = s.table.ColumnInfo(key); col == nil {
 		return nil, model.NewColumnNotFoundError(key)
 	}
-	size := max(s.builder.Limit, 0)
+	size := max(s.builder.core.Limit, 0)
 	res := make(map[int64]*R, size)
 	for obj, err := range s.IterRows(nil) {
 		if err != nil {
@@ -201,7 +201,7 @@ func (s *StateSelect[T, R]) Rank(key string) (map[int64][]*R, error) {
 	if col = s.table.ColumnInfo(key); col == nil {
 		return nil, model.NewColumnNotFoundError(key)
 	}
-	size := max(s.builder.Limit, 0)
+	size := max(s.builder.core.Limit, 0)
 	res := make(map[int64][]*R, size)
 	for obj, err := range s.IterRows(nil) {
 		if err != nil {
@@ -254,13 +254,17 @@ func (s *StateSelect[T, R]) Match(obj T) *StateSelect[T, R] {
 }
 
 // OrderBy adds ORDER BY clauses to the query
-// It accepts field names with optional DESC keyword for descending order
+// It accepts field names with optional ASC or DESC keyword for sort direction
 func (s *StateSelect[T, R]) OrderBy(args ...string) *StateSelect[T, R] {
-	var desc bool
 	for _, arg := range args {
+		var desc bool
 		pieces := strings.Fields(arg)
-		if len(pieces) == 2 && strings.ToUpper(pieces[1]) == "DESC" {
-			arg, desc = pieces[0], true
+		if len(pieces) == 2 {
+			dir := strings.ToUpper(pieces[1])
+			if dir == "DESC" {
+				desc = true
+			}
+			arg = pieces[0]
 		}
 		ord := &Order{Field: s.table.Field(arg), Desc: desc}
 		s.builder.Orders = append(s.builder.Orders, ord)
@@ -282,7 +286,7 @@ func (s *StateSelect[T, R]) GroupBy(args ...string) *StateSelect[T, R] {
 // It sets the LIMIT clause to the specified value
 func (s *StateSelect[T, R]) Take(i int) *StateSelect[T, R] {
 	if i >= TakeNoLimit {
-		s.builder.Limit = i
+		s.builder.core.Limit = i
 	}
 	return s
 }
@@ -375,18 +379,34 @@ func (s *StateSelect[T, R]) Join(joinType model.JoinType, info TableInfo, on Con
 func (s *StateSelect[T, R]) LeftJoin(fkey string, refer *Field) *StateSelect[T, R] {
 	info := GetTableInfo(refer.TableAddr)
 	var leftField *Field
-	leftField = s.table.Field(fkey)
+	
+	// Try to find the column in the main table first
+	col := s.table.ColumnInfo(fkey)
+	if col != nil {
+		leftField = s.table.sortedFields[col.FieldId]
+	}
+	
+	// If not found in main table, try the last joined table
 	if leftField == nil && len(s.builder.Joins) > 0 {
 		lastJoin := s.builder.Joins[len(s.builder.Joins)-1]
 		leftTableInfo := findTableInfoByName(lastJoin.Table.Name)
 		if leftTableInfo == nil {
 			panic("table info not found for join table: " + lastJoin.Table.Name)
 		}
-		leftField = leftTableInfo.Field(fkey)
+		col = leftTableInfo.ColumnInfo(fkey)
+		if col != nil {
+			leftField = leftTableInfo.sortedFields[col.FieldId]
+		}
 	}
+	
 	if leftField == nil {
 		panic("column " + fkey + " not found in main table or last join table")
 	}
+	
+	if info == nil {
+		panic("failed to get table info for join")
+	}
+	
 	s.Join(model.LeftJoin, *info, EqualsField(leftField, refer))
 	s.builder.VisitFields = append(s.builder.VisitFields, info.GetSortedFields()...)
 	return s
@@ -454,9 +474,9 @@ func (s *StateSelect[T, R]) Pagination(page, size int) (*Pagination[T, R], error
 	counter := NewStateSelect[T, ResultLong](s.ctx, s.table)
 	counter.builder.VisitFields = nil
 	counter.Select(fld)
-	counter.CopyFrom(s.builder, s.conn)
+	counter.CopyFrom(s.StateWhere)
 	counter.builder.Orders = nil
-	counter.builder.Limit = 0
+	counter.builder.core.Limit = 0
 	counter.builder.Offset = 0
 	count, err := FetchSingleResult(counter)
 	if err != nil {
@@ -464,7 +484,7 @@ func (s *StateSelect[T, R]) Pagination(page, size int) (*Pagination[T, R], error
 	}
 
 	s.builder.Offset = size * (page - 1)
-	s.builder.Limit = size
+	s.builder.core.Limit = size
 
 	p := new(Pagination[T, R])
 	p.Values, err = s.All()

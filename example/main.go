@@ -2,47 +2,46 @@ package main
 
 import (
 	"fmt"
-	"strings"
 
 	"goent-example/models"
 
 	"github.com/azhai/goent"
-	"github.com/azhai/goent/drivers/pgsql"
-	"github.com/azhai/goent/drivers/sqlite"
 	"github.com/azhai/goent/model"
 	"github.com/azhai/goent/utils"
 )
 
-// Database is the database connection with its driver.
-type Database struct {
-	models.PublicSchema `goe:"public;prefix:t_"`
-	*goent.DB
+type DatabaseConfig struct {
+	Type    string
+	DSN     string
+	LogFile string
 }
 
-func main() {
-	var dbDSN, logFile string
-	env := utils.NewEnvWithFile("../.env")
-	dbType := env.GetStr("DB_TYPE", "sqlite")
-	if dbDSN = env.Get("DB_DSN"); dbDSN == "" {
-		dbDSN = DefaultDSN(dbType)
-	}
+func loadConfig(env *utils.Environ) *DatabaseConfig {
+	var logFile string
 	if _, ok := env.Lookup("DB_LOG_FILE"); ok {
 		logFile = env.Get("DB_LOG_FILE")
 	} else {
 		logFile = env.Get("LOG_FILE")
 	}
-	if logFile == "" {
-		logFile = "stdout"
+	cfg := &DatabaseConfig{
+		Type:    env.GetStr("DB_TYPE", "sqlite"),
+		DSN:     env.GetStr("DB_DSN", "test.db"),
+		LogFile: logFile,
 	}
-	db, err := connect(dbType, dbDSN, logFile)
+	if cfg.DSN == "" {
+		cfg.DSN = DefaultDSN(cfg.Type)
+	}
+	return cfg
+}
+
+func main() {
+	env := utils.NewEnvWithFile("../.env")
+	cfg := loadConfig(env)
+	db, err := models.OpenDB(cfg.Type, cfg.DSN, cfg.LogFile)
 	if err != nil {
 		panic(err)
 	}
 	defer clearDatabase(db, false)
-
-	if err = goent.AutoMigrate(db); err != nil {
-		panic(err)
-	}
 
 	// addForeignKeys(db)
 
@@ -72,33 +71,19 @@ func main() {
 	fmt.Printf("%+v\n", order)
 }
 
-func connect(dbType, dbDSN, logFile string) (*Database, error) {
-	var drv model.Driver
-	if dbType == "pgsql" || dbType == "postgres" {
-		drv = pgsql.OpenDSN(dbDSN)
-	} else if dbType == "" && strings.HasPrefix(dbDSN, "postgres://") {
-		drv = pgsql.OpenDSN(dbDSN)
-	} else {
-		_ = utils.MakeDirForFile(dbDSN)
-		drv = sqlite.OpenDSN(dbDSN)
-	}
-	return goent.Open[Database](drv, logFile)
-}
-
-func clearDatabase(db *Database, isDrop bool) {
+func clearDatabase(db *models.Database, isDrop bool) {
 	var err error
-	if isDrop {
+	if db != nil && isDrop {
 		// sql := "DROP TABLE IF EXISTS public.t_order_product, public.t_order, public.t_product, public.t_category CASCADE"
 		// err = db.RawExecContext(context.Background(), sql)
-		err = db.DropTables()
+		if err = db.DropTables(); err != nil {
+			panic(err)
+		}
 	}
-	_ = goent.Close(db)
-	if err != nil {
-		panic(err)
-	}
+	models.CloseDB()
 }
 
-func seedData(db *Database) error {
+func seedData(db *models.Database) error {
 	count, err := db.Category.Count("*")
 	if err != nil || count > 0 {
 		return err
@@ -112,7 +97,7 @@ func seedData(db *Database) error {
 	return nil
 }
 
-func createOrder(db *Database, orderNo string) (*models.Order, error) {
+func createOrder(db *models.Database, orderNo string) (*models.Order, error) {
 	obj, err := db.Order.Select("id", "status", "total").Match(models.Order{OrderNo: orderNo}).One()
 	fmt.Printf("createOrder: obj=%v, err=%v, err==ErrNoRows=%v\n", obj, err, err == model.ErrNoRows)
 	if err != nil && err != model.ErrNoRows || obj != nil && obj.ID > 0 {
@@ -130,7 +115,7 @@ func createOrder(db *Database, orderNo string) (*models.Order, error) {
 	return order, nil
 }
 
-func CalcTotalPrice(db *Database, order *models.Order) (float64, error) {
+func CalcTotalPrice(db *models.Database, order *models.Order) (float64, error) {
 	var err error
 	if order == nil {
 		return 0.0, err
@@ -172,7 +157,7 @@ func CalcTotalPrice(db *Database, order *models.Order) (float64, error) {
 	return total, err
 }
 
-func CalcTotalPrice2(db *Database, order *models.Order) (float64, error) {
+func CalcTotalPrice2(db *models.Database, order *models.Order) (float64, error) {
 	var err error
 	if order == nil {
 		return 0.0, err
@@ -202,7 +187,7 @@ func CalcTotalPrice2(db *Database, order *models.Order) (float64, error) {
 	return total, err
 }
 
-func CalcTotalPrice3(db *Database, order *models.Order) (float64, error) {
+func CalcTotalPrice3(db *models.Database, order *models.Order) (float64, error) {
 	var err error
 	if order == nil {
 		return 0.0, err
@@ -226,7 +211,7 @@ func CalcTotalPrice3(db *Database, order *models.Order) (float64, error) {
 	return total, err
 }
 
-func ListAllProducts(db *Database) ([]*models.Product, error) {
+func ListAllProducts(db *models.Database) ([]*models.Product, error) {
 	filter := goent.LessEquals(db.Product.Field("price"), 100)
 	query := db.Product.Select().Filter(filter)
 	products, err := query.All()
@@ -234,10 +219,7 @@ func ListAllProducts(db *Database) ([]*models.Product, error) {
 		return nil, err
 	}
 
-	_ = goent.QueryForeign(db.Product, db.Category)
-	_ = goent.QueryForeign(db.Order, db.OrderDetail)
-	_ = goent.QueryForeign(db.Order, db.Product)
-	_ = goent.QueryForeign(db.OrderDetail, db.Product)
+	_ = goent.QueryForeignByName(db.Product, products, "Category")
 
 	// var cateIds []int64
 	// for _, p := range products {
@@ -252,7 +234,7 @@ func ListAllProducts(db *Database) ([]*models.Product, error) {
 	return products, nil
 }
 
-func addForeignKeys(db *Database) {
+func addForeignKeys(db *models.Database) {
 	db.Product.Foreigns = map[string]*goent.Foreign{
 		"t_category": {
 			Type:       goent.M2O,
