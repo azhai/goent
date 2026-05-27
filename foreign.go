@@ -384,8 +384,9 @@ func selectReferMap(ctx context.Context, refInfo *TableInfo, filter Condition, p
 		if err = rows.Scan(dest...); err != nil {
 			return nil, err
 		}
+		// Use fieldInt64 to safely dereference pointer fields before calling .Int()
 		pkField := val.Elem().Field(pkCol.FieldId)
-		if id := pkField.Int(); id != 0 {
+		if id, ok := fieldInt64(pkField); ok && id != 0 {
 			result[id] = val
 		}
 	}
@@ -419,8 +420,9 @@ func selectReferRank(ctx context.Context, refInfo *TableInfo, filter Condition, 
 		if err = rows.Scan(dest...); err != nil {
 			return nil, err
 		}
+		// Use fieldInt64 to safely dereference pointer fields before calling .Int()
 		pkField := val.Elem().Field(pkCol.FieldId)
-		if id := pkField.Int(); id != 0 {
+		if id, ok := fieldInt64(pkField); ok && id != 0 {
 			result[id] = append(result[id], val)
 		}
 	}
