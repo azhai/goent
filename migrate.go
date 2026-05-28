@@ -246,10 +246,14 @@ func addRelationByTag(tm *model.TableMigrate, fd *fieldDesc, migField reflect.St
 	pkName := fd.targetInfo.PrimaryKeys[0].ColumnName
 	isO2O := utils.HasTagValue(goeTag, "o2o")
 
+	colName := utils.ToSnakeCase(migField.Name)
+	if col, ok := utils.GetTagValue(goeTag, "column"); ok && col != "" {
+		colName = col
+	}
 	attrMig := model.AttributeMigrate{
 		FieldName:    migField.Name,
-		Name:         utils.ToSnakeCase(migField.Name),
-		EscapingName: driver.KeywordHandler(utils.ToSnakeCase(migField.Name)),
+		Name:         colName,
+		EscapingName: driver.KeywordHandler(colName),
 		DataType:     resolveTypeName(migField.Type),
 		Nullable:     nullable,
 		FieldPos:     fieldId,

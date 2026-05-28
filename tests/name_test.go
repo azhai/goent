@@ -92,11 +92,42 @@ func TestToSnakeCase(t *testing.T) {
 			input:    "user_name",
 			expected: "user_name",
 		},
-		// {
-		// 	name:     "complex camelCase",
-		// 	input:    "getUserXMLHTTPRequest",
-		// 	expected: "get_user_xml_http_request",
-		// },
+		// Abbreviation-aware cases
+		{
+			name:     "abbreviation PRs kept together",
+			input:    "OpenPRsCount",
+			expected: "open_prs_count",
+		},
+		{
+			name:     "abbreviation ID kept together",
+			input:    "UserID",
+			expected: "user_id",
+		},
+		{
+			name:     "abbreviation HTTPS kept together",
+			input:    "HTTPSEndpoint",
+			expected: "https_endpoint",
+		},
+		{
+			name:     "abbreviation XML kept together",
+			input:    "parseXMLData",
+			expected: "parse_xml_data",
+		},
+		{
+			name:     "abbreviation URL at start",
+			input:    "URLPath",
+			expected: "url_path",
+		},
+		{
+			name:     "abbreviation IDs plural",
+			input:    "UserIDs",
+			expected: "user_ids",
+		},
+		{
+			name:     "abbreviation API in middle",
+			input:    "RestAPIHandler",
+			expected: "rest_api_handler",
+		},
 	}
 
 	for _, cas := range testCases {
@@ -106,5 +137,27 @@ func TestToSnakeCase(t *testing.T) {
 				t.Errorf("ToSnakeCase(%q) got %q, BUT want %q", cas.input, result, cas.expected)
 			}
 		})
+	}
+}
+
+func TestRegisterAbbreviations(t *testing.T) {
+	// Register a custom abbreviation
+	utils.RegisterAbbreviations(map[string]string{
+		"CRM": "crm",
+	})
+
+	cases := []struct {
+		input    string
+		expected string
+	}{
+		{"CRMSystem", "crm_system"},
+		{"OpenCRMPortal", "open_crm_portal"},
+	}
+
+	for _, cas := range cases {
+		result := utils.ToSnakeCase(cas.input)
+		if result != cas.expected {
+			t.Errorf("ToSnakeCase(%q) got %q, BUT want %q", cas.input, result, cas.expected)
+		}
 	}
 }

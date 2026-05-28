@@ -236,8 +236,16 @@ func createOneToSome(b body, typeOf reflect.Type) any {
 }
 
 func newAttr(b body) error {
+	columnName := utils.ToSnakeCase(b.fieldName)
+	// Check for column tag override on the struct field
+	if b.valueOf.IsValid() && b.fieldId < b.valueOf.NumField() {
+		fieldOf := b.valueOf.Type().Field(b.fieldId)
+		if col, ok := utils.GetTagValue(fieldOf.Tag.Get("goe"), "column"); ok && col != "" {
+			columnName = col
+		}
+	}
 	createAttFromColumn(b.mapp.db, &Column{
-		ColumnName: utils.ToSnakeCase(b.fieldName),
+		ColumnName: columnName,
 		FieldName:  b.fieldName,
 		HasDefault: b.nullable,
 	}, b.mapp.tableId)

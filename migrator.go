@@ -102,8 +102,9 @@ func migratePk(typeOf reflect.Type, driver model.Driver) ([]*model.PrimaryKeyMig
 	for i := range fields {
 		geoTag := fields[i].Tag.Get("goe")
 		fieldPos := getFieldPosition(typeOf, fields[i].Name)
+		colOverride, _ := utils.GetTagValue(geoTag, "column")
 		pks[i] = createMigratePk(fields[i].Name, isAutoIncrement(fields[i]),
-			getTagType(fields[i]), getTagValue(geoTag, "default:"), driver, fieldPos)
+			getTagType(fields[i]), getTagValue(geoTag, "default:"), driver, fieldPos, colOverride)
 		fieldsNames[i] = fields[i].Name
 	}
 	return pks, fieldsNames, nil
@@ -135,6 +136,9 @@ func migrateAtt(b body) error {
 		return nil
 	}
 
+	goeTag := migField.Tag.Get("goe")
+	colOverride, _ := utils.GetTagValue(goeTag, "column")
+
 	dataType := getTagType(migField)
 	if strings.Contains(dataType, ".") {
 		t := migField.Type
@@ -155,18 +159,23 @@ func migrateAtt(b body) error {
 		getTagValue(migField.Tag.Get("goe"), "default:"),
 		b.driver,
 		b.fieldId,
+		colOverride,
 	)
 	b.migrate.table.Attributes = append(b.migrate.table.Attributes, at)
 
 	return checkIndex(b, at, false)
 }
 
-func createMigratePk(attributeName string, autoIncrement bool, dataType, defaultTag string, driver model.Driver, fieldPos int) *model.PrimaryKeyMigrate {
+func createMigratePk(attributeName string, autoIncrement bool, dataType, defaultTag string, driver model.Driver, fieldPos int, colOverride string) *model.PrimaryKeyMigrate {
+	colName := colOverride
+	if colName == "" {
+		colName = utils.ToSnakeCase(attributeName)
+	}
 	return &model.PrimaryKeyMigrate{
 		AttributeMigrate: model.AttributeMigrate{
 			FieldName:    attributeName,
-			Name:         utils.ToSnakeCase(attributeName),
-			EscapingName: driver.KeywordHandler(utils.ToSnakeCase(attributeName)),
+			Name:         colName,
+			EscapingName: driver.KeywordHandler(colName),
 			DataType:     dataType,
 			Default:      defaultTag,
 			FieldPos:     fieldPos,
@@ -175,11 +184,15 @@ func createMigratePk(attributeName string, autoIncrement bool, dataType, default
 	}
 }
 
-func createMigrateAtt(attributeName string, dataType string, nullable bool, defaultValue string, driver model.Driver, fieldPos int) model.AttributeMigrate {
+func createMigrateAtt(attributeName string, dataType string, nullable bool, defaultValue string, driver model.Driver, fieldPos int, colOverride string) model.AttributeMigrate {
+	colName := colOverride
+	if colName == "" {
+		colName = utils.ToSnakeCase(attributeName)
+	}
 	return model.AttributeMigrate{
 		FieldName:    attributeName,
-		Name:         utils.ToSnakeCase(attributeName),
-		EscapingName: driver.KeywordHandler(utils.ToSnakeCase(attributeName)),
+		Name:         colName,
+		EscapingName: driver.KeywordHandler(colName),
 		DataType:     dataType,
 		Nullable:     nullable,
 		Default:      defaultValue,

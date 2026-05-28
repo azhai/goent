@@ -352,6 +352,9 @@ func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schem
 		}
 
 		columnName := utils.ToSnakeCase(fieldOf.Name)
+		if col, ok := utils.GetTagValue(geoTag, "column"); ok && col != "" {
+			columnName = col
+		}
 		defaultValue, hasDefault := utils.GetTagValue(geoTag, "default")
 
 		if fieldKind == reflect.Slice {

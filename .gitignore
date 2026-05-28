@@ -2,6 +2,13 @@
 ._*
 .env
 .env.*
+
+.arts/
+.codeartsdoer/
+.git/
+.idea/
+.vscode/
+
 *.bak
 *.cache
 *.csv
@@ -19,12 +26,8 @@
 *.swp
 *.sublime-project
 *.sublime-workspace
+*.test
 
-.arts/
-.codeartsdoer/
-.git/
-.idea/
-.vscode/
 bin/
 specs/
 tmp/
