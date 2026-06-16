@@ -702,7 +702,7 @@ func (t *Table[T]) TruncateContext(ctx context.Context) error {
 	tableName := t.getFullName()
 	switch t.db.DriverName() {
 	case "PostgreSQL":
-		sql = "TRUNCATE TABLE " + tableName + " RESTART IDENTITY"
+		sql = "TRUNCATE TABLE " + tableName + " RESTART IDENTITY CASCADE"
 	default:
 		sql = "DELETE FROM " + tableName
 	}

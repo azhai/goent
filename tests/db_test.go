@@ -24,11 +24,11 @@ import (
 
 // Animal is an animal in the zoo.
 type Animal struct {
-	Name        string `goe:"index"`
+	Name        string       `goe:"index"`
 	HabitatId   *uuid.UUID
 	InfoId      *[]byte
-	Id          int `goe:"pk"`
-	AnimalFoods []AnimalFood
+	Id          int          `goe:"pk"`
+	AnimalFoods []*AnimalFood `goe:"o2m;fk=animal_id"`
 }
 
 func (*Animal) TableName() string {
@@ -43,9 +43,9 @@ type AnimalFood struct {
 
 // Food is a type of food that an animal can eat.
 type Food struct {
-	Id          uuid.UUID `goe:"pk"`
+	Id          uuid.UUID    `goe:"pk"`
 	Name        string
-	AnimalFoods []AnimalFood
+	AnimalFoods []*AnimalFood `goe:"o2m;fk=food_id"`
 }
 
 // Habitat is a place where animals live.
@@ -54,14 +54,14 @@ type Habitat struct {
 	Name        string    `goe:"type:varchar(50)"`
 	WeatherId   int
 	NameWeather string
-	Animals     []Animal
+	Animals     []*Animal `goe:"o2m;fk=habitat_id"`
 }
 
 // Weather is a type of weather that a habitat can have.
 type Weather struct {
-	Id       int `goe:"pk"`
+	Id       int       `goe:"pk"`
 	Name     string
-	Habitats []Habitat
+	Habitats []*Habitat `goe:"o2m;fk=weather_id"`
 }
 
 // Info is additional information about an animal.
@@ -102,10 +102,10 @@ func (t *Status) InsertValues() []any {
 
 // User is a user in the system.
 type User struct {
-	Id        int    `goe:"pk"`
-	Name      string `goe:"index(n:idx_name_lower f:lower)"`
-	Email     string `goe:"unique"`
-	UserRoles []UserRole
+	Id        int        `goe:"pk"`
+	Name      string     `goe:"index(n:idx_name_lower f:lower)"`
+	Email     string     `goe:"unique"`
+	UserRoles []*UserRole `goe:"o2m;fk=user_id"`
 }
 
 // UserRole is the relationship between a user and a role.
@@ -118,9 +118,9 @@ type UserRole struct {
 
 // Role is a role in the system.
 type Role struct {
-	Id        int `goe:"pk"`
+	Id        int        `goe:"pk"`
 	Name      string
-	UserRoles []UserRole
+	UserRoles []*UserRole `goe:"o2m;fk=role_id"`
 }
 
 // Flag is a flag that can be set on an entity.

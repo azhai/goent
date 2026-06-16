@@ -79,7 +79,13 @@ type OneToSomeRelation struct {
 }
 
 func createAttributeStrings(db *DB, schema *string, table string, attributeName string, tableId, fieldId int, Driver model.Driver) attributeStrings {
-	name := Driver.KeywordHandler(utils.ToSnakeCase(attributeName))
+	// 只对Go字段名（含大写字母且不含下划线）做ToSnakeCase转换
+	// 标注的列名（如 full_name）或全小写的名称，直接作为列名使用
+	name := attributeName
+	if strings.ContainsAny(attributeName, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") && !strings.Contains(attributeName, "_") {
+		name = utils.ToSnakeCase(attributeName)
+	}
+	name = Driver.KeywordHandler(name)
 	return attributeStrings{
 		db:            db,
 		tableName:     table,
@@ -91,7 +97,7 @@ func createAttributeStrings(db *DB, schema *string, table string, attributeName 
 }
 
 func createAttFromColumn(db *DB, col *Column, tableId int) att {
-	attStr := createAttributeStrings(db, col.schemaName, col.tableName, col.FieldName, tableId, col.FieldId, db.driver)
+	attStr := createAttributeStrings(db, col.schemaName, col.tableName, col.ColumnName, tableId, col.FieldId, db.driver)
 	return att{attributeStrings: attStr, isDefault: col.HasDefault}
 }
 

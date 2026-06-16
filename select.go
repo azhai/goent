@@ -133,7 +133,13 @@ func (s *StateSelect[T, R]) One() (obj *R, err error) {
 	}
 	qr := model.CreateQuery(s.builder.Build(false))
 	defer PutBuilder(s.builder)
-	return s.FetchRow(qr, nil)
+	obj, err = s.FetchRow(qr, nil)
+	if err == nil && s.sameModel && len(s.withForeigns) > 0 {
+		rows := []*R{obj}
+		typedRows := *(*[]*T)(unsafe.Pointer(&rows))
+		err = QueryForeignsByNameContext(s.ctx, s.table, typedRows, s.withForeigns...)
+	}
+	return
 }
 
 // ByPK selects a single row by primary key using cached SQL.

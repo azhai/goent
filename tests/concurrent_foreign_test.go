@@ -82,6 +82,10 @@ func TestConcurrentWith(t *testing.T) {
 	}
 
 	// Prepare test data - need animals with UserRoles
+	err = db.UserRole.Delete().Exec()
+	if err != nil {
+		t.Fatalf("Expected delete user roles, got error: %v", err)
+	}
 	err = db.User.Delete().Exec()
 	if err != nil {
 		t.Fatalf("Expected delete users, got error: %v", err)
@@ -90,13 +94,9 @@ func TestConcurrentWith(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected delete roles, got error: %v", err)
 	}
-	err = db.UserRole.Delete().Exec()
-	if err != nil {
-		t.Fatalf("Expected delete user roles, got error: %v", err)
-	}
 
 	// Insert user and role
-	user := &User{Name: "TestUser", Id: 500}
+	user := &User{Name: "TestUser", Email: "testuser500@test.com", Id: 500}
 	err = db.User.Insert().One(user)
 	if err != nil {
 		t.Fatalf("Expected insert user, got error: %v", err)

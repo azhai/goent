@@ -5,6 +5,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strings"
 
 	"github.com/azhai/goent/model"
 )
@@ -148,12 +149,17 @@ func QueryForeignsByNameContext[T any](ctx context.Context, table *Table[T], row
 
 // findForeignByName searches for a foreign relationship by name.
 // It checks the Foreigns map keys (table names), MountField, and ForeignKey.
+// Matching is case-insensitive.
 func findForeignByName(foreigns map[string]*Foreign, name string) *Foreign {
 	if foreign, ok := foreigns[name]; ok {
 		return foreign
 	}
-	for _, foreign := range foreigns {
-		if foreign.MountField == name || foreign.ForeignKey == name {
+	lowerName := strings.ToLower(name)
+	for key, foreign := range foreigns {
+		if strings.ToLower(key) == lowerName {
+			return foreign
+		}
+		if strings.ToLower(foreign.MountField) == lowerName || strings.ToLower(foreign.ForeignKey) == lowerName {
 			return foreign
 		}
 	}
@@ -295,11 +301,14 @@ func initForeignSlice(row any, foreign *Foreign) {
 func queryOne2ManyReflect[T any](ctx context.Context, foreign *Foreign, table *Table[T], refInfo *TableInfo, rows []*T) error {
 	reg := mapRowsByPK(rows, table, foreign)
 
-	pkName := foreign.Reference.ColumnName
+	fkName := foreign.ForeignKey // e.g. "order_id" in the child table
 	pkIds := slices.Sorted(maps.Keys(reg))
-	filter := And(foreign.Where, InBatch(foreign.Reference, pkIds, 500))
 
-	data, err := selectReferRank(ctx, refInfo, filter, pkName)
+	// Build filter: WHERE order_id IN (5557, ...) using the FK column in the child table
+	fkField := &Field{ColumnName: fkName}
+	filter := And(foreign.Where, InBatch(fkField, pkIds, 500))
+
+	data, err := selectReferRank(ctx, refInfo, filter, fkName)
 	if err != nil {
 		return err
 	}

@@ -92,21 +92,23 @@ func TableNamePattern(name string) string {
 
 // HasTagValue checks if tag has key value
 // It returns true if the tag contains the specified key
+// Supports both semicolon and comma as separators
 func HasTagValue(tag string, key string) bool {
-	return strings.Contains(";"+tag+";", ";"+key+";")
-	// values := strings.Split(tag, ";")
-	// for _, v := range values {
-	// 	if v == subTag {
-	// 		return true
-	// 	}
-	// }
-	// return false
+	normalized := strings.ReplaceAll(tag, ",", ";")
+	return strings.Contains(";"+normalized+";", ";"+key+";")
 }
 
 // GetTagValue gets tag value by key
 // It returns the value and a boolean indicating if the key was found
+// Supports both semicolon and comma as separators, and both "key:value" and "key=value" formats
 func GetTagValue(tag string, key string) (string, bool) {
-	pieces := strings.SplitN(";"+tag+";", ";"+key+":", 2)
+	normalized := strings.ReplaceAll(tag, ",", ";")
+	// Try "key:" format
+	pieces := strings.SplitN(";"+normalized+";", ";"+key+":", 2)
+	if len(pieces) < 2 {
+		// Try "key=" format
+		pieces = strings.SplitN(";"+normalized+";", ";"+key+"=", 2)
+	}
 	if len(pieces) < 2 {
 		return "", false
 	}

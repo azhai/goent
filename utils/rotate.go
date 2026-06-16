@@ -199,7 +199,8 @@ func (w *RotateWriter) openNew() error {
 	return nil
 }
 
-// openExistingOrNew opens an existing log file for appending, or creates a new one if it doesn't exist
+// openExistingOrNew opens an existing log file for appending, or creates a new one if it doesn't exist.
+// If the existing file was last modified in a previous period, it is rotated first.
 func (w *RotateWriter) openExistingOrNew() error {
 	w.mill()
 
@@ -212,13 +213,40 @@ func (w *RotateWriter) openExistingOrNew() error {
 		return fmt.Errorf("error getting log file info: %s", err)
 	}
 
+	// If the file was last modified in a previous period, rotate it first
+	filePeriod := w.periodLabel(info.ModTime())
+	currentPeriod := w.periodLabel(currentTime())
+	if filePeriod != currentPeriod {
+		return w.rotateStaleFile(fn, info)
+	}
+
 	f, err := os.OpenFile(fn, os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return w.openNew()
 	}
 	w.file = f
 	w.size = info.Size()
+	w.openPeriod = currentPeriod
+	return nil
+}
+
+// rotateStaleFile renames an existing log file from a previous period and creates a new one
+func (w *RotateWriter) rotateStaleFile(fn string, info os.FileInfo) error {
+	mode := info.Mode()
+	newName := backupName(fn, w.Cycle.layout(), info.ModTime())
+	if err := os.Rename(fn, newName); err != nil {
+		return fmt.Errorf("can't rename stale log file: %s", err)
+	}
+
+	flag := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+	f, err := os.OpenFile(fn, flag, mode)
+	if err != nil {
+		return fmt.Errorf("can't open new logfile: %s", err)
+	}
+	w.file = f
+	w.size = 0
 	w.openPeriod = w.periodLabel(currentTime())
+	w.mill()
 	return nil
 }
 
