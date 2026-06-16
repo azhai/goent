@@ -3,6 +3,7 @@ package drivers
 import (
 	"strings"
 
+	"github.com/azhai/gobus/log"
 	"github.com/azhai/goent/drivers/pgsql"
 	"github.com/azhai/goent/drivers/sqlite"
 	"github.com/azhai/goent/model"
@@ -37,7 +38,7 @@ func Connect(cfg DatabaseConfig) (model.Driver, error) {
 	if drv == nil || cfg.LogFile == "" {
 		return drv, nil
 	}
-	logger, err := utils.CreateDailyLogger(cfg.LogFile, true)
+	logger, err := log.NewDailyLogger(cfg.LogFile, 7)
 	err = drv.AddLogger(logger, err)
 	return drv, err
 }
@@ -49,7 +50,7 @@ func OpenDialect(dbType, dbDSN string) model.Driver {
 	} else if dbType == "" && strings.HasPrefix(dbDSN, "postgres://") {
 		return pgsql.OpenDSN(dbDSN)
 	} else {
-		_ = utils.MakeDirForFile(dbDSN)
+		_ = log.MakeDirForFile(dbDSN)
 		return sqlite.OpenDSN(dbDSN)
 	}
 }

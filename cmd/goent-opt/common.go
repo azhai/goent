@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/azhai/gobus/log"
 	"github.com/azhai/goent"
 	"github.com/azhai/goent/drivers/pgsql"
 	"github.com/azhai/goent/drivers/sqlite"
@@ -41,7 +42,7 @@ func OpenDB(cfg DBConfig) (*Database, error) {
 	if cfg.IsPg {
 		drv = pgsql.OpenDSN(cfg.DSN)
 	} else {
-		_ = utils.MakeDirForFile(cfg.DSN)
+		_ = log.MakeDirForFile(cfg.DSN)
 		drv = sqlite.OpenDSN(cfg.DSN)
 	}
 	db, err := goent.Open[Database](drv)

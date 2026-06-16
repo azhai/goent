@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"fmt"
 
+	"github.com/azhai/gobus/log"
 	"github.com/azhai/goent/reverse"
 	"github.com/azhai/goent/utils"
 )
@@ -52,7 +53,7 @@ func RunTablesGeneration(cfg *reverse.ReverseConfig, pkgName, outPath string) er
 	if err := GenerateModelsFile(&buf, cfg, pkgName); err != nil {
 		return err
 	}
-	if err := utils.WriteToFile(&buf, outPath); err != nil {
+	if err := log.WriteToFile(&buf, outPath); err != nil {
 		return err
 	}
 	fmt.Printf("Generated: %s\n", outPath)

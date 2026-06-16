@@ -1,9 +1,10 @@
 module github.com/azhai/goent
 
-go 1.26.0
+go 1.26.4
 
 require (
 	github.com/alexflint/go-arg v1.6.1
+	github.com/azhai/gobus v0.1.0
 	github.com/c-bata/go-prompt v0.2.6
 	github.com/go-goe/goe v0.7.1
 	github.com/go-goe/postgres v0.5.1
@@ -36,3 +37,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
+
+replace github.com/azhai/gobus => ../gobus

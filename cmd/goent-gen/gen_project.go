@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/azhai/gobus/log"
 	"github.com/azhai/goent/reverse"
 	"github.com/azhai/goent/utils"
 )
@@ -15,7 +16,7 @@ func RunProjectGeneration(cfg *reverse.ReverseConfig, pkgName, outPath string) e
 	if err := GenerateConnFile(&buf, cfg, pkgName); err != nil {
 		return err
 	}
-	if err := utils.WriteToFile(&buf, outPath); err != nil {
+	if err := log.WriteToFile(&buf, outPath); err != nil {
 		return err
 	}
 	fmt.Printf("Generated: %s\n", outPath)

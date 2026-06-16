@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/azhai/gobus/log"
 	"github.com/azhai/goent/utils"
 	"golang.org/x/tools/go/packages"
 )
@@ -76,7 +77,7 @@ func generateForPackage(pkg *packages.Package, outputPath string) error {
 		return fmt.Errorf("No scanner methods generated for package %s\n", pkg.Name)
 	}
 
-	if err := utils.WriteToFile(&buf, outputPath); err != nil {
+	if err := log.WriteToFile(&buf, outputPath); err != nil {
 		return err
 	}
 	fmt.Printf("Generated: %s\n", outputPath)
