@@ -66,7 +66,7 @@ type TableInfo struct {
 }
 
 // String returns the table name as a string representation.
-func (info TableInfo) String() string {
+func (info *TableInfo) String() string {
 	return info.TableName
 	// return fmt.Sprintf("%s.%s", t.SchemaName, t.TableName)
 }
@@ -89,7 +89,7 @@ func (info *TableInfo) Table() *model.Table {
 
 // ColumnInfo returns the Column metadata for a given column name.
 // It performs case-insensitive lookup.
-func (info TableInfo) ColumnInfo(name string) *Column {
+func (info *TableInfo) ColumnInfo(name string) *Column {
 	if col, ok := info.Columns[name]; ok {
 		return col
 	}
@@ -165,11 +165,11 @@ func (info *TableInfo) GetPKField() *Field {
 //	for _, field := range fields {
 //		fmt.Println(field.ColumnName)
 //	}
-func (info TableInfo) GetSortedFields() []*Field {
+func (info *TableInfo) GetSortedFields() []*Field {
 	return info.sortedFields
 }
 
-func (info TableInfo) getFullName() string {
+func (info *TableInfo) getFullName() string {
 	if info.SchemaName != "" {
 		return info.SchemaName + "." + info.TableName
 	}
@@ -231,7 +231,7 @@ func (info *TableInfo) GetDeleteByPKSql() string {
 	return info.deleteByPKSql
 }
 
-func (info TableInfo) getRefTableName(foreign *Foreign, fkName string) (string, bool) {
+func (info *TableInfo) getRefTableName(foreign *Foreign, fkName string) (string, bool) {
 	switch foreign.Type {
 	case M2O, O2O:
 		if _, ok := info.Columns[fkName]; !ok {
@@ -249,7 +249,7 @@ func (info TableInfo) getRefTableName(foreign *Foreign, fkName string) (string, 
 	return "", false
 }
 
-func (info TableInfo) setForeignReference(foreign *Foreign, refTableName string) (*Foreign, bool) {
+func (info *TableInfo) setForeignReference(foreign *Foreign, refTableName string) (*Foreign, bool) {
 	if strings.EqualFold(info.TableName, refTableName) ||
 		strings.EqualFold(info.FieldName, refTableName) ||
 		strings.HasSuffix(strings.ToLower(info.TableName), "_"+strings.ToLower(refTableName)) {
@@ -568,49 +568,106 @@ func (q *TableQuery[T]) Delete() *StateDelete[T] {
 	return &StateDelete[T]{table: q.table, StateDeleteWhere: s}
 }
 
+// Update creates a StateUpdate from this query's conditions.
+// This enables conditional bulk updates without querying IDs first.
+//
+// Example:
+//
+//	err := db.User.Filter(goent.Equals(db.User.Field("status"), "active")).
+//	    Update().Set(goent.Pair{Key: "status", Value: "inactive"}).Exec()
+func (q *TableQuery[T]) Update() *StateUpdate[T] {
+	s := NewStateWhere(q.state.ctx)
+	s.builder.Type = model.UpdateQuery
+	s.builder.core.Where = q.state.builder.core.Where
+	s.conn = q.state.conn
+	return &StateUpdate[T]{table: q.table, StateWhere: s}
+}
+
+// UpdateByID creates a StateUpdateByID for two-phase update: first queries
+// matching primary key IDs, then updates rows by ID using an IN clause.
+// This works around PostgreSQL's lack of LIMIT in UPDATE statements and
+// provides the list of affected IDs for auditing.
+//
+// Example:
+//
+//	ids, err := db.User.Filter(goent.Equals(db.User.Field("status"), "active")).
+//	    UpdateByID().
+//	    Set(goent.Pair{Key: "status", Value: "inactive"}).
+//	    BatchSize(500).
+//	    Take(100).
+//	    Exec()
+func (q *TableQuery[T]) UpdateByID() *StateUpdateByID[T] {
+	return &StateUpdateByID[T]{
+		byIDBase: byIDBase[T]{
+			table: q.table,
+			where: q.state.builder.core.Where,
+			ctx:   q.state.ctx,
+			conn:  q.state.conn,
+		},
+	}
+}
+
+// DeleteByID creates a StateDeleteByID for two-phase delete: first queries
+// matching primary key IDs, then deletes rows by ID using an IN clause.
+//
+// Example:
+//
+//	ids, err := db.User.Filter(goent.Equals(db.User.Field("status"), "deleted")).
+//	    DeleteByID().Exec()
+func (q *TableQuery[T]) DeleteByID() *StateDeleteByID[T] {
+	return &StateDeleteByID[T]{
+		byIDBase: byIDBase[T]{
+			table: q.table,
+			where: q.state.builder.core.Where,
+			ctx:   q.state.ctx,
+			conn:  q.state.conn,
+		},
+	}
+}
+
 // Count counts the number of rows matching the query conditions.
 func (q *TableQuery[T]) Count(col string) (int64, error) {
-	return aggInt[T](q.state, q.table, col, "COUNT(%s)")
+	return aggInt(q.state, q.table, col, "COUNT(%s)")
 }
 
 func (q *TableQuery[T]) Max(col string) (int64, error) {
-	return aggInt[T](q.state, q.table, col, "MAX(%s)")
+	return aggInt(q.state, q.table, col, "MAX(%s)")
 }
 
 func (q *TableQuery[T]) Min(col string) (int64, error) {
-	return aggInt[T](q.state, q.table, col, "MIN(%s)")
+	return aggInt(q.state, q.table, col, "MIN(%s)")
 }
 
 func (q *TableQuery[T]) Sum(col string) (int64, error) {
-	return aggInt[T](q.state, q.table, col, "SUM(%s)")
+	return aggInt(q.state, q.table, col, "SUM(%s)")
 }
 
 func (q *TableQuery[T]) Avg(col string) (int64, error) {
-	return aggInt[T](q.state, q.table, col, "AVG(%s)")
+	return aggInt(q.state, q.table, col, "AVG(%s)")
 }
 
 func (q *TableQuery[T]) MaxFloat(col string) (float64, error) {
-	return aggFloat[T](q.state, q.table, col, "MAX(%s)")
+	return aggFloat(q.state, q.table, col, "MAX(%s)")
 }
 
 func (q *TableQuery[T]) MinFloat(col string) (float64, error) {
-	return aggFloat[T](q.state, q.table, col, "MIN(%s)")
+	return aggFloat(q.state, q.table, col, "MIN(%s)")
 }
 
 func (q *TableQuery[T]) SumFloat(col string) (float64, error) {
-	return aggFloat[T](q.state, q.table, col, "SUM(%s)")
+	return aggFloat(q.state, q.table, col, "SUM(%s)")
 }
 
 func (q *TableQuery[T]) AvgFloat(col string) (float64, error) {
-	return aggFloat[T](q.state, q.table, col, "AVG(%s)")
+	return aggFloat(q.state, q.table, col, "AVG(%s)")
 }
 
 func (q *TableQuery[T]) ToUpper(col string) ([]string, error) {
-	return aggStr[T](q.state, q.table, col, "UPPER(%s)")
+	return aggStr(q.state, q.table, col, "UPPER(%s)")
 }
 
 func (q *TableQuery[T]) ToLower(col string) ([]string, error) {
-	return aggStr[T](q.state, q.table, col, "LOWER(%s)")
+	return aggStr(q.state, q.table, col, "LOWER(%s)")
 }
 
 // ------------------------------
@@ -629,7 +686,7 @@ func (t *Table[T]) Filter(args ...Condition) *TableQuery[T] {
 
 // FilterContext creates a conditional query builder with the specified context and filter conditions.
 func (t *Table[T]) FilterContext(ctx context.Context, args ...Condition) *TableQuery[T] {
-	q := newTableQuery[T](t, ctx)
+	q := newTableQuery(t, ctx)
 	q.state = q.state.Filter(args...)
 	return q
 }
@@ -646,7 +703,7 @@ func (t *Table[T]) Where(where string, args ...any) *TableQuery[T] {
 
 // WhereContext creates a conditional query builder with the specified context and WHERE clause.
 func (t *Table[T]) WhereContext(ctx context.Context, where string, args ...any) *TableQuery[T] {
-	q := newTableQuery[T](t, ctx)
+	q := newTableQuery(t, ctx)
 	q.state = q.state.Where(where, args...)
 	return q
 }

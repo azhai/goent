@@ -162,3 +162,99 @@ func (s *StateUpdate[T]) LeftJoin(fkey string, refer *Field) *StateUpdate[T] {
 	leftField := s.table.sortedFields[col.FieldId]
 	return s.Join(model.LeftJoin, *info, EqualsField(leftField, refer))
 }
+
+// StateUpdateByID represents a two-phase UPDATE query: first queries matching
+// primary key IDs, then updates rows by ID using an IN clause.
+//
+// This approach:
+//   - Works around PostgreSQL's lack of LIMIT in UPDATE statements (via Take)
+//   - Provides the list of affected IDs for auditing
+//   - Uses InBatch to handle large ID sets within parameter limits
+//
+// Only works for tables with a single integer primary key.
+//
+// Example:
+//
+//	ids, err := db.User.Filter(goent.Equals(db.User.Field("status"), "active")).
+//	    UpdateByID().
+//	    Set(goent.Pair{Key: "status", Value: "inactive"}).
+//	    BatchSize(500).
+//	    Take(100).
+//	    Exec()
+type StateUpdateByID[T any] struct {
+	byIDBase[T]      // Shared two-phase fields and methods (BatchSize, Take, OnTransaction)
+	changes     Dict // Column changes to apply
+}
+
+// Set specifies the column values to update.
+// Each pair's Key is the column name, Value is the new value.
+func (s *StateUpdateByID[T]) Set(pairs ...Pair) *StateUpdateByID[T] {
+	if s.changes == nil {
+		s.changes = make(Dict)
+	}
+	for _, pair := range pairs {
+		s.changes[pair.Key] = pair.Value
+	}
+	return s
+}
+
+// SetMap specifies column values to update using a map.
+func (s *StateUpdateByID[T]) SetMap(changes Dict) *StateUpdateByID[T] {
+	if s.changes == nil {
+		s.changes = make(Dict)
+	}
+	for key, val := range changes {
+		s.changes[key] = val
+	}
+	return s
+}
+
+// BatchSize sets the IN clause batch size for Phase 2.
+// Wrapper around byIDBase.BatchSize that returns the concrete type for chaining.
+func (s *StateUpdateByID[T]) BatchSize(size int) *StateUpdateByID[T] {
+	s.byIDBase.BatchSize(size)
+	return s
+}
+
+// Take limits the number of IDs queried in Phase 1.
+// Wrapper around byIDBase.Take that returns the concrete type for chaining.
+// Unlike StateUpdate.Take, this works on PostgreSQL because the LIMIT
+// is applied to the SELECT query, not the UPDATE statement.
+func (s *StateUpdateByID[T]) Take(i int) *StateUpdateByID[T] {
+	s.byIDBase.Take(i)
+	return s
+}
+
+// OnTransaction sets the transaction for both Phase 1 (SELECT) and Phase 2 (UPDATE).
+// Wrapper around byIDBase.OnTransaction that returns the concrete type for chaining.
+func (s *StateUpdateByID[T]) OnTransaction(tx model.Transaction) *StateUpdateByID[T] {
+	s.byIDBase.OnTransaction(tx)
+	return s
+}
+
+// Exec executes the two-phase update.
+// Phase 1: SELECT pk FROM table WHERE <conditions> [LIMIT n]
+// Phase 2: UPDATE table SET ... WHERE pk IN (ids)  (batched via InBatch)
+// Returns the list of affected IDs.
+func (s *StateUpdateByID[T]) Exec() ([]int64, error) {
+	if len(s.changes) == 0 {
+		return nil, fmt.Errorf("goent: StateUpdateByID.Exec has no changes, use Set() or SetMap()")
+	}
+
+	ids, cond, err := s.buildInBatchCond()
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return ids, nil
+	}
+
+	state := NewStateWhere(s.ctx)
+	state.builder.Type = model.UpdateQuery
+	state.builder.core.Where = cond
+	state.conn = s.conn
+
+	upd := &StateUpdate[T]{table: s.table, StateWhere: state}
+	upd.SetMap(s.changes)
+	return ids, upd.Exec()
+}

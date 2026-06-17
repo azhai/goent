@@ -209,3 +209,65 @@ func MatchFilter[T any](table *Table[T], obj T) Condition {
 	col := &Field{TableAddr: table.TableAddr}
 	return EqualsMap(col, data)
 }
+
+// StateDeleteByID represents a two-phase DELETE query: first queries matching
+// primary key IDs, then deletes rows by ID using an IN clause.
+//
+// This approach:
+//   - Works around PostgreSQL's lack of LIMIT in DELETE statements (via Take)
+//   - Provides the list of deleted IDs for auditing
+//   - Uses InBatch to handle large ID sets within parameter limits
+//
+// Only works for tables with a single integer primary key.
+//
+// Example:
+//
+//	ids, err := db.User.Filter(goent.Equals(db.User.Field("status"), "deleted")).
+//	    DeleteByID().Exec()
+type StateDeleteByID[T any] struct {
+	byIDBase[T] // Shared two-phase fields and methods (BatchSize, Take, OnTransaction)
+}
+
+// BatchSize sets the IN clause batch size for Phase 2.
+// Wrapper around byIDBase.BatchSize that returns the concrete type for chaining.
+func (s *StateDeleteByID[T]) BatchSize(size int) *StateDeleteByID[T] {
+	s.byIDBase.BatchSize(size)
+	return s
+}
+
+// Take limits the number of IDs queried in Phase 1.
+// Wrapper around byIDBase.Take that returns the concrete type for chaining.
+// Unlike StateDelete.Take, this works on PostgreSQL because the LIMIT
+// is applied to the SELECT query, not the DELETE statement.
+func (s *StateDeleteByID[T]) Take(i int) *StateDeleteByID[T] {
+	s.byIDBase.Take(i)
+	return s
+}
+
+// OnTransaction sets the transaction for both Phase 1 (SELECT) and Phase 2 (DELETE).
+// Wrapper around byIDBase.OnTransaction that returns the concrete type for chaining.
+func (s *StateDeleteByID[T]) OnTransaction(tx model.Transaction) *StateDeleteByID[T] {
+	s.byIDBase.OnTransaction(tx)
+	return s
+}
+
+// Exec executes the two-phase delete.
+// Phase 1: SELECT pk FROM table WHERE <conditions> [LIMIT n]
+// Phase 2: DELETE FROM table WHERE pk IN (ids)  (batched via InBatch)
+// Returns the list of deleted IDs.
+func (s *StateDeleteByID[T]) Exec() ([]int64, error) {
+	ids, cond, err := s.buildInBatchCond()
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return ids, nil
+	}
+
+	sd := NewStateDeleteWhere(s.ctx)
+	sd.builder.core.Where = cond
+	sd.conn = s.conn
+
+	del := &StateDelete[T]{table: s.table, StateDeleteWhere: sd}
+	return ids, del.Exec()
+}

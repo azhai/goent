@@ -24,10 +24,10 @@ import (
 
 // Animal is an animal in the zoo.
 type Animal struct {
-	Name        string       `goe:"index"`
+	Name        string `goe:"index"`
 	HabitatId   *uuid.UUID
 	InfoId      *[]byte
-	Id          int          `goe:"pk"`
+	Id          int           `goe:"pk"`
 	AnimalFoods []*AnimalFood `goe:"o2m;fk=animal_id"`
 }
 
@@ -43,7 +43,7 @@ type AnimalFood struct {
 
 // Food is a type of food that an animal can eat.
 type Food struct {
-	Id          uuid.UUID    `goe:"pk"`
+	Id          uuid.UUID `goe:"pk"`
 	Name        string
 	AnimalFoods []*AnimalFood `goe:"o2m;fk=food_id"`
 }
@@ -59,7 +59,7 @@ type Habitat struct {
 
 // Weather is a type of weather that a habitat can have.
 type Weather struct {
-	Id       int       `goe:"pk"`
+	Id       int `goe:"pk"`
 	Name     string
 	Habitats []*Habitat `goe:"o2m;fk=weather_id"`
 }
@@ -102,9 +102,9 @@ func (t *Status) InsertValues() []any {
 
 // User is a user in the system.
 type User struct {
-	Id        int        `goe:"pk"`
-	Name      string     `goe:"index(n:idx_name_lower f:lower)"`
-	Email     string     `goe:"unique"`
+	Id        int         `goe:"pk"`
+	Name      string      `goe:"index(n:idx_name_lower f:lower)"`
+	Email     string      `goe:"unique"`
 	UserRoles []*UserRole `goe:"o2m;fk=user_id"`
 }
 
@@ -118,7 +118,7 @@ type UserRole struct {
 
 // Role is a role in the system.
 type Role struct {
-	Id        int        `goe:"pk"`
+	Id        int `goe:"pk"`
 	Name      string
 	UserRoles []*UserRole `goe:"o2m;fk=role_id"`
 }

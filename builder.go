@@ -547,8 +547,8 @@ func (b *Builder) buildJoins() []any {
 
 	var args []any
 	for _, j := range b.Joins {
-		c.buf.WriteString(" ")
-		c.buf.WriteString(string(j.JoinType) + " ")
+		joiner := " " + string(j.JoinType) + " "
+		c.buf.WriteString(joiner)
 		if j.fullName != "" {
 			c.buf.WriteString(j.fullName)
 		} else if j.Table != nil {
@@ -633,9 +633,9 @@ func (c *BuilderCore) buildTemplate(cond Condition, args *[]any, startIdx int, f
 }
 
 // appendValueParam delegates to the core's shared implementation.
-func (b *Builder) appendValueParam(val *Value, startIdx int, args *[]any) int {
-	return b.core.appendValueParam(val, startIdx, args)
-}
+// func (b *Builder) appendValueParam(val *Value, startIdx int, args *[]any) int {
+// 	return b.core.appendValueParam(val, startIdx, args)
+// }
 
 // BuildWhere builds the WHERE clause for the Builder
 func (b *Builder) buildWhere(full bool) []any {
