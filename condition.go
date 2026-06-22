@@ -2,7 +2,9 @@ package goent
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
+	"strings"
 )
 
 // Condition represents a SQL WHERE condition with a template and associated fields/values
@@ -386,9 +388,32 @@ func applyFilter(w *Condition, conds ...Condition) Condition {
 	return And(conds...)
 }
 
-// applyWhere combines existing conditions with a raw WHERE clause
+// isEmptySlice reports whether v is a slice or array with zero length.
+func isEmptySlice(v any) bool {
+	if v == nil {
+		return false
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Slice, reflect.Array:
+		return rv.Len() == 0
+	}
+	return false
+}
+
+// applyWhere combines existing conditions with a raw WHERE clause.
+// For the common raw IN/NOT IN patterns with an empty slice, it produces a
+// constant condition so the query is valid and semantically reasonable.
 func applyWhere(w *Condition, where string, args ...any) Condition {
 	cond := Expr(where, args...)
+	if len(args) == 1 && isEmptySlice(args[0]) {
+		lower := strings.ToLower(strings.TrimSpace(where))
+		if strings.HasSuffix(lower, " not in ?") {
+			cond = Expr("1 = 1")
+		} else if strings.HasSuffix(lower, " in ?") {
+			cond = Expr("1 = 0")
+		}
+	}
 	if !w.IsEmpty() {
 		return And(*w, cond)
 	}

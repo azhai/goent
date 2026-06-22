@@ -16,6 +16,7 @@ type NilMarker struct{}
 // It provides methods for building and executing DELETE queries with various options
 type StateDelete[T any] struct {
 	table             *Table[T] // The table to delete records from
+	skipEvent         bool      // Internal: skip event publishing (used by StateDeleteByID)
 	*StateDeleteWhere           // Embedded StateDeleteWhere for WHERE clause construction
 }
 
@@ -29,7 +30,7 @@ func (s *StateDelete[T]) Match(obj T) *StateDelete[T] {
 // Exec executes the DELETE query
 // It builds and runs the DELETE statement with the specified conditions
 func (s *StateDelete[T]) Exec() error {
-	s.builder.SetTable(&s.table.TableInfo)
+	s.builder.SetTable(s.table.TableInfo)
 	sql, args := s.builder.Build()
 	if sql == "" {
 		defer PutDeleteBuilder(s.builder)
@@ -38,8 +39,17 @@ func (s *StateDelete[T]) Exec() error {
 	}
 	qr := model.CreateQuery(sql, args)
 	defer PutDeleteBuilder(s.builder)
-	conn, cfg := s.Prepare(&s.table.TableInfo)
-	return qr.WrapExec(s.ctx, conn, cfg)
+	conn, cfg := s.Prepare(s.table.TableInfo)
+	if err := qr.WrapExec(s.ctx, conn, cfg); err != nil {
+		return err
+	}
+	// Skip event for clear-all operations (no WHERE) and internal byid calls
+	if !s.skipEvent && !s.builder.core.Where.IsEmpty() {
+		info := s.table.TableInfo
+		publishEvent(info.db.bus, info, conn, EventTopicDelete,
+			s.builder.core.Where.Template, nil, nil, qr.RowsAffected)
+	}
+	return nil
 }
 
 // ByPK deletes a single row by primary key using cached SQL.
@@ -50,9 +60,14 @@ func (s *StateDelete[T]) ByPK(id int64) error {
 	if sql == "" {
 		return model.ErrNoPrimaryKey
 	}
-	conn, cfg := s.Prepare(&s.table.TableInfo)
+	conn, cfg := s.Prepare(s.table.TableInfo)
 	qr := model.CreateQuery(sql, []any{id})
-	return qr.WrapExec(s.ctx, conn, cfg)
+	if err := qr.WrapExec(s.ctx, conn, cfg); err != nil {
+		return err
+	}
+	info := s.table.TableInfo
+	publishEvent(info.db.bus, info, conn, EventTopicDeleteByPK, "", []int64{id}, nil, 1)
+	return nil
 }
 
 // OnTransaction sets the transaction for the DELETE operation
@@ -268,6 +283,13 @@ func (s *StateDeleteByID[T]) Exec() ([]int64, error) {
 	sd.builder.core.Where = cond
 	sd.conn = s.conn
 
-	del := &StateDelete[T]{table: s.table, StateDeleteWhere: sd}
-	return ids, del.Exec()
+	del := &StateDelete[T]{table: s.table, StateDeleteWhere: sd, skipEvent: true}
+	if err := del.Exec(); err != nil {
+		return ids, err
+	}
+	// Send byid event with the queried IDs
+	info := s.table.TableInfo
+	publishEvent(info.db.bus, info, s.conn, EventTopicDeleteByID,
+		s.where.Template, ids, nil, int64(len(ids)))
+	return ids, nil
 }

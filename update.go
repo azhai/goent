@@ -11,6 +11,9 @@ import (
 type StateUpdate[T any] struct {
 	table       *Table[T]   // The table to update records in
 	others      []*Table[T] // Other tables involved in JOIN operations
+	skipEvent   bool        // Internal: skip event publishing (used by StateUpdateByID)
+	eventTopic  string      // Event topic to publish (default: ent:update; ByPK uses ent:update-bypk)
+	eventIDs    []int64     // Event IDs to publish (default: nil; ByPK sets [id])
 	*StateWhere             // Embedded StateWhere for WHERE clause construction
 }
 
@@ -23,15 +26,28 @@ type StateUpdate[T any] struct {
 //	err := db.User.Where("id = ?", 1).Update().Set(change).Exec()
 func (s *StateUpdate[T]) Exec() error {
 	defer PutBuilder(s.builder)
-	s.builder.SetTable(&s.table.TableInfo)
+	s.builder.SetTable(s.table.TableInfo)
 	sql, args := s.builder.Build(true)
 	if sql == "" {
 		return fmt.Errorf("goent: StateUpdate.Exec built empty SQL (Type=%d, Changes=%d, Where=%v, args=%v)",
 			s.builder.Type, len(s.builder.Changes), !s.builder.core.Where.IsEmpty(), args)
 	}
 	qr := model.CreateQuery(sql, args)
-	conn, cfg := s.Prepare(&s.table.TableInfo)
-	return qr.WrapExec(s.ctx, conn, cfg)
+	conn, cfg := s.Prepare(s.table.TableInfo)
+	if err := qr.WrapExec(s.ctx, conn, cfg); err != nil {
+		return err
+	}
+	// Skip event for JOIN updates, subquery updates, and internal byid calls
+	if !s.skipEvent && !s.builder.IsJoinQuery() && !s.builder.core.Where.IsEmpty() {
+		info := s.table.TableInfo
+		topic := s.eventTopic
+		if topic == "" {
+			topic = EventTopicUpdate
+		}
+		publishEvent(info.db.bus, info, conn, topic,
+			s.builder.core.Where.Template, s.eventIDs, changesToMap(s.builder.Changes), qr.RowsAffected)
+	}
+	return nil
 }
 
 // ByPK updates a single row by primary key.
@@ -46,6 +62,8 @@ func (s *StateUpdate[T]) ByPK(id int64) error {
 		return model.ErrNoPrimaryKey
 	}
 	s.builder.core.Where = Equals(pkField, id)
+	s.eventTopic = EventTopicUpdateByPK
+	s.eventIDs = []int64{id}
 	return s.Exec()
 }
 
@@ -134,7 +152,7 @@ func (s *StateUpdate[T]) Take(i int) *StateUpdate[T] {
 //
 //	info := GetTableInfo(referAddr)
 //	err := db.User.Update().Join(model.InnerJoin, *info, EqualsField(...)).Set(...).Exec()
-func (s *StateUpdate[T]) Join(joinType model.JoinType, info TableInfo, on Condition) *StateUpdate[T] {
+func (s *StateUpdate[T]) Join(joinType model.JoinType, info *TableInfo, on Condition) *StateUpdate[T] {
 	s.builder.Type = model.UpdateJoinQuery
 	s.builder.Joins = append(s.builder.Joins, &JoinTable{
 		JoinType: joinType, Table: info.Table(), On: Condition{},
@@ -160,7 +178,7 @@ func (s *StateUpdate[T]) LeftJoin(fkey string, refer *Field) *StateUpdate[T] {
 	}
 
 	leftField := s.table.sortedFields[col.FieldId]
-	return s.Join(model.LeftJoin, *info, EqualsField(leftField, refer))
+	return s.Join(model.LeftJoin, info, EqualsField(leftField, refer))
 }
 
 // StateUpdateByID represents a two-phase UPDATE query: first queries matching
@@ -254,7 +272,15 @@ func (s *StateUpdateByID[T]) Exec() ([]int64, error) {
 	state.builder.core.Where = cond
 	state.conn = s.conn
 
-	upd := &StateUpdate[T]{table: s.table, StateWhere: state}
+	upd := &StateUpdate[T]{table: s.table, StateWhere: state, skipEvent: true}
 	upd.SetMap(s.changes)
-	return ids, upd.Exec()
+	changes := changesToMap(upd.builder.Changes)
+	if err := upd.Exec(); err != nil {
+		return ids, err
+	}
+	// Send byid event with the queried IDs and changes
+	info := s.table.TableInfo
+	publishEvent(info.db.bus, info, s.conn, EventTopicUpdateByID,
+		s.where.Template, ids, changes, int64(len(ids)))
+	return ids, nil
 }

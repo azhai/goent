@@ -19,7 +19,7 @@ type StateInsert[T any] struct {
 func (s *StateInsert[T]) One(obj *T) error {
 	defer PutBuilder(s.builder)
 	s.builder.Type = model.InsertQuery
-	s.builder.SetTable(&s.table.TableInfo)
+	s.builder.SetTable(s.table.TableInfo)
 	s.builder.ResetForSave()
 
 	valueOf := reflect.ValueOf(obj).Elem()
@@ -35,24 +35,49 @@ func (s *StateInsert[T]) One(obj *T) error {
 			s.builder.Type, len(s.builder.Changes), args)
 	}
 	qr := model.CreateQuery(sql, args)
-	conn, cfg := s.Prepare(&s.table.TableInfo)
+	conn, cfg := s.Prepare(s.table.TableInfo)
+	info := s.table.TableInfo
+	changes := changesToMap(s.builder.Changes)
 	if retFid >= 0 && returning != "" && s.table.db.driver.SupportsReturning() {
 		hd := NewHandler(s.ctx, conn, cfg)
-		return hd.ExecuteReturning(qr, valueOf, retFid)
+		if err := hd.ExecuteReturning(qr, valueOf, retFid); err != nil {
+			return err
+		}
+		publishEvent(info.db.bus, info, conn, EventTopicInsertOne, "", extractID(valueOf, retFid), changes, 1)
+		return nil
 	}
 	err := qr.WrapExec(s.ctx, conn, cfg)
 	if err != nil {
 		return err
 	}
 	if retFid >= 0 && returning != "" && s.table.PrimaryKeys[0].IsAutoIncr && !s.table.db.driver.SupportsReturning() {
-		return s.getLastInsertId(valueOf, retFid)
+		if err := s.getLastInsertId(valueOf, retFid); err != nil {
+			return err
+		}
+	}
+	publishEvent(info.db.bus, info, conn, EventTopicInsertOne, "", extractID(valueOf, retFid), changes, 1)
+	return nil
+}
+
+// extractID reads the int64 primary key value at field index fid from a reflect.Value.
+// Returns nil if fid is invalid or the field is not an integer kind.
+func extractID(valueOf reflect.Value, fid int) []int64 {
+	if fid < 0 {
+		return nil
+	}
+	f := valueOf.Field(fid)
+	switch f.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return []int64{f.Int()}
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return []int64{int64(f.Uint())}
 	}
 	return nil
 }
 
 func (s *StateInsert[T]) getLastInsertId(valueOf reflect.Value, retFid int) error {
 	qr := model.CreateQuery("SELECT last_insert_rowid()", nil)
-	conn, cfg := s.Prepare(&s.table.TableInfo)
+	conn, cfg := s.Prepare(s.table.TableInfo)
 	row, err := qr.WrapQueryRow(s.ctx, conn, cfg)
 	if err != nil {
 		return err
@@ -67,7 +92,7 @@ func (s *StateInsert[T]) getLastInsertId(valueOf reflect.Value, retFid int) erro
 
 func (s *StateInsert[T]) queryLastInsertId() (int64, error) {
 	qr := model.CreateQuery("SELECT last_insert_rowid()", nil)
-	conn, cfg := s.Prepare(&s.table.TableInfo)
+	conn, cfg := s.Prepare(s.table.TableInfo)
 	row, err := qr.WrapQueryRow(s.ctx, conn, cfg)
 	if err != nil {
 		return 0, err
@@ -91,7 +116,7 @@ func (s *StateInsert[T]) All(retPK bool, data []*T) error {
 		return s.One(data[0])
 	}
 	s.builder.Type = model.InsertAllQuery
-	s.builder.SetTable(&s.table.TableInfo)
+	s.builder.SetTable(s.table.TableInfo)
 	s.builder.ResetForSave()
 
 	isAutoIncr := false
@@ -138,20 +163,51 @@ func (s *StateInsert[T]) All(retPK bool, data []*T) error {
 
 	returning := s.builder.Returning
 	qr := model.CreateQuery(s.builder.Build(true))
-	conn, cfg := s.Prepare(&s.table.TableInfo)
+	conn, cfg := s.Prepare(s.table.TableInfo)
+	info := s.table.TableInfo
+	n := int64(len(data))
 	if pkFid >= 0 && returning != "" && isAutoIncr && s.table.db.driver.SupportsReturning() {
 		valueOf := reflect.ValueOf(data)
 		hd := NewHandler(s.ctx, conn, cfg)
-		return hd.BatchReturning(qr, valueOf, pkFid)
+		if err := hd.BatchReturning(qr, valueOf, pkFid); err != nil {
+			return err
+		}
+		publishEvent(info.db.bus, info, conn, EventTopicInsertBulk, "", extractIDs(data, pkFid), nil, n)
+		return nil
 	}
 	err := qr.WrapExec(s.ctx, conn, cfg)
 	if err != nil {
 		return err
 	}
 	if pkFid >= 0 && returning != "" && isAutoIncr && !s.table.db.driver.SupportsReturning() {
-		return s.getLastInsertIds(data, pkFid)
+		if err := s.getLastInsertIds(data, pkFid); err != nil {
+			return err
+		}
 	}
+	publishEvent(info.db.bus, info, conn, EventTopicInsertBulk, "", extractIDs(data, pkFid), nil, n)
 	return nil
+}
+
+// extractIDs reads the int64 primary key values at field index fid from a slice of records.
+// Returns nil if fid is invalid or no records are provided.
+func extractIDs[T any](data []*T, fid int) []int64 {
+	if fid < 0 || len(data) == 0 {
+		return nil
+	}
+	ids := make([]int64, 0, len(data))
+	for _, row := range data {
+		if row == nil {
+			continue
+		}
+		f := reflect.ValueOf(row).Elem().Field(fid)
+		switch f.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			ids = append(ids, f.Int())
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			ids = append(ids, int64(f.Uint()))
+		}
+	}
+	return ids
 }
 
 func (s *StateInsert[T]) getLastInsertIds(data []*T, pkFid int) error {
@@ -207,7 +263,7 @@ func (s *StateSave[T]) getQuery(primary Dict) model.Query {
 // It automatically handles insert/update logic based on primary key presence
 func (s *StateSave[T]) One(obj *T) error {
 	defer PutBuilder(s.builder)
-	s.builder.SetTable(&s.table.TableInfo)
+	s.builder.SetTable(s.table.TableInfo)
 	s.builder.ResetForSave()
 
 	// Fast path: use UpdatePairs for single PK update (no reflection needed)
@@ -222,19 +278,37 @@ func (s *StateSave[T]) One(obj *T) error {
 	valueOf := reflect.ValueOf(obj).Elem()
 	primary, retFid := CollectFields(s.builder, s.table, valueOf, s.table.Ignores)
 	qr := s.Take(1).getQuery(primary)
-	conn, cfg := s.Prepare(&s.table.TableInfo)
+	conn, cfg := s.Prepare(s.table.TableInfo)
+	info := s.table.TableInfo
+	isUpdate := len(primary) > 0
 	if s.builder.Returning != "" {
 		hd := NewHandler(s.ctx, conn, cfg)
-		return hd.ExecuteReturning(qr, valueOf, retFid)
+		if err := hd.ExecuteReturning(qr, valueOf, retFid); err != nil {
+			return err
+		}
+		if isUpdate {
+			publishEvent(info.db.bus, info, conn, EventTopicUpdate, "", nil, changesToMap(s.builder.Changes), 1)
+		} else {
+			publishEvent(info.db.bus, info, conn, EventTopicInsertOne, "", extractID(valueOf, retFid), changesToMap(s.builder.Changes), 1)
+		}
+		return nil
 	}
-	return qr.WrapExec(s.ctx, conn, cfg)
+	if err := qr.WrapExec(s.ctx, conn, cfg); err != nil {
+		return err
+	}
+	if isUpdate {
+		publishEvent(info.db.bus, info, conn, EventTopicUpdate, "", nil, changesToMap(s.builder.Changes), qr.RowsAffected)
+	} else {
+		publishEvent(info.db.bus, info, conn, EventTopicInsertOne, "", nil, changesToMap(s.builder.Changes), 1)
+	}
+	return nil
 }
 
 // Map saves records from a map, inserting or updating based on primary key presence
 // It extracts primary keys from the map to determine insert/update logic
 func (s *StateSave[T]) Map(value Dict) error {
 	defer PutBuilder(s.builder)
-	s.builder.SetTable(&s.table.TableInfo)
+	s.builder.SetTable(s.table.TableInfo)
 	s.builder.ResetForSave()
 
 	primary := make(Dict, len(s.table.PrimaryKeys))
@@ -251,7 +325,7 @@ func (s *StateSave[T]) Map(value Dict) error {
 	}
 
 	qr := s.getQuery(primary)
-	conn, cfg := s.Prepare(&s.table.TableInfo)
+	conn, cfg := s.Prepare(s.table.TableInfo)
 	return qr.WrapExec(s.ctx, conn, cfg)
 }
 

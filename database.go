@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sync"
 
+	"github.com/azhai/gobus"
 	"github.com/azhai/goent/model"
 )
 
@@ -66,6 +67,7 @@ func GetTableFieldName(addr uintptr, name string) (string, error) {
 // DB represents a database connection with its driver
 // It provides methods for executing queries and managing transactions
 type DB struct {
+	bus    *gobus.EventBus
 	driver model.Driver // Database driver implementation
 }
 
@@ -92,6 +94,41 @@ func (db *DB) Stats() sql.DBStats {
 	return db.driver.Stats()
 }
 
+// Watch subscribes the provided tables to the event bus for modification events.
+// It marks the tables as watched, enabling event notifications on INSERT, UPDATE, and DELETE.
+//
+// Only single-table modification operations emit events:
+//   - INSERT (One/All): emits ent:insert-one / ent:insert-bulk
+//   - UPDATE (Exec/ByPK/UpdateByID): emits ent:update / ent:update-bypk / ent:update-byid
+//   - DELETE (Exec/ByPK/DeleteByID): emits ent:delete / ent:delete-bypk / ent:delete-byid
+//
+// The following operations are excluded from event notifications:
+//   - JOIN updates (multi-table updates via Join/LeftJoin)
+//   - Subquery updates
+//   - Clear-all deletes (DELETE without a WHERE clause)
+//
+// Event data fields:
+//   - model:     Go struct type name (e.g. "Animal")
+//   - table:     database table name (e.g. "animals")
+//   - where:     WHERE clause template string (empty for insert/bypk)
+//   - ids:       affected primary key IDs
+//   - changes:   column changes map (only for single insert and updates)
+//   - affecteds: number of affected rows
+//   - trans_no:  transaction identifier string (empty if not in a transaction)
+//
+// Example:
+//
+//	bus := gobus.NewEventBus(1024)
+//	db.Watching(bus, db.Animal.TableInfo, db.User.TableInfo)
+func (db *DB) Watching(bus *gobus.EventBus, tables ...*TableInfo) {
+	if db.bus = bus; db.bus == nil {
+		return
+	}
+	for _, table := range tables {
+		table.isWatched = true
+	}
+}
+
 // RawExecContext executes a raw SQL statement without returning rows
 // It executes the provided SQL with the given arguments
 //
@@ -101,7 +138,7 @@ func (db *DB) Stats() sql.DBStats {
 func (db *DB) RawExecContext(ctx context.Context, rawSql string, args ...any) error {
 	conn := db.driver.NewConnection()
 	dc := db.driver.GetDatabaseConfig()
-	qr := model.CreateQuery(rawSql, args)
+	qr := model.CreateQuery(db.driver.NormalizeSql(rawSql), args)
 	return qr.WrapExec(ctx, conn, dc)
 }
 
@@ -121,25 +158,38 @@ func (db *DB) RawExecContext(ctx context.Context, rawSql string, args ...any) er
 func (db *DB) RawQueryContext(ctx context.Context, rawSql string, args ...any) (model.Rows, error) {
 	conn := db.driver.NewConnection()
 	dc := db.driver.GetDatabaseConfig()
-	qr := model.CreateQuery(rawSql, args)
+	qr := model.CreateQuery(db.driver.NormalizeSql(rawSql), args)
 	return qr.WrapQuery(ctx, conn, dc)
 }
 
-// NewTransactionContext creates a new Transaction with the specified context and isolation level
-// It returns a transaction object that can be used for atomic operations
+// RawQueryRowContext executes a raw SQL query and returns a single row.
+// It returns a non-nil Row whose Scan will report the underlying error
+// (including sql.ErrNoRows when no row matches), so callers can safely
+// chain .Scan(...) without a nil check.
 func (db *DB) RawQueryRowContext(ctx context.Context, rawSql string, args ...any) model.Row {
 	conn := db.driver.NewConnection()
 	dc := db.driver.GetDatabaseConfig()
-	qr := model.CreateQuery(rawSql, args)
+	qr := model.CreateQuery(db.driver.NormalizeSql(rawSql), args)
 	rows, err := qr.WrapQuery(ctx, conn, dc)
 	if err != nil {
-		return nil
+		return errRow{err: err}
 	}
 	if rows.Next() {
 		return rows
 	}
 	rows.Close()
-	return nil
+	return errRow{err: sql.ErrNoRows}
+}
+
+// errRow is a Row implementation that always returns the same error from Scan.
+// It is returned by RawQueryRowContext when the query fails or yields no rows,
+// so callers do not need to nil-check the returned Row.
+type errRow struct {
+	err error
+}
+
+func (r errRow) Scan(_ ...any) error {
+	return r.err
 }
 
 // NewTransaction creates a new Transaction on the database using the default level
@@ -230,6 +280,26 @@ func (db *DB) DropTables() error {
 		return nil
 	}
 	return NewSchemaOps(db).DropTables(context.Background(), tables)
+}
+
+// TruncateTable truncates the specified table.
+// For PostgreSQL it uses TRUNCATE ... RESTART IDENTITY CASCADE,
+// for SQLite it falls back to DELETE FROM plus sqlite_sequence cleanup.
+func (db *DB) TruncateTable(schema, table string) error {
+	if db == nil || db.driver == nil {
+		return model.ErrDBNotFound
+	}
+	return db.driver.TruncateTable(schema, table)
+}
+
+// Upsert inserts a single row or updates it when the conflict columns already exist.
+// The table name may include a schema prefix. For PostgreSQL it uses ON CONFLICT,
+// for SQLite it uses INSERT OR REPLACE.
+func (db *DB) Upsert(table string, columns, conflictCols []string, values ...any) error {
+	if db == nil || db.driver == nil {
+		return model.ErrDBNotFound
+	}
+	return db.driver.Upsert(table, columns, conflictCols, values)
 }
 
 // Close closes the database connection and cleans up the table registry

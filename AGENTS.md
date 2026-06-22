@@ -34,6 +34,8 @@ goent/
 ├── body.go             # Internal types (body, pk, att, attributeStrings, stringInfos)
 ├── reflect.go          # Reflection-based field/relation initialization (InitField, createRelation)
 ├── database.go         # Database connection, transaction management, and registry
+├── events.go           # Event notification system (publishEvent, event topics)
+├── byid_base.go        # Shared base for two-phase update/delete (byIDBase[T])
 ├── migrate.go          # Migration orchestration (AutoMigrate, dbMigrator, relationInfo)
 ├── migrator.go         # Migration helpers (type resolution, attribute/index migration)
 ├── schema_ops.go       # Schema operations (SchemaOps)
@@ -255,6 +257,68 @@ The `GenSetForeign` interface allows generated code to set foreign relationship 
 without reflection. When a model implements `SetForeign(name string, value any)`,
 the eager loading functions use it instead of `reflect.Value.Set`.
 
+### Event Notification System
+
+The `Watch()` method enables event notifications for table modifications. When a watched
+table performs INSERT, UPDATE, or DELETE operations, events are published to the event bus.
+
+```go
+bus := gobus.NewEventBus(1024)
+db.Watch(bus, db.Animal.TableInfo, db.User.TableInfo)
+
+// Subscribe to events
+bus.Subscribe(goent.EventTopicInsertOne, gobus.Fanout, "my-handler", func(evt *gobus.Event) {
+    model := evt.Data["model"].(string)       // Go struct name, e.g. "Animal"
+    table := evt.Data["table"].(string)       // DB table name, e.g. "animals"
+    ids := evt.Data["ids"].([]int64)          // Affected primary key IDs
+    changes := evt.Data["changes"]            // Column changes (map[string]any or nil)
+    affecteds := evt.Data["affecteds"].(int64) // Number of affected rows
+    transNo := evt.Data["trans_no"].(string)  // Transaction ID (empty if non-tx)
+})
+```
+
+#### Event Topics
+
+| Operation | Topic | Description |
+|-----------|-------|-------------|
+| Single insert | `ent:insert-one` | Insert with returning (has IDs and changes) |
+| Batch insert | `ent:insert-bulk` | Batch insert (has IDs, no changes) |
+| Conditional update | `ent:update` | UPDATE with WHERE (has changes) |
+| Update by PK | `ent:update-bypk` | Single-row update by primary key (has IDs and changes) |
+| Two-phase update | `ent:update-byid` | Update by queried IDs (has IDs and changes) |
+| Conditional delete | `ent:delete` | DELETE with WHERE |
+| Delete by PK | `ent:delete-bypk` | Single-row delete by primary key (has IDs) |
+| Two-phase delete | `ent:delete-byid` | Delete by queried IDs (has IDs) |
+
+#### Event Data Fields
+
+- `model`: Go struct type name (e.g. `"Animal"`)
+- `table`: Database table name (e.g. `"animals"`)
+- `where`: WHERE clause template string (empty for insert/bypk operations)
+- `ids`: Affected primary key IDs (insert: new IDs; update/delete byid: queried IDs; bypk: the single ID)
+- `changes`: Column changes map (only for single insert and updates; nil for bulk insert and deletes)
+- `affecteds`: Number of affected rows
+- `trans_no`: Transaction identifier string (empty if not in a transaction; format `tx:0x...`)
+
+#### Excluded Operations
+
+The following operations do NOT emit events:
+- JOIN updates (multi-table updates via `Join`/`LeftJoin`)
+- Subquery updates
+- Clear-all deletes (DELETE without a WHERE clause)
+- Operations on unwatched tables
+
+#### Transaction Support
+
+Events are published immediately after each operation succeeds. For operations within a
+transaction, the `trans_no` field contains a transaction identifier (derived from the
+transaction pointer address). All operations in the same transaction share the same
+`trans_no`. This allows subscribers to group events by transaction.
+
+Note: Events are sent even if the transaction is later rolled back. Subscribers that need
+transactional consistency should check the `trans_no` and wait for commit/rollback signals
+from their application logic.
+
 ## Code Conventions
 
 ### Naming
@@ -415,6 +479,10 @@ db.Default.Insert().One(&d)
 16. **`InBatch()` splits large IN clauses** - Avoids SQLite 999 and PostgreSQL 65535 parameter limits
 17. **`GenSetForeign` interface for zero-reflection assignment** - Generated code can implement `SetForeign(name, value)` to bypass reflection
 18. **`QueryForeignByNameContext`/`QueryForeignsByNameContext` accept context and rows** - Enables transaction-scoped foreign queries; rows parameter provides the records to populate
+19. **`TableInfo` is embedded as a pointer in `Table[T]`** - Reduces struct size; use `table.TableInfo` (not `&table.TableInfo`) when passing to functions
+20. **`Watch()` enables event notifications** - Only single-table INSERT/UPDATE/DELETE emit events; JOIN updates, subquery updates, and clear-all deletes are excluded
+21. **Events include `trans_no` for transactions** - All operations in the same transaction share the same `trans_no`; non-transactional operations have an empty `trans_no`
+22. **`Query.RowsAffected` captures affected row count** - Drivers populate this field during `ExecContext`; used by the event system for the `affecteds` field
 
 ## Common Tasks
 

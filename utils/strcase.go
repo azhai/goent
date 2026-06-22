@@ -1,6 +1,8 @@
 package utils
 
 import (
+	"encoding/json"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -26,30 +28,28 @@ func init() {
 // DefaultAbbreviations returns the default set of common abbreviations.
 func DefaultAbbreviations() map[string]string {
 	return map[string]string{
-		"ID":    "id",
-		"IDs":   "ids",
-		"URL":   "url",
-		"URLs":  "urls",
 		"API":   "api",
+		"CPU":   "cpu",
+		"CSS":   "css",
+		"DNS":   "dns",
+		"GPU":   "gpu",
+		"HTML":  "html",
 		"HTTP":  "http",
 		"HTTPS": "https",
-		"SSH":   "ssh",
-		"SQL":   "sql",
-		"JSON":  "json",
-		"XML":   "xml",
-		"HTML":  "html",
-		"CSS":   "css",
-		"PR":    "pr",
-		"PRs":   "prs",
+		"ID":    "id",
+		"IDs":   "ids",
+		"IO":    "io",
 		"IP":    "ip",
 		"IPs":   "ips",
+		"JSON":  "json",
+		"RAM":   "ram",
+		"SQL":   "sql",
+		"SSH":   "ssh",
 		"TCP":   "tcp",
 		"UDP":   "udp",
-		"DNS":   "dns",
-		"CPU":   "cpu",
-		"GPU":   "gpu",
-		"RAM":   "ram",
-		"IO":    "io",
+		"URL":   "url",
+		"URLs":  "urls",
+		"XML":   "xml",
 	}
 }
 
@@ -63,6 +63,33 @@ func RegisterAbbreviations(abbrs map[string]string) {
 	for k, v := range abbrs {
 		abbreviations[k] = v
 	}
+}
+
+// LoadAbbreviationsFromFile loads custom abbreviations from a JSON file.
+// The file should contain a JSON object mapping Go abbreviation names to
+// their snake_case forms, e.g. {"ETag": "etag", "CRM": "crm"}.
+// If the file does not exist, no error is returned.
+func LoadAbbreviationsFromFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	return LoadAbbreviationsFromData(data)
+}
+
+// LoadAbbreviationsFromData loads custom abbreviations from JSON bytes.
+// The data should contain a JSON object mapping Go abbreviation names to
+// their snake_case forms, e.g. {"ETag": "etag", "CRM": "crm"}.
+func LoadAbbreviationsFromData(data []byte) error {
+	var abbrs map[string]string
+	if err := json.Unmarshal(data, &abbrs); err != nil {
+		return err
+	}
+	RegisterAbbreviations(abbrs)
+	return nil
 }
 
 // sortedAbbreviationKeys returns abbreviation keys sorted by length descending

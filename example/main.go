@@ -5,6 +5,7 @@ import (
 
 	"goent-example/models"
 
+	"github.com/azhai/gobus"
 	"github.com/azhai/goent"
 	"github.com/azhai/goent/drivers"
 	"github.com/azhai/goent/model"
@@ -19,6 +20,31 @@ func main() {
 		panic(err)
 	}
 	defer clearDatabase(db, false)
+
+	// Watch the Book, Order, and OrderDetail tables for changes
+	db.Watching(nil, db.Book.TableInfo, db.Order.TableInfo, db.OrderDetail.TableInfo)
+
+	// Setup event notification: watch the Order table for modifications
+	bus := gobus.NewEventBus(1024)
+	db.Watching(bus, db.Order.TableInfo)
+	// Subscribe to all order modification events
+	for _, topic := range []string{
+		goent.EventTopicInsertOne, goent.EventTopicInsertBulk,
+		goent.EventTopicUpdate, goent.EventTopicUpdateByPK, goent.EventTopicUpdateByID,
+		goent.EventTopicDelete, goent.EventTopicDeleteByPK, goent.EventTopicDeleteByID,
+	} {
+		_ = bus.Subscribe(topic, gobus.Fanout, "logger", func(evt *gobus.Event) {
+			model := evt.Data["model"]
+			table := evt.Data["table"]
+			affecteds := evt.Data["affecteds"]
+			transNo := evt.Data["trans_no"]
+			if transNo == "" {
+				transNo = "(non-tx)"
+			}
+			fmt.Printf("[EVENT] %s: model=%v table=%v affecteds=%v trans_no=%v\n",
+				evt.Topic, model, table, affecteds, transNo)
+		})
+	}
 
 	// addForeignKeys(db)
 

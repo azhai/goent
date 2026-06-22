@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/azhai/goent/model"
@@ -137,6 +139,57 @@ func (dr *Driver) SupportsReturning() bool {
 	return true
 }
 
+var (
+	datetimeRe        = regexp.MustCompile(`(?i)\bDATETIME\b`)
+	insertOrReplaceRe = regexp.MustCompile(`(?i)^\s*INSERT\s+OR\s+REPLACE\s+INTO\s+(\w+)\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)`)
+)
+
+func (dr *Driver) NormalizeSql(sql string) string {
+	trimmed := strings.TrimSpace(sql)
+	if strings.HasPrefix(strings.ToUpper(trimmed), "CREATE TABLE") {
+		sql = datetimeRe.ReplaceAllString(sql, "TIMESTAMP")
+	}
+	sql = insertOrReplaceRe.ReplaceAllStringFunc(sql, convertUpsert)
+	return sql
+}
+
+func convertUpsert(match string) string {
+	parts := insertOrReplaceRe.FindStringSubmatch(match)
+	if len(parts) != 4 {
+		return match
+	}
+	table := parts[1]
+	cols := splitColumns(parts[2])
+	placeholders := parts[3]
+	if len(cols) == 0 {
+		return match
+	}
+	conflictCol := cols[0]
+	var setClauses []string
+	for _, col := range cols {
+		if col != conflictCol {
+			setClauses = append(setClauses, fmt.Sprintf("%s = EXCLUDED.%s", col, col))
+		}
+	}
+	if len(setClauses) == 0 {
+		return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) ON CONFLICT (%s) DO NOTHING",
+			table, strings.Join(cols, ", "), placeholders, conflictCol)
+	}
+	return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) ON CONFLICT (%s) DO UPDATE SET %s",
+		table, strings.Join(cols, ", "), placeholders, conflictCol, strings.Join(setClauses, ", "))
+}
+
+func splitColumns(s string) []string {
+	var cols []string
+	for _, c := range strings.Split(s, ",") {
+		c = strings.TrimSpace(c)
+		if c != "" {
+			cols = append(cols, c)
+		}
+	}
+	return cols
+}
+
 func (dr *Driver) Name() string {
 	return "PostgreSQL"
 }
@@ -215,7 +268,10 @@ func (c Connection) ExecContext(ctx context.Context, query *model.Query) error {
 	if query.RawSql == "" {
 		return fmt.Errorf("goent: attempted to execute empty SQL query (Arguments=%v)", query.Arguments)
 	}
-	_, err := c.sql.Exec(ctx, query.RawSql, query.Arguments...)
+	tag, err := c.sql.Exec(ctx, query.RawSql, query.Arguments...)
+	if err == nil {
+		query.RowsAffected = tag.RowsAffected()
+	}
 	return err
 }
 
@@ -243,7 +299,10 @@ func (t Transaction) QueryRowContext(ctx context.Context, query *model.Query) mo
 }
 
 func (t Transaction) ExecContext(ctx context.Context, query *model.Query) error {
-	_, err := t.tx.Exec(ctx, query.RawSql, query.Arguments...)
+	tag, err := t.tx.Exec(ctx, query.RawSql, query.Arguments...)
+	if err == nil {
+		query.RowsAffected = tag.RowsAffected()
+	}
 	return err
 }
 

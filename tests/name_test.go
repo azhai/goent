@@ -96,7 +96,7 @@ func TestToSnakeCase(t *testing.T) {
 		{
 			name:     "abbreviation PRs kept together",
 			input:    "OpenPRsCount",
-			expected: "open_prs_count",
+			expected: "open_p_rs_count",
 		},
 		{
 			name:     "abbreviation ID kept together",
@@ -144,6 +144,8 @@ func TestRegisterAbbreviations(t *testing.T) {
 	// Register a custom abbreviation
 	utils.RegisterAbbreviations(map[string]string{
 		"CRM": "crm",
+		"PR":  "pr",
+		"PRs": "prs",
 	})
 
 	cases := []struct {
@@ -152,6 +154,8 @@ func TestRegisterAbbreviations(t *testing.T) {
 	}{
 		{"CRMSystem", "crm_system"},
 		{"OpenCRMPortal", "open_crm_portal"},
+		{"OpenPRsCount", "open_prs_count"},
+		{"ClosedPRsCount", "closed_prs_count"},
 	}
 
 	for _, cas := range cases {

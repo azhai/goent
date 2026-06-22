@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/azhai/goent"
+	"github.com/azhai/goent/backup"
 )
 
 func runExport(args *DbExportArgs) {
@@ -24,6 +26,11 @@ func runExport(args *DbExportArgs) {
 		os.Exit(1)
 	}
 	defer CloseDB(db)
+
+	if args.Archive {
+		runArchiveExport(db.DB, args)
+		return
+	}
 
 	ctx := context.Background()
 
@@ -81,4 +88,37 @@ func runExport(args *DbExportArgs) {
 	}
 
 	fmt.Println("Export complete!")
+}
+
+func runArchiveExport(db *goent.DB, args *DbExportArgs) {
+	ctx := context.Background()
+	bc := backup.Config{
+		Dir:    filepath.Dir(args.Dir),
+		DSN:    args.DSN,
+		Schema: args.Schema,
+	}
+	if bc.Schema == "" && strings.Contains(strings.ToLower(db.DriverName()), "postgres") {
+		bc.Schema = "public"
+	}
+	if bc.Dir == "" || bc.Dir == "." {
+		bc.Dir = "."
+	}
+
+	engine := backup.New(db, bc)
+	res := engine.Full(ctx, "goent-export")
+	if res.Err != nil {
+		fmt.Fprintf(os.Stderr, "Archive export failed: %v\n", res.Err)
+		os.Exit(1)
+	}
+
+	// Rename to the requested path if user provided an explicit archive path.
+	if filepath.Ext(args.Dir) == ".gz" || filepath.Ext(args.Dir) == ".tar" {
+		if err := os.Rename(res.Path, args.Dir); err != nil {
+			fmt.Fprintf(os.Stderr, "Error renaming archive: %v\n", err)
+			os.Exit(1)
+		}
+		res.Path = args.Dir
+	}
+
+	fmt.Printf("Archive exported to %s (%d bytes)\n", res.Path, res.Size)
 }

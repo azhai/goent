@@ -31,6 +31,7 @@ type TableInfo struct {
 	Foreigns    map[string]*Foreign // Foreigns is a map of foreign key column names to Foreign metadata.
 	Ignores     []string            // Ignores is a list of column names to ignore.
 
+	isWatched     bool         // isWatched is true if need send modify event.
 	simpleTable   bool         // simpleTable is true if the table has a single primary key.
 	sortedFields  []*Field     // sortedFields is a list of columns sorted by field ID.
 	selectByPKSql string       // selectByPKSql is the cached SELECT BY primary key SQL.
@@ -62,7 +63,15 @@ type TableInfo struct {
 	// insertOneFields is the cached field list for INSERT (non-PK, non-default columns).
 	insertOneFields []*Field
 	// insertOneOnce ensures insertOneSql is initialized only once (concurrent-safe).
-	insertOneOnce sync.Once
+	insertOneOnce   sync.Once
+	pkFieldOnce     sync.Once // guards pkField
+	cachedPkeysOnce sync.Once // guards cachedPkeys
+	formattedOnce   sync.Once // guards formattedName
+	modelTableOnce  sync.Once // guards modelTable
+	connOnce        sync.Once // guards cachedConn
+	cfgOnce         sync.Once // guards cachedCfg
+	selectByPKOnce  sync.Once // guards selectByPKSql
+	deleteByPKOnce  sync.Once // guards deleteByPKSql
 }
 
 // String returns the table name as a string representation.
@@ -73,17 +82,16 @@ func (info *TableInfo) String() string {
 
 // Table returns a model.Table representation with schema and table name.
 func (info *TableInfo) Table() *model.Table {
-	if info.modelTable != nil {
-		return info.modelTable
-	}
-	var schemaName *string
-	if info.SchemaName != "" {
-		schemaName = &info.SchemaName
-	}
-	info.modelTable = &model.Table{
-		Schema: schemaName,
-		Name:   info.TableName,
-	}
+	info.modelTableOnce.Do(func() {
+		var schemaName *string
+		if info.SchemaName != "" {
+			schemaName = &info.SchemaName
+		}
+		info.modelTable = &model.Table{
+			Schema: schemaName,
+			Name:   info.TableName,
+		}
+	})
 	return info.modelTable
 }
 
@@ -121,39 +129,31 @@ func (info *TableInfo) Field(name string) *Field {
 // It only returns valid field ID and column name for single-column primary keys.
 // The pkeys slice is cached to avoid allocation on repeated calls.
 func (info *TableInfo) GetPrimaryInfo() (int, string, []string) {
-	if info.cachedPkeys != nil {
-		pkFid, pkName := -1, ""
-		if len(info.PrimaryKeys) == 1 {
-			pkFid = info.PrimaryKeys[0].Column.FieldId
-			pkName = info.PrimaryKeys[0].ColumnName
+	info.cachedPkeysOnce.Do(func() {
+		size := len(info.PrimaryKeys)
+		pkeys := make([]string, 0, size)
+		for _, pkey := range info.PrimaryKeys {
+			pkeys = append(pkeys, pkey.ColumnName)
 		}
-		return pkFid, pkName, info.cachedPkeys
-	}
-	size := len(info.PrimaryKeys)
-	pkeys := make([]string, 0, size)
-	for _, pkey := range info.PrimaryKeys {
-		pkeys = append(pkeys, pkey.ColumnName)
-	}
-	sort.Strings(pkeys)
-	info.cachedPkeys = pkeys
+		sort.Strings(pkeys)
+		info.cachedPkeys = pkeys
+	})
 	pkFid, pkName := -1, ""
-	if size == 1 {
+	if len(info.PrimaryKeys) == 1 {
 		pkFid = info.PrimaryKeys[0].Column.FieldId
 		pkName = info.PrimaryKeys[0].ColumnName
 	}
-	return pkFid, pkName, pkeys
+	return pkFid, pkName, info.cachedPkeys
 }
 
 // GetPKField returns the primary key field for single-PK tables.
 // Returns nil for tables with no primary key or composite primary keys.
 func (info *TableInfo) GetPKField() *Field {
-	if info.pkField != nil {
-		return info.pkField
-	}
-	if len(info.PrimaryKeys) != 1 {
-		return nil
-	}
-	info.pkField = info.sortedFields[info.PrimaryKeys[0].Column.FieldId]
+	info.pkFieldOnce.Do(func() {
+		if len(info.PrimaryKeys) == 1 {
+			info.pkField = info.sortedFields[info.PrimaryKeys[0].Column.FieldId]
+		}
+	})
 	return info.pkField
 }
 
@@ -178,56 +178,49 @@ func (info *TableInfo) getFullName() string {
 
 // GetFormattedName returns the driver-formatted full table name, caching the result.
 func (info *TableInfo) GetFormattedName() string {
-	if info.formattedName != "" {
-		return info.formattedName
-	}
-	if info.driver != nil {
-		info.formattedName = info.driver.FormatTableName(info.SchemaName, info.TableName)
-	} else {
-		info.formattedName = info.getFullName()
-	}
+	info.formattedOnce.Do(func() {
+		if info.driver != nil {
+			info.formattedName = info.driver.FormatTableName(info.SchemaName, info.TableName)
+		} else {
+			info.formattedName = info.getFullName()
+		}
+	})
 	return info.formattedName
 }
 
 // GetConnection returns a cached Connection, creating one if necessary.
 func (info *TableInfo) GetConnection() model.Connection {
-	if info.cachedConn != nil {
-		return info.cachedConn
-	}
-	info.cachedConn = info.driver.NewConnection()
+	info.connOnce.Do(func() {
+		info.cachedConn = info.driver.NewConnection()
+	})
 	return info.cachedConn
 }
 
 // GetConfig returns a cached DatabaseConfig pointer.
 func (info *TableInfo) GetConfig() *model.DatabaseConfig {
-	if info.cachedCfg != nil {
-		return info.cachedCfg
-	}
-	info.cachedCfg = info.driver.GetDatabaseConfig()
+	info.cfgOnce.Do(func() {
+		info.cachedCfg = info.driver.GetDatabaseConfig()
+	})
 	return info.cachedCfg
 }
 
 func (info *TableInfo) GetSelectByPKSql() string {
-	if info.selectByPKSql != "" {
-		return info.selectByPKSql
-	}
-	if len(info.PrimaryKeys) != 1 {
-		return ""
-	}
-	pkName := info.PrimaryKeys[0].ColumnName
-	info.selectByPKSql = "SELECT * FROM " + info.getFullName() + " WHERE " + pkName + " = $1"
+	info.selectByPKOnce.Do(func() {
+		if len(info.PrimaryKeys) == 1 {
+			pkName := info.PrimaryKeys[0].ColumnName
+			info.selectByPKSql = "SELECT * FROM " + info.getFullName() + " WHERE " + pkName + " = $1"
+		}
+	})
 	return info.selectByPKSql
 }
 
 func (info *TableInfo) GetDeleteByPKSql() string {
-	if info.deleteByPKSql != "" {
-		return info.deleteByPKSql
-	}
-	if len(info.PrimaryKeys) != 1 {
-		return ""
-	}
-	pkName := info.PrimaryKeys[0].ColumnName
-	info.deleteByPKSql = "DELETE FROM " + info.getFullName() + " WHERE " + pkName + " = $1"
+	info.deleteByPKOnce.Do(func() {
+		if len(info.PrimaryKeys) == 1 {
+			pkName := info.PrimaryKeys[0].ColumnName
+			info.deleteByPKSql = "DELETE FROM " + info.getFullName() + " WHERE " + pkName + " = $1"
+		}
+	})
 	return info.deleteByPKSql
 }
 
@@ -271,15 +264,17 @@ func (info *TableInfo) setForeignReference(foreign *Foreign, refTableName string
 // Table represents a database table with its model and metadata.
 // It provides methods for querying, inserting, updating, and deleting records.
 type Table[T any] struct {
-	Model *T
-	db    *DB
-	TableInfo
 	// fetchAll is the cached FetchFunc for simple Select (sameModel, no joins).
 	fetchAll FetchFunc
 	// fetchAllOnce ensures fetchAll is initialized only once (concurrent-safe).
 	fetchAllOnce sync.Once
 	// fetchByPKOnce ensures fetchByPK/connByPK/cfgByPK are initialized only once.
 	fetchByPKOnce sync.Once
+
+	db         *DB // db is the database connection.
+	Model      *T  // Model is the struct type representing the table records.
+	*TableInfo     // TableInfo contains metadata about the table, including columns, primary keys, foreign keys, and indexes.
+
 }
 
 // SimpleTable creates a new Table instance for a simple table without foreign keys.
@@ -295,7 +290,7 @@ type Table[T any] struct {
 func SimpleTable[T any](db *DB, tableName, SchemaName string) *Table[T] {
 	return &Table[T]{
 		db: db,
-		TableInfo: TableInfo{
+		TableInfo: &TableInfo{
 			TableName:   tableName,
 			SchemaName:  SchemaName,
 			simpleTable: true,
@@ -312,11 +307,11 @@ func SimpleTable[T any](db *DB, tableName, SchemaName string) *Table[T] {
 //	value, info := NewTableReflect(db, reflect.TypeFor[User](), addr, "User", "", 0, 0)
 //	fmt.Println(info.TableName) // prints "user"
 func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schema string,
-	schemaId, tableId int) (reflect.Value, TableInfo) {
+	schemaId, tableId int) (reflect.Value, *TableInfo) {
 	tb := reflect.New(typeOf)
 	modelField := tb.Elem().FieldByName("Model")
 	if !modelField.IsValid() {
-		return tb, TableInfo{}
+		return tb, &TableInfo{}
 	}
 
 	modelType := modelField.Type().Elem()
@@ -330,7 +325,7 @@ func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schem
 		tableName = prefix + utils.TableNamePattern(fieldName)
 	}
 
-	info := TableInfo{
+	info := &TableInfo{
 		SchemaId: schemaId, SchemaName: schemaName,
 		TableId: tableId, TableName: tableName,
 		TableAddr: addr, FieldName: fieldName,

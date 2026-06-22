@@ -107,7 +107,7 @@ func travelSchemas(db *DB, dbId int, valueOf reflect.Value) ([]string, error) {
 				setDBMethod.Call([]reflect.Value{reflect.ValueOf(db)})
 			}
 			tableField.Set(tableOf)
-			tableRegistry[info.TableAddr] = &info
+			tableRegistry[info.TableAddr] = info
 		}
 	}
 

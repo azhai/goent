@@ -596,6 +596,13 @@ func (c *BuilderCore) appendValueParam(val *Value, startIdx int, args *[]any) in
 		} else if len(val.Args) > 0 {
 			*args = append(*args, val.Args[0])
 		}
+	} else {
+		// Empty slice/array value: emit an untyped NULL list to keep the SQL
+		// syntactically valid. For IN this matches nothing; for NOT IN it
+		// matches nothing as well (NOT IN NULL is unknown), so callers that
+		// need "match everything" semantics should avoid passing empty slices
+		// to NOT IN via raw Where.
+		c.buf.WriteString("(NULL)")
 	}
 	return startIdx
 }

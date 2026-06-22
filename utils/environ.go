@@ -27,6 +27,12 @@ func NewEnv() *Environ {
 	return MustLoadEnvFile(".env")
 }
 
+// NewEmptyEnviron creates a new empty Environ instance that falls back to system
+// environment variables when a key is not found in its internal storage.
+func NewEmptyEnviron() *Environ {
+	return &Environ{storage: make(map[string]Entry)}
+}
+
 // NewEnvWithFile is an alias for MustWithFile, kept for backward compatibility
 func NewEnvWithFile(filename string) *Environ {
 	return MustLoadEnvFile(filename)

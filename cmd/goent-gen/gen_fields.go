@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"go/types"
+	"path/filepath"
 	"reflect"
 	"strings"
 
@@ -11,6 +12,8 @@ import (
 	"github.com/azhai/goent/utils"
 	"golang.org/x/tools/go/packages"
 )
+
+const abbreviationsFileName = "goent-abbrs.json"
 
 // ModelStruct represents a struct with its name and type.
 type ModelStruct struct {
@@ -53,6 +56,13 @@ func RunFieldsGeneration(cfg *packages.Config, pkgPath, outPath string) error {
 func generateForPackage(pkg *packages.Package, outputPath string) error {
 	if len(pkg.GoFiles) == 0 {
 		return fmt.Errorf("No Go files found for package %s\n", pkg.Name)
+	}
+
+	// Load custom abbreviations from the package directory if present.
+	pkgDir := filepath.Dir(pkg.GoFiles[0])
+	abbrPath := filepath.Join(pkgDir, abbreviationsFileName)
+	if err := utils.LoadAbbreviationsFromFile(abbrPath); err != nil {
+		return fmt.Errorf("Error loading abbreviations from %s: %v\n", abbrPath, err)
 	}
 
 	structs := filterModels(findStructs(pkg.Types.Scope()), pkg.Name)

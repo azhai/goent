@@ -35,7 +35,7 @@ func NewStateSelectFrom[T, R any](state *StateWhere, table *Table[T]) *StateSele
 		state = NewStateWhere(ctx)
 	}
 	state.builder.Type = model.SelectQuery
-	state.builder.SetTable(&table.TableInfo)
+	state.builder.SetTable(table.TableInfo)
 	// Share sortedFields directly; Select() will clone on first append.
 	state.builder.VisitFields = table.GetSortedFields()
 	state.builder.visitFieldsShared = true
@@ -93,14 +93,14 @@ func (s *StateSelect[T, R]) getFetchFunc() FetchFunc {
 		// Use cached FetchFunc for simple Select (sameModel, no joins)
 		s.table.fetchAllOnce.Do(func() {
 			info := s.table.TableInfo
-			s.table.fetchAll = CreateFetchFunc(&info, info.GetSortedFields(), nil)
+			s.table.fetchAll = CreateFetchFunc(info, info.GetSortedFields(), nil)
 		})
 		if s.table.fetchAll != nil {
 			return s.table.fetchAll
 		}
 	}
 	info, fields := s.table.TableInfo, s.builder.VisitFields
-	return CreateFetchFunc(&info, fields, s.GetJoinForeigns())
+	return CreateFetchFunc(info, fields, s.GetJoinForeigns())
 }
 
 func genScanDestFetch[R any](target any) []any {
@@ -113,7 +113,7 @@ func (s *StateSelect[T, R]) FetchRow(qr model.Query, to FetchFunc) (*R, error) {
 	if to == nil {
 		to = s.getFetchFunc()
 	}
-	conn, cfg := s.Prepare(&s.table.TableInfo)
+	conn, cfg := s.Prepare(s.table.TableInfo)
 	row, err := qr.WrapQueryRow(s.ctx, conn, cfg)
 	if err != nil || row == nil {
 		return nil, err
@@ -164,7 +164,7 @@ func (s *StateSelect[T, R]) IterRows(to FetchFunc) iter.Seq2[*R, error] {
 	}
 	qr := model.CreateQuery(s.builder.Build(false))
 	builder := s.builder
-	conn, cfg := s.Prepare(&s.table.TableInfo)
+	conn, cfg := s.Prepare(s.table.TableInfo)
 	hd := NewHandler(s.ctx, conn, cfg)
 	seq := FetchResult[R](hd, qr, to)
 	return func(yield func(*R, error) bool) {
@@ -379,7 +379,7 @@ func (s *StateSelect[T, R]) GetJoinForeigns() []*Foreign {
 
 // Join joins another table with a condition
 // It adds a JOIN clause with the specified join type and condition
-func (s *StateSelect[T, R]) Join(joinType model.JoinType, info TableInfo, on Condition) *StateSelect[T, R] {
+func (s *StateSelect[T, R]) Join(joinType model.JoinType, info *TableInfo, on Condition) *StateSelect[T, R] {
 	s.builder.Type = model.SelectJoinQuery
 	jt := &JoinTable{
 		JoinType: joinType,
@@ -430,7 +430,7 @@ func (s *StateSelect[T, R]) LeftJoin(fkey string, refer *Field) *StateSelect[T, 
 		panic("failed to get table info for join")
 	}
 
-	s.Join(model.LeftJoin, *info, EqualsField(leftField, refer))
+	s.Join(model.LeftJoin, info, EqualsField(leftField, refer))
 	// Clone VisitFields if shared before appending
 	if s.builder.visitFieldsShared {
 		orig := s.builder.VisitFields
