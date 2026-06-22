@@ -20,6 +20,7 @@ type Query struct {
 	Arguments     []any         // Query arguments
 	QueryDuration time.Duration // Execution duration
 	Err           error         // Execution error
+	RowsAffected  int64         // Number of rows affected (for INSERT/UPDATE/DELETE)
 }
 
 // CreateQuery creates a new Query with the given raw SQL and arguments

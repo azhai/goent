@@ -6,6 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/azhai/goent"
+	"github.com/azhai/goent/backup"
 )
 
 func runImport(args *DbImportArgs) {
@@ -23,6 +26,11 @@ func runImport(args *DbImportArgs) {
 		os.Exit(1)
 	}
 	defer CloseDB(db)
+
+	if args.Archive {
+		runArchiveImport(db.DB, args)
+		return
+	}
 
 	ctx := context.Background()
 
@@ -90,6 +98,29 @@ func runImport(args *DbImportArgs) {
 	}
 
 	fmt.Println("Import complete!")
+}
+
+func runArchiveImport(db *goent.DB, args *DbImportArgs) {
+	ctx := context.Background()
+	bc := backup.Config{
+		DSN:    args.DSN,
+		Schema: args.Schema,
+	}
+	if bc.Schema == "" && strings.Contains(strings.ToLower(db.DriverName()), "postgres") {
+		bc.Schema = "public"
+	}
+
+	engine := backup.New(db, bc)
+	path := args.Dir
+	if path == "" || path == "./export" {
+		fmt.Fprintln(os.Stderr, "Archive import requires an archive file path via -O")
+		os.Exit(1)
+	}
+	if err := engine.Restore(ctx, path, false); err != nil {
+		fmt.Fprintf(os.Stderr, "Archive import failed: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Archive imported from %s\n", path)
 }
 
 func findSchemaFile(dir, table string) string {

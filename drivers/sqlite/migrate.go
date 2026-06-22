@@ -112,6 +112,27 @@ func (dr *Driver) RenameTable(schema, table, newTable string) error {
 	return dr.rawExecContext(context.TODO(), fmt.Sprintf("ALTER TABLE %v RENAME TO %v;", table, newTable))
 }
 
+func (dr *Driver) TruncateTable(schema, table string) error {
+	if len(schema) > 2 {
+		table = schema + "." + table
+	}
+	if err := dr.rawExecContext(context.TODO(), fmt.Sprintf("DELETE FROM %v;", table)); err != nil {
+		return err
+	}
+	_ = dr.rawExecContext(context.TODO(), "DELETE FROM sqlite_sequence WHERE name = ?;", table)
+	return nil
+}
+
+func (dr *Driver) Upsert(table string, columns, conflictCols []string, values []any) error {
+	placeholders := make([]string, len(values))
+	for i := range values {
+		placeholders[i] = "?"
+	}
+	sql := fmt.Sprintf("INSERT OR REPLACE INTO %s (%s) VALUES (%s)",
+		table, strings.Join(columns, ", "), strings.Join(placeholders, ", "))
+	return dr.rawExecContext(context.TODO(), sql, values...)
+}
+
 func (dr *Driver) RenameColumn(schema, table, oldColumn, newColumn string) error {
 	if len(schema) > 2 {
 		table = schema + "." + table

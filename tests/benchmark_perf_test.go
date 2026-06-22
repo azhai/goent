@@ -551,7 +551,7 @@ func BenchmarkScanDestReflection(b *testing.B) {
 	for b.Loop() {
 		s := &Status{Name: "Test"}
 		valueOf := reflect.ValueOf(s).Elem()
-		_ = goent.AppendDestTable(&info, valueOf)
+		_ = goent.AppendDestTable(info, valueOf)
 	}
 }
 

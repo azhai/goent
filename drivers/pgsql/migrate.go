@@ -106,6 +106,42 @@ func (dr *Driver) RenameTable(schema, table, newTable string) error {
 	return dr.rawExecContext(context.TODO(), fmt.Sprintf("ALTER TABLE %v RENAME TO %v;", table, newTable))
 }
 
+func (dr *Driver) TruncateTable(schema, table string) error {
+	if len(schema) > 2 {
+		table = schema + "." + table
+	}
+	return dr.rawExecContext(context.TODO(), fmt.Sprintf("TRUNCATE TABLE %v RESTART IDENTITY CASCADE;", table))
+}
+
+func (dr *Driver) Upsert(table string, columns, conflictCols []string, values []any) error {
+	placeholders := make([]string, len(values))
+	for i := range values {
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
+	}
+	conflict := strings.Join(conflictCols, ", ")
+	updateCols := make([]string, 0, len(columns))
+	for _, col := range columns {
+		isConflict := false
+		for _, cc := range conflictCols {
+			if col == cc {
+				isConflict = true
+				break
+			}
+		}
+		if !isConflict {
+			updateCols = append(updateCols, fmt.Sprintf("%s = EXCLUDED.%s", col, col))
+		}
+	}
+	sql := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) ON CONFLICT (%s) DO ",
+		table, strings.Join(columns, ", "), strings.Join(placeholders, ", "), conflict)
+	if len(updateCols) == 0 {
+		sql += "NOTHING"
+	} else {
+		sql += "UPDATE SET " + strings.Join(updateCols, ", ")
+	}
+	return dr.rawExecContext(context.TODO(), sql, values...)
+}
+
 func (dr *Driver) RenameColumn(schema, table, oldColumn, newColumn string) error {
 	if len(schema) > 2 {
 		table = schema + "." + table
@@ -277,10 +313,10 @@ func checkIndex(indexes []model.IndexMigrate, table *model.TableMigrate, sql *st
 	for i := range indexes {
 		if dbIndex, exist := dis[indexes[i].Name]; exist {
 			if indexes[i].Unique != dbIndex.unique {
-				sql.WriteString(dropIndex(table, indexes[i].EscapingName))
+				sql.WriteString(dropIndex(table, indexes[i].EscapingName, dbIndex.constraintName))
 				sql.WriteString(createIndex(indexes[i], table))
 			} else if indexes[i].Func != "" && indexes[i].Func != dbIndex.attname {
-				sql.WriteString(dropIndex(table, indexes[i].EscapingName))
+				sql.WriteString(dropIndex(table, indexes[i].EscapingName, dbIndex.constraintName))
 				sql.WriteString(createIndex(indexes[i], table))
 			}
 			dbIndex.migrated = true
@@ -295,7 +331,7 @@ func checkIndex(indexes []model.IndexMigrate, table *model.TableMigrate, sql *st
 				return m.Name == dbIndex.attname
 			}
 			if !slices.ContainsFunc(table.OneToSomes, isSameName) {
-				sql.WriteString(dropIndex(table, keywordHandler(dbIndex.indexName)))
+				sql.WriteString(dropIndex(table, keywordHandler(dbIndex.indexName), dbIndex.constraintName))
 			}
 		}
 	}

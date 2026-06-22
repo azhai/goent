@@ -138,6 +138,10 @@ func (dr *Driver) SupportsReturning() bool {
 	return false
 }
 
+func (dr *Driver) NormalizeSql(sql string) string {
+	return sql
+}
+
 func (dr *Driver) Name() string {
 	return "SQLite"
 }
@@ -198,7 +202,10 @@ func (c Connection) QueryRowContext(ctx context.Context, query *model.Query) mod
 }
 
 func (c Connection) ExecContext(ctx context.Context, query *model.Query) error {
-	_, err := c.sql.ExecContext(ctx, query.RawSql, query.Arguments...)
+	res, err := c.sql.ExecContext(ctx, query.RawSql, query.Arguments...)
+	if err == nil && res != nil {
+		query.RowsAffected, _ = res.RowsAffected()
+	}
 	return err
 }
 
@@ -224,7 +231,10 @@ func (t Transaction) QueryRowContext(ctx context.Context, query *model.Query) mo
 }
 
 func (t Transaction) ExecContext(ctx context.Context, query *model.Query) error {
-	_, err := t.tx.ExecContext(ctx, query.RawSql, query.Arguments...)
+	res, err := t.tx.ExecContext(ctx, query.RawSql, query.Arguments...)
+	if err == nil && res != nil {
+		query.RowsAffected, _ = res.RowsAffected()
+	}
 	return err
 }
 

@@ -395,20 +395,22 @@ func getTableColumns(conn *pgxpool.Pool, schema, tableName string) (dbTable, err
 
 // databaseIndex represents an index in the database for migration comparison.
 type databaseIndex struct {
-	indexName string
-	unique    bool
-	attname   string
-	table     string
-	migrated  bool
+	indexName      string
+	unique         bool
+	attname        string
+	table          string
+	constraintName string
+	migrated       bool
 }
 
 // getTableIndexes queries index metadata for a table during migration.
 func getTableIndexes(conn *pgxpool.Pool, schema, tableName string) (map[string]*databaseIndex, error) {
-	sqlQuery := `SELECT DISTINCT ci.relname, i.indisunique as is_unique, c.relname, a.attname FROM pg_index i
+	sqlQuery := `SELECT DISTINCT ci.relname, i.indisunique as is_unique, c.relname, a.attname, COALESCE(con.conname, '') FROM pg_index i
 	JOIN pg_attribute a ON i.indexrelid = a.attrelid
 	JOIN pg_class ci ON ci.oid = i.indexrelid
 	JOIN pg_class c ON c.oid = i.indrelid
 	JOIN pg_namespace n ON n.oid = c.relnamespace
+	LEFT JOIN pg_constraint con ON con.conindid = i.indexrelid
 	WHERE i.indisprimary = false AND n.nspname = $1 AND c.relname = $2;
 	`
 
@@ -421,15 +423,16 @@ func getTableIndexes(conn *pgxpool.Pool, schema, tableName string) (map[string]*
 	dis := make(map[string]*databaseIndex)
 	di := databaseIndex{}
 	for rows.Next() {
-		err = rows.Scan(&di.indexName, &di.unique, &di.table, &di.attname)
+		err = rows.Scan(&di.indexName, &di.unique, &di.table, &di.attname, &di.constraintName)
 		if err != nil {
 			return nil, err
 		}
 		dis[di.indexName] = &databaseIndex{
-			indexName: di.indexName,
-			unique:    di.unique,
-			attname:   di.attname,
-			table:     di.table,
+			indexName:      di.indexName,
+			unique:         di.unique,
+			attname:        di.attname,
+			table:          di.table,
+			constraintName: di.constraintName,
 		}
 	}
 	return dis, nil
@@ -516,8 +519,13 @@ func addFkOneToSome(table *model.TableMigrate, att model.OneToSomeMigrate) strin
 		att.EscapingTargetColumn)
 }
 
-// dropIndex generates DROP INDEX SQL.
-func dropIndex(table *model.TableMigrate, idxName string) string {
+// dropIndex generates SQL to drop an index. If constraintName is non-empty,
+// the index backs a PostgreSQL constraint (e.g. a UNIQUE constraint), so the
+// constraint must be dropped instead of the index.
+func dropIndex(table *model.TableMigrate, idxName, constraintName string) string {
+	if constraintName != "" {
+		return fmt.Sprintf("ALTER TABLE %v DROP CONSTRAINT IF EXISTS %v;", table.EscapingTableName(), keywordHandler(constraintName)) + "\n"
+	}
 	if table.Schema != nil {
 		return fmt.Sprintf("DROP INDEX IF EXISTS %v;", *table.Schema+"."+idxName) + "\n"
 	}

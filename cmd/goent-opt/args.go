@@ -27,10 +27,11 @@ type OptDSN struct {
 type DbExportArgs struct {
 	OptDSN
 	All           bool   `arg:"-A,--all" help:"Export all tables"`
+	Archive       bool   `arg:"-Z,--archive" help:"Export the whole database as a compressed archive using goent/backup"`
 	Schema        string `arg:"-S,--schema" help:"PostgreSQL schema name"`
 	StructureOnly bool   `arg:"-T,--structure-only" help:"Export only table structure (SQL), no data"`
 	DataOnly      bool   `arg:"-D,--data-only" help:"Export only data, no table structure"`
-	Dir           string `arg:"-O,--dir" default:"./export" help:"Output directory"`
+	Dir           string `arg:"-O,--dir" default:"./export" help:"Output directory or archive file path when --archive is used"`
 }
 
 func (DbExportArgs) Description() string {
@@ -49,11 +50,12 @@ func (DbExportArgs) Examples() []string {
 type DbImportArgs struct {
 	OptDSN
 	All           bool   `arg:"-A,--all" help:"Import all tables from directory"`
+	Archive       bool   `arg:"-Z,--archive" help:"Import a compressed archive created with goent/backup"`
 	Schema        string `arg:"-S,--schema" help:"PostgreSQL schema name"`
 	StructureOnly bool   `arg:"-T,--structure-only" help:"Import only table structure (SQL), no data"`
 	DataOnly      bool   `arg:"-D,--data-only" help:"Import only data, no table structure"`
 	Truncate      bool   `arg:"--truncate" help:"Truncate tables before importing data"`
-	Dir           string `arg:"-O,--dir" default:"./export" help:"Input directory"`
+	Dir           string `arg:"-O,--dir" default:"./export" help:"Input directory or archive file path when --archive is used"`
 }
 
 func (DbImportArgs) Description() string {

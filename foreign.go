@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 
 	"github.com/azhai/goent/model"
 )
@@ -42,19 +43,23 @@ type Foreign struct {
 	Where      Condition   // WHERE clause for filtering
 	RefType    string      // Type name of the referenced struct (e.g. "Contributor" for AssigneeID)
 
-	mountFieldIdx int // Cached field index for MountField (0 = not cached)
+	mountFieldIdx atomic.Int32 // Cached field index for MountField (-1 = not found, 0 = not cached, >0 = index+1)
 }
 
 // getMountFieldIdx returns the cached field index for MountField, looking it up on first access.
 func (f *Foreign) getMountFieldIdx(valueOf reflect.Value) int {
-	if f.mountFieldIdx != 0 {
-		return f.mountFieldIdx
+	idx := f.mountFieldIdx.Load()
+	if idx != 0 {
+		return int(idx)
 	}
 	sf, ok := valueOf.Type().FieldByName(f.MountField)
 	if ok {
-		f.mountFieldIdx = sf.Index[0] + 1
+		idx = int32(sf.Index[0] + 1)
+	} else {
+		idx = -1
 	}
-	return f.mountFieldIdx
+	f.mountFieldIdx.Store(idx)
+	return int(idx)
 }
 
 // fieldByCachedIdx returns the reflect.Value at the cached field index.
@@ -227,7 +232,7 @@ func mapRowsByPK[T any](rows []*T, table *Table[T], foreign *Foreign) map[int64]
 	for _, row := range rows {
 		valueOf := reflect.ValueOf(row).Elem()
 		pkField := valueOf.Field(pkCol.FieldId)
-		if id := pkField.Int(); id != 0 {
+		if id, ok := fieldInt64(pkField); ok && id != 0 {
 			reg[id] = row
 		}
 		if foreign != nil {
@@ -575,7 +580,7 @@ func QueryMiddleTableContext[T any](ctx context.Context, foreign *Foreign, table
 	for _, row := range rows {
 		valueOf := reflect.ValueOf(row).Elem()
 		pkField := valueOf.Field(pkCol.FieldId)
-		if id := pkField.Int(); id != 0 {
+		if id, ok := fieldInt64(pkField); ok && id != 0 {
 			pkIds = append(pkIds, id)
 		}
 	}
@@ -590,7 +595,7 @@ func QueryMiddleTableContext[T any](ctx context.Context, foreign *Foreign, table
 	builder := GetBuilder()
 	defer PutBuilder(builder)
 	builder.Type = model.SelectQuery
-	builder.SetTable(&table.TableInfo)
+	builder.SetTable(table.TableInfo)
 	builder.core.Where, builder.core.Limit = filter, len(pkIds)
 	builder.VisitFields = []*Field{
 		{ColumnName: leftCol},

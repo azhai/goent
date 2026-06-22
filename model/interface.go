@@ -20,6 +20,10 @@ type Driver interface {
 	RenameColumn(schema, table, oldColumn, newName string) error
 	// RenameTable renames a table in the database schema
 	RenameTable(schema, table, newName string) error
+	// TruncateTable truncates a table in the database schema
+	TruncateTable(schema, table string) error
+	// Upsert inserts or updates a single row by conflict columns
+	Upsert(table string, columns, conflictCols []string, values []any) error
 
 	// AddLogger adds a logger to the database driver
 	AddLogger(Logger, error) error
@@ -31,6 +35,8 @@ type Driver interface {
 	FormatTableName(schema, table string) string
 	// SupportsReturning checks if the database driver supports RETURNING clause
 	SupportsReturning() bool
+	// NormalizeSql normalizes raw SQL for database dialect differences
+	NormalizeSql(sql string) string
 
 	// NewConnection creates a new database connection
 	NewConnection() Connection
@@ -74,6 +80,7 @@ type Logger interface {
 
 type Connection interface {
 	// ExecContext executes a SQL statement without returning rows
+	// Implementations should populate query.RowsAffected from the driver result
 	ExecContext(ctx context.Context, query *Query) error
 	// QueryRowContext executes a SQL query and returns a single row
 	QueryRowContext(ctx context.Context, query *Query) Row

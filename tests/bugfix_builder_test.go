@@ -200,3 +200,59 @@ func TestBuilderPoolResetConsistency(t *testing.T) {
 		}
 	}
 }
+
+// TestEmptySliceInRawWhere tests that raw Where clauses with empty slice
+// arguments produce valid SQL instead of truncated "IN " syntax.
+func TestEmptySliceInRawWhere(t *testing.T) {
+	db, err := Setup()
+	if err != nil {
+		t.Skipf("Skipping test: database setup failed: %v", err)
+		return
+	}
+
+	err = db.Animal.Delete().Exec()
+	if err != nil {
+		t.Fatalf("Failed to delete animals: %v", err)
+	}
+	animals := []*Animal{
+		{Name: "Cat", Id: 600},
+		{Name: "Dog", Id: 601},
+		{Name: "Fox", Id: 602},
+	}
+	for _, a := range animals {
+		if err := db.Animal.Insert().One(a); err != nil {
+			t.Fatalf("Failed to insert animal: %v", err)
+		}
+	}
+
+	// Empty IN should not produce syntax error and should return nothing.
+	results, err := db.Animal.Select().Where("id IN ?", []int{}).All()
+	if err != nil {
+		t.Fatalf("Empty IN raw where error: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("Expected 0 results for empty IN, got %d", len(results))
+	}
+
+	// Empty NOT IN should not produce syntax error and should return all rows.
+	results, err = db.Animal.Select().Where("id NOT IN ?", []int{}).All()
+	if err != nil {
+		t.Fatalf("Empty NOT IN raw where error: %v", err)
+	}
+	if len(results) != 3 {
+		t.Errorf("Expected 3 results for empty NOT IN, got %d", len(results))
+	}
+
+	// Empty IN on delete should not produce syntax error and should delete nothing.
+	err = db.Animal.Delete().Where("id IN ?", []int{}).Exec()
+	if err != nil {
+		t.Fatalf("Empty IN delete error: %v", err)
+	}
+	count, err := db.Animal.Count("id")
+	if err != nil {
+		t.Fatalf("Count error: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("Expected 3 animals after empty IN delete, got %d", count)
+	}
+}
