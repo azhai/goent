@@ -5,7 +5,7 @@ import (
 	"os"
 
 	arg "github.com/alexflint/go-arg"
-	"github.com/azhai/goent/utils"
+	"github.com/azhai/gobus/environ"
 )
 
 type Args struct {
@@ -26,7 +26,7 @@ func (Args) Examples() []string {
 	}
 }
 
-func resolveDSN(env *utils.Environ, cliDSN string) string {
+func resolveDSN(env *environ.Environ, cliDSN string) string {
 	if cliDSN != "" {
 		return cliDSN
 	}
@@ -45,7 +45,7 @@ func resolveDSN(env *utils.Environ, cliDSN string) string {
 	return ""
 }
 
-func resolveDBType(env *utils.Environ, dsn string) string {
+func resolveDBType(env *environ.Environ, dsn string) string {
 	if val := os.Getenv("DB_TYPE"); val != "" {
 		return val
 	}

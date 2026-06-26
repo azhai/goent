@@ -12,12 +12,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/azhai/gobus/environ"
 	"github.com/azhai/goent"
+
 	// "github.com/azhai/goent-libpq"
 	"github.com/azhai/goent/drivers/pgsql"
 	"github.com/azhai/goent/drivers/sqlite"
 	"github.com/azhai/goent/model"
-	"github.com/azhai/goent/utils"
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 )
@@ -249,7 +250,7 @@ type Database struct {
 
 var (
 	db  *Database
-	env *utils.Environ
+	env *environ.Environ
 )
 
 var mapDriver = map[string]func(dbDSN, logFile string) (*Database, error){
@@ -262,7 +263,7 @@ var mapDriver = map[string]func(dbDSN, logFile string) (*Database, error){
 }
 
 func init() {
-	env = utils.NewEnvWithFile("../.env")
+	env = environ.NewEnvWithFile("../.env")
 }
 
 func TestMain(m *testing.M) {

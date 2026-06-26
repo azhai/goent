@@ -5,12 +5,13 @@ import (
 	"cmp"
 	"fmt"
 
+	"github.com/azhai/gobus/comap"
 	"github.com/azhai/gobus/log"
 	"github.com/azhai/goent/reverse"
 	"github.com/azhai/goent/utils"
 )
 
-var allTables = utils.NewCoMap[string, reverse.TableInfo]()
+var allTables = comap.NewCoMap[string, reverse.TableInfo]()
 
 // RunTablesGeneration generates the tables.go file from database schema
 func RunTablesGeneration(cfg *reverse.ReverseConfig, pkgName, outPath string) error {

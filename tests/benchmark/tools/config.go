@@ -3,7 +3,7 @@ package tools
 import (
 	"strings"
 
-	"github.com/azhai/goent/utils"
+	"github.com/azhai/gobus/environ"
 )
 
 // TODO: Add these ones to the .env file.
@@ -18,7 +18,7 @@ const (
 var PostgresDSN string
 
 func init() {
-	env := utils.NewEnvWithFile("../../../.env")
+	env := environ.NewEnvWithFile("../../../.env")
 	if PostgresDSN = env.Get("POSTGRES_DSN"); PostgresDSN != "" {
 		return
 	}

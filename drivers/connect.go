@@ -3,11 +3,11 @@ package drivers
 import (
 	"strings"
 
+	"github.com/azhai/gobus/environ"
 	"github.com/azhai/gobus/log"
 	"github.com/azhai/goent/drivers/pgsql"
 	"github.com/azhai/goent/drivers/sqlite"
 	"github.com/azhai/goent/model"
-	"github.com/azhai/goent/utils"
 )
 
 // DatabaseConfig is the configuration for the database.
@@ -18,7 +18,7 @@ type DatabaseConfig struct {
 }
 
 // LoadConfig loads the database configuration from the environment.
-func LoadConfig(env *utils.Environ, defaultDSN string) DatabaseConfig {
+func LoadConfig(env *environ.Environ, defaultDSN string) DatabaseConfig {
 	var logFile string
 	if _, ok := env.Lookup("DB_LOG_FILE"); ok {
 		logFile = env.Get("DB_LOG_FILE")

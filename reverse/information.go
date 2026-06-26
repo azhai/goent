@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/azhai/gobus/comap"
 	"github.com/azhai/goent/utils"
 )
 
@@ -17,7 +18,7 @@ const (
 	TableTypeComplexJunction
 )
 
-type TableRegistry = utils.CoMap[string, TableInfo]
+type TableRegistry = comap.CoMap[string, TableInfo]
 
 // TableInfo represents database table metadata
 type TableInfo struct {

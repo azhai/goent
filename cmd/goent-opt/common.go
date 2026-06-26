@@ -7,12 +7,12 @@ import (
 	"os"
 	"strings"
 
+	"github.com/azhai/gobus/environ"
 	"github.com/azhai/gobus/log"
 	"github.com/azhai/goent"
 	"github.com/azhai/goent/drivers/pgsql"
 	"github.com/azhai/goent/drivers/sqlite"
 	"github.com/azhai/goent/model"
-	"github.com/azhai/goent/utils"
 )
 
 type Database struct {
@@ -63,16 +63,16 @@ type DBConfig struct {
 	DBType string
 }
 
-func NewEnvSafe() *utils.Environ {
+func NewEnvSafe() *environ.Environ {
 	filename := ".env"
 	if _, err := os.Stat(filename); err != nil {
-		return &utils.Environ{}
+		return &environ.Environ{}
 	}
 	defer func() {
 		if r := recover(); r != nil {
 		}
 	}()
-	return utils.NewEnvWithFile(filename)
+	return environ.NewEnvWithFile(filename)
 }
 
 func IsPostgresDSN(dsn string) bool {
