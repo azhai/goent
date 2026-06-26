@@ -6,8 +6,8 @@ github.com/alexflint/go-scalar v1.2.0 h1:WR7JPKkeNpnYIOfHRa7ivM21aWAdHD0gEWHCx+W
 github.com/alexflint/go-scalar v1.2.0/go.mod h1:LoFvNMqS1CPrMVltza4LvnGKhaSpc3oyLEBUZVhhS2o=
 github.com/allegro/bigcache v1.2.1-0.20190218064605-e24eb225f156 h1:eMwmnE/GDgah4HI848JfFxHt+iPb26b4zyfspmqY0/8=
 github.com/allegro/bigcache v1.2.1-0.20190218064605-e24eb225f156/go.mod h1:Cb/ax3seSYIx7SuZdm2G2xzfwmv3TPSk2ucNfQESPXM=
-github.com/azhai/gobus v0.2.0 h1:AaFER+nksMw1qKV8xa5vbnUSwQPWuN99PC38Gb7D7dM=
-github.com/azhai/gobus v0.2.0/go.mod h1:krOjZD4AglqXeKf5G5ux5xE1sWSIjRvWxNJ/umtkqtE=
+github.com/azhai/gobus v0.2.1 h1:qWWE50mcRlMlIP1NUCqbV1IOBRvCWrXAPDcxHst6ICQ=
+github.com/azhai/gobus v0.2.1/go.mod h1:krOjZD4AglqXeKf5G5ux5xE1sWSIjRvWxNJ/umtkqtE=
 github.com/c-bata/go-prompt v0.2.6 h1:POP+nrHE+DfLYx370bedwNhsqmpCUynWPxuHi0C5vZI=
 github.com/c-bata/go-prompt v0.2.6/go.mod h1:/LMAke8wD2FsNu9EXNdHxNLbd9MedkPnCdfpU9wwHfY=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
