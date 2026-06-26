@@ -6,14 +6,14 @@ import (
 	"goent-example/models"
 
 	"github.com/azhai/gobus"
+	"github.com/azhai/gobus/environ"
 	"github.com/azhai/goent"
 	"github.com/azhai/goent/drivers"
 	"github.com/azhai/goent/model"
-	"github.com/azhai/goent/utils"
 )
 
 func main() {
-	env := utils.NewEnvWithFile("../.env")
+	env := environ.NewEnvWithFile("../.env")
 	cfg := drivers.LoadConfig(env, "test.db")
 	db, err := models.OpenDB(cfg)
 	if err != nil {

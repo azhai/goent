@@ -4,16 +4,16 @@ go 1.26.4
 
 require (
 	github.com/alexflint/go-arg v1.6.1
-	github.com/azhai/gobus v0.1.0
+	github.com/azhai/gobus v0.2.0
 	github.com/c-bata/go-prompt v0.2.6
-	github.com/go-goe/goe v0.7.1
-	github.com/go-goe/postgres v0.5.1
+	github.com/go-goe/goe v0.7.2
+	github.com/go-goe/postgres v0.5.2
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/shopspring/decimal v1.4.0
 	golang.org/x/text v0.38.0
-	golang.org/x/tools v0.46.0
-	modernc.org/sqlite v1.52.0
+	golang.org/x/tools v0.47.0
+	modernc.org/sqlite v1.53.0
 )
 
 require (

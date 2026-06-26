@@ -4,13 +4,13 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/azhai/goent/utils"
+	"github.com/azhai/gobus/comap"
 )
 
 // TestCoMapEachShallowCopy tests that CoMap.Each() returns a shallow snapshot
 // and modifications to the original map during iteration don't affect the iterator.
 func TestCoMapEachShallowCopy(t *testing.T) {
-	m := utils.NewCoMap[string, int]()
+	m := comap.NewCoMap[string, int]()
 
 	m.Set("a", ptr(1))
 	m.Set("b", ptr(2))
@@ -34,7 +34,7 @@ func TestCoMapEachShallowCopy(t *testing.T) {
 // TestCoMapEachSnapshotIsolation tests that modifications after snapshot
 // don't affect the ongoing iteration
 func TestCoMapEachSnapshotIsolation(t *testing.T) {
-	m := utils.NewCoMap[string, int]()
+	m := comap.NewCoMap[string, int]()
 	m.Set("x", ptr(10))
 
 	// Start iteration, then modify the map
@@ -51,7 +51,7 @@ func TestCoMapEachSnapshotIsolation(t *testing.T) {
 
 // TestCoMapConcurrentReadWrite tests concurrent reads and writes
 func TestCoMapConcurrentReadWrite(t *testing.T) {
-	m := utils.NewCoMap[int, int]()
+	m := comap.NewCoMap[int, int]()
 	done := make(chan struct{})
 
 	// Writer goroutine
@@ -81,7 +81,7 @@ func TestCoMapConcurrentReadWrite(t *testing.T) {
 
 // TestCoMapSetGetDelete tests basic CoMap operations
 func TestCoMapSetGetDelete(t *testing.T) {
-	m := utils.NewCoMap[string, int]()
+	m := comap.NewCoMap[string, int]()
 
 	// Set and Get
 	m.Set("key", ptr(42))
@@ -103,7 +103,7 @@ func TestCoMapSetGetDelete(t *testing.T) {
 
 // TestCoMapKeys returns keys (not necessarily sorted)
 func TestCoMapKeys(t *testing.T) {
-	m := utils.NewCoMap[string, int]()
+	m := comap.NewCoMap[string, int]()
 	m.Set("c", ptr(3))
 	m.Set("a", ptr(1))
 	m.Set("b", ptr(2))

@@ -5,7 +5,7 @@ import (
 	"os"
 
 	arg "github.com/alexflint/go-arg"
-	"github.com/azhai/goent/utils"
+	"github.com/azhai/gobus/environ"
 )
 
 type OptArgs struct {
@@ -136,7 +136,7 @@ func Run() {
 	}
 }
 
-func (a *OptArgs) MergeConfigs(env *utils.Environ) {
+func (a *OptArgs) MergeConfigs(env *environ.Environ) {
 	var dsn *string
 	switch {
 	case a.DbExport != nil:
@@ -155,7 +155,7 @@ func (a *OptArgs) MergeConfigs(env *utils.Environ) {
 	}
 }
 
-func resolveDSN(env *utils.Environ) string {
+func resolveDSN(env *environ.Environ) string {
 	if val := os.Getenv("DB_DSN"); val != "" {
 		return val
 	}
@@ -171,7 +171,7 @@ func resolveDSN(env *utils.Environ) string {
 	return ""
 }
 
-func resolveDBType(env *utils.Environ) string {
+func resolveDBType(env *environ.Environ) string {
 	if val := os.Getenv("DB_TYPE"); val != "" {
 		return val
 	}
@@ -182,22 +182,6 @@ func resolveDBType(env *utils.Environ) string {
 		return val
 	}
 	return ""
-}
-
-func resolveLogFile(env *utils.Environ) string {
-	if _, ok := utils.GetEnvExists("DB_LOG_FILE"); ok {
-		return os.Getenv("DB_LOG_FILE")
-	}
-	if val := os.Getenv("LOG_FILE"); val != "" {
-		return val
-	}
-	if val := os.Getenv("GOE_LOG_FILE"); val != "" {
-		return val
-	}
-	if _, ok := env.Lookup("DB_LOG_FILE"); ok {
-		return env.Get("DB_LOG_FILE")
-	}
-	return env.Get("LOG_FILE")
 }
 
 func ToDBConfig(dsn, dbType string) (DBConfig, error) {

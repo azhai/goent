@@ -4,7 +4,7 @@ import (
 	"os"
 
 	arg "github.com/alexflint/go-arg"
-	"github.com/azhai/goent/utils"
+	"github.com/azhai/gobus/environ"
 )
 
 type GenArgs struct {
@@ -86,7 +86,7 @@ func Run() {
 	}
 }
 
-func (a *GenArgs) MergeConfigs(env *utils.Environ) {
+func (a *GenArgs) MergeConfigs(env *environ.Environ) {
 	if a.Tables != nil && a.Tables.DSN == "" {
 		a.Tables.DSN = resolveDSN(env)
 	}
@@ -95,19 +95,19 @@ func (a *GenArgs) MergeConfigs(env *utils.Environ) {
 	}
 }
 
-func NewEnvSafe() *utils.Environ {
+func NewEnvSafe() *environ.Environ {
 	filename := ".env"
 	if _, err := os.Stat(filename); err != nil {
-		return &utils.Environ{}
+		return &environ.Environ{}
 	}
 	defer func() {
 		if r := recover(); r != nil {
 		}
 	}()
-	return utils.NewEnvWithFile(filename)
+	return environ.NewEnvWithFile(filename)
 }
 
-func resolveDSN(env *utils.Environ) string {
+func resolveDSN(env *environ.Environ) string {
 	if val := os.Getenv("DB_DSN"); val != "" {
 		return val
 	}

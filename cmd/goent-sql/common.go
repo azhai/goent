@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/azhai/goent/utils"
+	"github.com/azhai/gobus/environ"
 )
 
 // DBConfig holds database connection configuration
@@ -17,16 +17,16 @@ type DBConfig struct {
 }
 
 // NewEnvSafe loads .env file safely
-func NewEnvSafe() *utils.Environ {
+func NewEnvSafe() *environ.Environ {
 	filename := ".env"
 	if _, err := os.Stat(filename); err != nil {
-		return &utils.Environ{}
+		return &environ.Environ{}
 	}
 	defer func() {
 		if r := recover(); r != nil {
 		}
 	}()
-	return utils.NewEnvWithFile(filename)
+	return environ.NewEnvWithFile(filename)
 }
 
 // IsPostgresDSN checks if the DSN points to a PostgreSQL database

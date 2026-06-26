@@ -7,8 +7,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/azhai/gobus/environ"
 	"github.com/azhai/goent"
-	"github.com/azhai/goent/utils"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -594,7 +594,7 @@ func BenchmarkDeleteBuilderPoolStress(b *testing.B) {
 // =============================================
 
 func getDSN() string {
-	env := utils.NewEnvWithFile("../.env")
+	env := environ.NewEnvWithFile("../.env")
 	dsn := env.Get("POSTGRES_DSN")
 	if dsn == "" {
 		dsn = env.Get("DB_DSN")
