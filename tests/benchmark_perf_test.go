@@ -539,6 +539,22 @@ func BenchmarkScanDestGenerated(b *testing.B) {
 	}
 }
 
+// BenchmarkFieldStringCached measures the hot Field.String() path now served by
+// the precomputed qualifiedName cache (no registry lookup, no allocation).
+func BenchmarkFieldStringCached(b *testing.B) {
+	db, err := Setup()
+	if err != nil {
+		b.Skipf("Skipping: %v", err)
+		return
+	}
+	f := db.Status.Field("id")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		_ = f.String()
+	}
+}
+
 func BenchmarkScanDestReflection(b *testing.B) {
 	db, err := Setup()
 	if err != nil {
