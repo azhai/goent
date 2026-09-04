@@ -144,21 +144,23 @@ func (s *StateInsert[T]) All(retPK bool, data []*T) error {
 	if useGenInsertValues {
 		_, useGenInsertValues = any(data[0]).(GenInsertValues)
 	}
+	// Build a single flat []any (row-major) instead of a [][]any. This avoids
+	// allocating one slice header per row plus the outer slice of slices during
+	// bulk insert; Build indexes it as row i -> [i*size : i*size+size].
+	flat := make([]any, 0, len(data)*size)
 	for _, row := range data {
-		var newbie []any
 		if useGenInsertValues {
-			newbie = any(row).(GenInsertValues).InsertValues()
+			flat = append(flat, any(row).(GenInsertValues).InsertValues()...)
 		} else {
-			newbie = make([]any, size)
 			valueOf := reflect.ValueOf(row).Elem()
-			for i, fld := range s.builder.VisitFields {
+			for _, fld := range s.builder.VisitFields {
 				if val := valueOf.Field(fld.FieldId); val.IsValid() {
-					newbie[i] = val.Interface()
+					flat = append(flat, val.Interface())
 				}
 			}
 		}
-		s.builder.InsertValues = append(s.builder.InsertValues, newbie)
 	}
+	s.builder.InsertValues = flat
 
 	returning := s.builder.Returning
 	qr := model.CreateQuery(s.builder.Build(true))

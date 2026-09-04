@@ -112,7 +112,11 @@ func (o *GoentBenchmark) Delete(b *testing.B) {
 	n := b.N
 	books := models.NewBooks(n)
 
-	err := o.db.Book.Insert().All(false, books)
+	// retPK=true so the auto-increment IDs are filled back into books[i].ID.
+	// The timed loop below deletes each book by PK, so the IDs must be known;
+	// using false here would leave every ID at 0 and make every delete a no-op
+	// (DELETE WHERE id=0), producing a bogus "fast" number.
+	err := o.db.Book.Insert().All(true, books)
 	if err != nil {
 		return
 	}

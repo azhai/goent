@@ -184,7 +184,7 @@ type Builder struct {
 	Type  model.QueryType // The type of query (SELECT, INSERT, UPDATE, DELETE)
 	Joins []*JoinTable    // JOIN clauses for the query
 
-	InsertValues [][]any        // Values for batch INSERT operations
+	InsertValues []any          // Flat values for batch INSERT, row-major (row0 cols, row1 cols, ...).
 	VisitFields  []*Field       // Fields to select or insert
 	Changes      map[*Field]any // Changes for UPDATE operations
 
@@ -419,22 +419,27 @@ func (b *Builder) buildDoing() []any {
 		if len(b.InsertValues) == 0 {
 			return args
 		}
-		size, last := len(b.VisitFields), len(b.InsertValues)-1
+		size := len(b.VisitFields)
+		if size == 0 {
+			return args
+		}
+		rows := len(b.InsertValues) / size
 		c.buf.WriteString(") VALUES (")
-		for i, row := range b.InsertValues {
+		for i := 0; i < rows; i++ {
+			base := i * size
 			c.holders = make([]string, size)
 			for j := range size {
 				c.argNo += 1
 				c.holders[j] = "$" + strconv.Itoa(c.argNo)
 			}
-			args = append(args, row...)
+			args = append(args, b.InsertValues[base:base+size]...)
 			for j, holder := range c.holders {
 				if j > 0 {
 					c.buf.WriteByte(',')
 				}
 				c.buf.WriteString(holder)
 			}
-			if i != last {
+			if i != rows-1 {
 				c.buf.WriteString("), (")
 			}
 		}
