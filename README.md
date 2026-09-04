@@ -9,7 +9,7 @@ GO Entity or just "GoEnt" is an easy-to-use ORM for Go
 ![GoEnt Logo](goent-logo.svg)
 
 ## Requirements
-- go v1.26 or above
+- go v1.27 or above
 
 ## Real world examples
 GoEnt has [examples](https://github.com/azhai/goent/tree/main/examples) of queries and integrations, if you have a nice example and want to see if GoEnt can handle it, just try out.
@@ -95,6 +95,11 @@ Check out the [Benchmarks](#benchmarks) section for an overview of GoEnt perform
 	- [Manual Transaction](#manual-transaction)
 		- [Commit and Rollback](#commit-and-rollback)
 		- [Save Point](#save-point)
+- [Plus Extensions](#plus-extensions)
+	- [Database Sharding](#database-sharding)
+	- [Table Cache](#table-cache)
+	- [Nested Set (Tree)](#nested-set-tree)
+- [Code Quality & Tests](#code-quality--tests)
 - [Benchmarks](#benchmarks)
 
 ## Install
@@ -1649,6 +1654,134 @@ sv.Commit() // commit save point
 
 [Back to Contents](#content)
 
+
+## Plus Extensions
+
+The `plus` sub-package ships optional, batteries-included building blocks on top
+of the core ORM. They are kept out of the main import path so the core stays lean.
+
+### Database Sharding
+
+`plus.NewShardedTable` splits one logical collection across many physical tables
+named by a `ShardingStrategy`.
+
+```go
+db, _ := goent.Open[Database](sqlite.Open("goent.db"), "")
+// Each row is routed to t_log_00 .. t_log_0f (2-digit hex) by the hash of UserID.
+strategy := plus.ModuloHex{Bits: 4}            // 2^4 = 16 physical tables
+cache := plus.NewTableCache(5 * time.Minute)
+logs := plus.NewShardedTable[Log](db, "t_log", "user_id", strategy, cache)
+
+// Writes/reads route by shard value; PK is always passed separately.
+_ = logs.Insert(&Log{UserID: 42, Msg: "hi"})
+row, _ := logs.FindByPK(42, 7)          // shard 42, primary key 7
+_ = logs.Update(42, 7, goent.Pair{Key: "msg", Value: "updated"})
+_ = logs.DeleteByPK(42, 7)
+
+// Cross-shard helpers
+all, _ := logs.SelectAll()
+n, _ := logs.CountAll()
+page, _ := logs.SelectPage(1, 10)
+```
+
+Strategies implement `ShardingStrategy`:
+
+- `plus.ModuloHex{Bits: n}` — `shardValue mod 2^n`, table names `baseName_XX`
+  (lowercase 2-digit hex, e.g. `t_log_0a`). `Bits` is clamped to `[0, 62]` so the
+  shift can never panic or produce a negative shard index.
+- `plus.TimeGranularity` — `plus.ByDay` / `plus.ByMonth` / `plus.ByYear`, sharding
+  a `time.Time` field into `base_YYYYMMDD`, `base_YYYYMM`, or `base_YYYY`.
+
+### Table Cache
+
+`plus.TableCache` caches the set of existing shard/physical table names so the
+sharded table does not re-query `information_schema` on every write. It is
+TTL-based and schema-aware.
+
+```go
+cache := plus.NewTableCache(5 * time.Minute)
+_ = cache.RefreshSchema(ctx, db, "public") // binds args correctly (PostgreSQL $1)
+exists := cache.Exists("t_log_3")
+matched := cache.Match("t_log_%")
+```
+
+> [!NOTE]
+> Call `RefreshSchema(ctx, db, schema)` (or `Refresh(ctx, db)` for `"public"`)
+> after migrations create/drop shard tables, otherwise new shards are treated
+> as not-yet-existing.
+
+### Nested Set (Tree)
+
+`plus.NewNestedSet` builds and flattens a classic nested-set tree from rows that
+carry `Lft`/`Rgt` columns. It accepts `int`, `int32`, `int64`, `uint`, … columns.
+
+```go
+ns := plus.NewNestedSet[Category](db.Category, "Lft", "Rgt")
+
+// Flat list -> tree
+root := ns.BuildTree(records)
+root.WalkDepthFirst(func(n *plus.TreeNode[Category]) { /* ... */ })
+
+// Tree -> flat list with renumbered Lft/Rgt, returning (records, lastRgt)
+flat, last := ns.FlattenTree(root, 1)
+
+// Mutating helpers (in plus/nested_set_ops.go)
+_ = ns.InsertAsLastChild(&parent, &child)
+_ = ns.DeleteSubtree(&node)
+ancestors, _ := ns.GetAncestors(&node)
+```
+
+[Back to Contents](#content)
+
+## Code Quality & Tests
+
+GoEnt is verified with the standard Go toolchain — no extra linters are required:
+
+```bash
+go build ./...
+go vet ./...
+go test ./...
+```
+
+The suite covers the core ORM (`tests/`), the `plus` extensions
+(`tests/plus/`), and low-level helpers (`utils/strcase_test.go`,
+`utils/parse_test.go`). Regression tests guard against concurrency bugs in the
+internal `Builder` pool and against silent data loss in the nested-set writer.
+
+Recent fixes and hardening (see also the commit history):
+
+- **Builder pool double-Put (critical).** `Insert().All()` with a single row, and
+  `Select().IterRows()` ranged twice, used to return the same `*Builder` to the
+  `sync.Pool` twice, handing one builder to two goroutines and aborting the
+  process with `fatal error: concurrent map writes`. Each path now returns its
+  builder exactly once.
+- **Sharded `Update`/`DeleteByPK` used the shard value as the primary key.**
+  Both now take the real `pk` argument, matching `FindByPK`. This is a breaking
+  API change for callers that relied on the old signature.
+- **`TableCache.Refresh` failed on PostgreSQL.** The `$1` placeholder now binds
+  its argument; `RefreshSchema(ctx, db, schema)` is the schema-aware entry point.
+- **`NestedSet` only wrote `int` columns.** `int8`/`int16`/`int32`/`int64` and
+  unsigned columns are now written back, preventing corrupted trees.
+- **`ModuloHex` shift overflow.** `Bits` is clamped to `[0, 62]`.
+- **`condition.Not` on an empty condition** produced `NOT ()`; it now returns the
+  empty condition unchanged. `applyFilter` no longer mutates the caller's slice.
+- **`utils` name conversion.** `ToPlural` handles `Day→Days`/`Boy→Boys`;
+  `ToSnakeCase` respects identifier boundaries (e.g. `Identity` stays `identity`);
+  `ToCamelCase` is safe on multi-byte first runes. Abbreviation sorting is cached.
+
+### Performance optimizations
+
+- **Bulk-insert field list is cached per table.** `StateInsert.All` used to
+  rebuild its `VisitFields` slice (one `Field()` lookup per column) on every
+  call. `TableInfo.GetBulkInsertFields()` now precomputes and caches it once
+  (the auto-increment PK is excluded, exactly as before), so repeated bulk
+  inserts skip the per-call column scan.
+- **`And`/`Or` use `strings.Builder`.** Compound conditions no longer do
+  repeated `+=` string reallocation; the template is assembled once.
+- **Abbreviation table for `ToSnakeCase` is sorted once** and published under a
+  read lock, instead of allocating and sorting on every call.
+
+[Back to Contents](#content)
 
 ## Benchmarks
 

@@ -1,542 +1,271 @@
-# GoEnt Development Guide
+# AGENTS.md — AI Programming Guidance
 
-GoEnt is a type-safe ORM library for Go. This document provides guidance for developers working on this codebase.
+This file governs how AI coding agents operate in this repository. It is a
+synthesis of three proven, openly published approaches, each contributing a
+distinct, complementary discipline:
 
-## Project Overview
+| Source | What it contributes | Core idea |
+| --- | --- | --- |
+| [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files) | **State persistence** | Treat the filesystem as durable memory; plan in files so goals survive `/clear`, crashes, and context compaction. |
+| [DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail) | **Output discipline** | Write the minimum that works; reuse before you write; never cut safety. |
+| [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) | **Architecture & verification** | Build everything as a swappable plugin ("capability seam"); verify before you declare done; record decisions as ADRs. |
 
-GoEnt provides a type-safe ORM with the following key features:
-- Non-string query building using Go code
-- Type safety with compile-time errors
-- Auto-migrations from struct definitions
-- SQL-like queries using Go functions
-- Iterator support for row iteration
-- Pagination support
-- Support for PostgreSQL and SQLite
+These are not in tension. A minimal solution that is planned on disk, composed
+from plugins, and proven by tests is the target state for every task.
 
-## Architecture
+---
 
-```
-goent/
-├── builder.go          # SQL query builder core (Builder, BuilderCore, DeleteBuilder, pools)
-├── clause.go           # SQL clause types (Pair, Order, Group, JoinTable)
-├── field.go            # Field and Value types for column/value references
-├── condition.go        # Condition type and WHERE clause functions (And, Or, Equals, In, etc.)
-├── select.go           # SELECT query operations (StateSelect, Pagination)
-├── insert.go           # INSERT query operations (StateInsert, StateSave)
-├── update.go           # UPDATE query operations (StateUpdate)
-├── delete.go           # DELETE query operations (StateDelete, StateWhere, StateDeleteWhere)
-├── table.go            # Table metadata, field mapping, and TableQuery[T]
-├── handler.go          # Query execution and result handling
-├── foreign.go          # Foreign key relationship handling (O2O, O2M, M2O, M2M)
-├── column.go           # Column and Index metadata
-├── result.go           # ResultFunc types and FetchSingleResult/FetchArrayResult
-├── open.go             # Database initialization (Open, travelSchemas)
-├── body.go             # Internal types (body, pk, att, attributeStrings, stringInfos)
-├── reflect.go          # Reflection-based field/relation initialization (InitField, createRelation)
-├── database.go         # Database connection, transaction management, and registry
-├── events.go           # Event notification system (publishEvent, event topics)
-├── byid_base.go        # Shared base for two-phase update/delete (byIDBase[T])
-├── migrate.go          # Migration orchestration (AutoMigrate, dbMigrator, relationInfo)
-├── migrator.go         # Migration helpers (type resolution, attribute/index migration)
-├── schema_ops.go       # Schema operations (SchemaOps)
-├── aggregate.go        # Aggregate functions (Count, Sum, Avg, etc.)
-├── model/              # Core model definitions
-│   ├── model.go        # Data structures for queries and migrations
-│   ├── interface.go    # Driver, Connection, Transaction interfaces
-│   └── enum.go         # Query type and join type enumerations
-├── drivers/            # Database drivers
-│   ├── pgsql/          # PostgreSQL driver
-│   │   ├── driver.go   # Driver implementation
-│   │   ├── migrate.go  # Migration logic
-│   │   └── schema.go   # DDL query functions and helpers
-│   └── sqlite/         # SQLite driver
-│       ├── driver.go   # Driver implementation
-│       ├── migrate.go  # Migration logic
-│       └── schema.go   # DDL query functions and helpers
-├── utils/              # Utility functions
-└── example/            # Example usage
-```
+## 0. Core Operating Principles
 
-## Key Concepts
+Hold these six rules in mind on every turn. They are elaborated in the sections below.
 
-### Builder Pattern
+1. **Disk is memory; context is RAM.** Anything important is written to a file, not only kept in the conversation.
+2. **Plan before you build.** No task of 3+ steps or 5+ tool calls starts without a plan file.
+3. **Write the minimum that works.** Reuse before you write; the best code is the code you never shipped.
+4. **Compose with plugins, not edits.** Behavior changes by swapping a provider, not by rewriting call sites.
+5. **Verify before you claim done.** Run the repo's gates; never repeat a failure you already logged.
+6. **Safety is non-negotiable.** Trust-boundary validation, data-loss handling, security, and accessibility are never on the chopping block.
 
-The `Builder` struct in `builder.go` is the core of query construction. It uses composition with `BuilderCore`:
+---
 
-- **BuilderCore** contains shared fields: `Table`, `fullName`, `Where`, `Limit`, `argNo`, `holders`, `buf`
-- **Builder** composes `BuilderCore` and adds: `Type`, `Joins`, `InsertValues`, `VisitFields`, `Changes`, `Orders`, `Groups`, `Offset`, `Returning`, `RollUp`, `ForUpdate`
-- **DeleteBuilder** composes `BuilderCore` independently for DELETE-only operations
+## 1. Plan in Files, Not in Context
 
-Both `Builder` and `DeleteBuilder` have their own `sync.Pool` for object reuse.
+Adopt the Manus-style context-engineering model from *planning-with-files*:
+the **context window is volatile and limited (RAM)**, the **filesystem is
+durable and effectively unlimited (disk)**. Persist execution state to files so
+a `/clear`, a crash, or a compaction cannot lose the plan.
 
-Key design decisions:
-- No `sync.Mutex` on Builder/DeleteBuilder — they are single-goroutine after pool retrieval
-- Buffer size limit (4KB) prevents memory bloat from large SQL queries
-- `holders` slice is reused when small (`cap <= 64`), discarded when large
-- `BuilderCore` fields are unexported; use `CoreWhere()`, `CoreLimit()`, `CoreTable()` accessors for inspection
+### 1.1 The 3-file pattern
 
-### Table and Field Mapping
+For any multi-step task, maintain three files (templates in
+`.ai-memory/planning-template.md`):
 
-Tables are defined using structs with `goe` tags:
-```go
-type Product struct {
-    ID         int64
-    CategoryID int64  `goe:"m2o"`           // Many-to-one foreign key
-    Name       string `goe:"unique"`        // Unique index
-    Price      float64
-    Category   *Category `goe:"-"`           // Excluded from mapping
-}
+| File | Purpose |
+| --- | --- |
+| `task_plan.md` | Phases, checkboxes, and the resume point after a reset. |
+| `findings.md` | Research, decisions, and things learned along the way. |
+| `progress.md` | A session log: commands run, outputs, test results, errors. |
 
-type Default struct {
-    ID   string `goe:"default:'Default'"` // Primary key with default value
-    Name string
-}
-```
+### 1.2 When to create them (ladder)
 
-### Table Name Resolution
+Stop at the first applicable rung:
 
-Table names are resolved in the following order:
-1. **`TableName()` method** - If the struct implements `TableName() string`, that value is used directly
-2. **Struct name in snake_case with prefix** - If no `TableName()` method, the struct name is converted to snake_case, with optional `prefix:` from schema tag prepended
+1. Task needs 3+ steps or 5+ tool calls? → **create the three files first.**
+2. Learned something new? → **append it to `findings.md`.**
+3. Did something? → **log it in `progress.md`.**
+4. A phase finished? → **check it off in `task_plan.md`.**
+5. Context died (`/clear`, crash, compaction)? → **re-read the plan from disk and resume.**
+6. Every phase complete? → **only then is the task done.**
 
-The schema tag format is: `goe:"schema_name;prefix:table_prefix"`
+### 1.3 Key rules
 
-```go
-// Method 1: TableName() method (returns exact table name, no prefix added)
-type OrderDetail struct {
-    OrderID   int64 `goe:"pk;not_incr"`
-    ProductID int64 `goe:"pk;not_incr"`
-}
+- **Create the plan first.** Never start a non-trivial task without `task_plan.md`.
+- **The 2-action rule.** After every ~2 read/search/browse operations, save what you learned to `findings.md`.
+- **Log ALL errors.** Failed commands go in `progress.md`; they prevent repeating the same mistake.
+- **Never repeat failures.** Track each attempt; if an approach failed, mutate the approach before retrying.
 
-func (*OrderDetail) TableName() string {
-    return "t_order_detail"  // Exact table name, prefix is ignored
-}
+### 1.4 Plan recitation and recovery
 
-// Method 2: Auto-generated from struct name with prefix
-type PublicSchema struct {
-    User        *goent.Table[User]        // Table: t_user (with prefix t_)
-    Category    *goent.Table[Category]    // Table: t_category
-}
+At the start of each turn, re-read the active plan before making a decision.
+If the conversation was reset, the plan files on disk are the source of truth —
+recover from them without asking the user to restate the goal.
 
-type Database struct {
-    PublicSchema `goe:"public;prefix:t_"`  // schema=public, prefix=t_
-    *goent.DB
-}
+---
 
-// Without prefix
-type AuthSchema struct {
-    Role *goent.Table[Role]  // Table: role (no prefix)
-}
+## 2. Write the Minimum That Works (Ponytail)
 
-type Database struct {
-    AuthSchema `goe:"auth"`  // schema=auth, no prefix
-    *goent.DB
-}
+Be the "lazy senior dev": ruthless about avoiding unnecessary code, meticulous
+about correctness. Apply the **reuse ladder** *after* you understand the problem,
+never instead of understanding it — lazy about the solution, never about reading.
+
+### 2.1 The reuse ladder
+
+Before writing code, stop at the first rung that holds:
+
+1. **Does it need to exist?** — No → skip it (YAGNI).
+2. **Already in this codebase?** — Yes → reuse it, don't rewrite.
+3. **Stdlib does it?** — Yes → use the standard library.
+4. **Native platform feature?** — Yes (e.g. `<input type="date">`, `fetch`) → use it.
+5. **Installed dependency?** — Yes → use it; don't reinvent it.
+6. **One line?** — Yes → write one line.
+7. **Only then** → write the minimum that actually works.
+
+### 2.2 Safety is non-negotiable
+
+The ladder compresses *code*, never *correctness*. Never cut:
+
+- **Trust-boundary validation** — sanitize and verify untrusted input.
+- **Data-loss handling** — guard destructive operations; confirm before irreversible writes.
+- **Security** — no secrets in code, no unsafe eval, no exposed surfaces.
+- **Accessibility** — semantic markup, labels, and contrast are part of "working."
+
+### 2.3 The `ponytail:` marker convention
+
+When you deliberately cut a real corner with a known ceiling, mark it inline so
+it is greppable and reviewable:
+
+```ts
+// ponytail: browser has <input type="date">; skip the flatpickr wrapper
 ```
 
-### Column Metadata
-
-The `Column` struct in `column.go` stores column metadata:
-- `FieldName`: Go struct field name
-- `ColumnName`: Database column name (snake_case)
-- `ColumnType`: Database column type
-- `AllowNull`: Whether the column allows NULL
-- `HasDefault`: Whether the column has a default value
-- `DefaultValue`: The default value from struct tag
-- `isAutoIncr`: Whether the column is auto-increment
-
-### Foreign Key Relationships
-
-Four types of relationships are supported:
-- `O2O` (One-to-One): Single record association
-- `O2M` (One-to-Many): One record has many children
-- `M2O` (Many-to-One): Many records belong to one parent
-- `M2M` (Many-to-Many): Through a junction table
-
-### Query Building
-
-Use the fluent API:
-```go
-// Select with conditions
-animals, err := db.Animal.Select().
-    Where(goent.Equals(db.Animal.Field("id"), 2)).
-    All()
-
-// Insert with returning
-err := db.Animal.Insert().One(&animal)
-
-// Update with conditions
-err := db.Animal.Update().
-    Set(goent.Pair{Key: "name", Value: "Cat"}).
-    Filter(goent.Equals(db.Animal.Field("id"), 1)).
-    Exec()
-
-// Delete with conditions
-err := db.Animal.Delete().
-    Filter(goent.Like(db.Animal.Field("name"), "%Cat%")).
-    Exec()
-```
-
-### TableQuery (Conditional Queries)
-
-`Table.Filter()` and `Table.Where()` return a `TableQuery[T]` — a stateful query builder
-that holds conditions without modifying shared Table state. This is concurrency-safe.
-
-```go
-// Conditional aggregate
-count, err := db.Animal.Filter(goent.Equals(db.Animal.Field("name"), "Cat")).Count("id")
-
-// Conditional select
-animals, err := db.Animal.Where("age > ?", 18).Select().All()
-
-// Conditional delete
-err := db.Animal.Filter(goent.Equals(db.Animal.Field("status"), "deleted")).Delete().Exec()
-
-// Chained filters
-count, err := db.Animal.
-    Filter(goent.Greater(db.Animal.Field("id"), 0)).
-    Filter(goent.Less(db.Animal.Field("id"), 10)).
-    Count("id")
-```
-
-`TableQuery[T]` supports:
-- **Aggregate methods**: `Count`, `Max`, `Min`, `Sum`, `Avg`, `MaxFloat`, `MinFloat`, `SumFloat`, `AvgFloat`, `ToUpper`, `ToLower`
-- **Query methods**: `Select()` → `*StateSelect[T, T]`, `Delete()` → `*StateDelete[T]`
-- **Condition methods**: `Filter()`, `Where()`, `OnTransaction()`
-
-### LeftJoin Helper Method
-
-The `LeftJoin` method provides a convenient way to perform LEFT JOIN operations:
-
-```go
-// LeftJoin automatically selects columns from the joined table
-orderDetails, err := db.OrderDetail.Select().
-    LeftJoin("product_id", db.Product.Field("id")).
-    Filter(goent.Equals(db.OrderDetail.Field("order_id"), orderID)).
-    All()
-```
-
-Key behaviors:
-- Automatically adds joined table's columns to SELECT list
-- Supports chaining multiple joins
-- Only populates non-slice foreign fields (skips slice relationships like `Jobs []JobTitle`)
-- For columns that cannot be mapped to struct fields, uses dummy variables to receive values
-
-### Eager Loading with With()
-
-The `With()` method enables eager loading of foreign key relationships.
-It runs a separate query after `All()` to populate the specified foreign fields:
-
-```go
-// Load products with their categories
-products, err := db.Product.Select().With("Category").All()
-
-// Load multiple relationships at once
-products, err := db.Product.Select().With("Category", "OrderDetails").All()
-```
-
-Standalone functions for more control (require passing the query results explicitly):
-- `QueryForeignByName(table, rows, name)` - Query a single relationship by name
-- `QueryForeignsByName(table, rows, names...)` - Query multiple relationships
-- `QueryForeignByNameContext(ctx, table, rows, name)` - With transaction context
-- `QueryForeignsByNameContext(ctx, table, rows, names...)` - With transaction context
-
-### IN Clause Batching with InBatch()
-
-The `InBatch()` function splits large IN clauses into batches:
-
-```go
-ids := make([]int64, 5000)
-cond := goent.InBatch(db.User.Field("id"), ids, 500)
-// Generates: (id IN (1,...,500) OR id IN (501,...,1000) OR ...)
-```
-
-### GenSetForeign Interface
-
-The `GenSetForeign` interface allows generated code to set foreign relationship fields
-without reflection. When a model implements `SetForeign(name string, value any)`,
-the eager loading functions use it instead of `reflect.Value.Set`.
-
-### Event Notification System
-
-The `Watch()` method enables event notifications for table modifications. When a watched
-table performs INSERT, UPDATE, or DELETE operations, events are published to the event bus.
-
-```go
-bus := gobus.NewEventBus(1024)
-db.Watch(bus, db.Animal.TableInfo, db.User.TableInfo)
+Use this only for trivial, bounded simplifications — not as a license to ship
+unsafe code. Periodically run a debt review (`grep` for `ponytail:`) to confirm
+the ceilings are still acceptable.
 
-// Subscribe to events
-bus.Subscribe(goent.EventTopicInsertOne, gobus.Fanout, "my-handler", func(evt *gobus.Event) {
-    model := evt.Data["model"].(string)       // Go struct name, e.g. "Animal"
-    table := evt.Data["table"].(string)       // DB table name, e.g. "animals"
-    ids := evt.Data["ids"].([]int64)          // Affected primary key IDs
-    changes := evt.Data["changes"]            // Column changes (map[string]any or nil)
-    affecteds := evt.Data["affecteds"].(int64) // Number of affected rows
-    transNo := evt.Data["trans_no"].(string)  // Transaction ID (empty if non-tx)
-})
-```
-
-#### Event Topics
-
-| Operation | Topic | Description |
-|-----------|-------|-------------|
-| Single insert | `ent:insert-one` | Insert with returning (has IDs and changes) |
-| Batch insert | `ent:insert-bulk` | Batch insert (has IDs, no changes) |
-| Conditional update | `ent:update` | UPDATE with WHERE (has changes) |
-| Update by PK | `ent:update-bypk` | Single-row update by primary key (has IDs and changes) |
-| Two-phase update | `ent:update-byid` | Update by queried IDs (has IDs and changes) |
-| Conditional delete | `ent:delete` | DELETE with WHERE |
-| Delete by PK | `ent:delete-bypk` | Single-row delete by primary key (has IDs) |
-| Two-phase delete | `ent:delete-byid` | Delete by queried IDs (has IDs) |
-
-#### Event Data Fields
-
-- `model`: Go struct type name (e.g. `"Animal"`)
-- `table`: Database table name (e.g. `"animals"`)
-- `where`: WHERE clause template string (empty for insert/bypk operations)
-- `ids`: Affected primary key IDs (insert: new IDs; update/delete byid: queried IDs; bypk: the single ID)
-- `changes`: Column changes map (only for single insert and updates; nil for bulk insert and deletes)
-- `affecteds`: Number of affected rows
-- `trans_no`: Transaction identifier string (empty if not in a transaction; format `tx:0x...`)
-
-#### Excluded Operations
-
-The following operations do NOT emit events:
-- JOIN updates (multi-table updates via `Join`/`LeftJoin`)
-- Subquery updates
-- Clear-all deletes (DELETE without a WHERE clause)
-- Operations on unwatched tables
-
-#### Transaction Support
-
-Events are published immediately after each operation succeeds. For operations within a
-transaction, the `trans_no` field contains a transaction identifier (derived from the
-transaction pointer address). All operations in the same transaction share the same
-`trans_no`. This allows subscribers to group events by transaction.
+Full ladder and marker rules: `.ai-memory/ponytail-ladder.md`.
 
-Note: Events are sent even if the transaction is later rolled back. Subscribers that need
-transactional consistency should check the `trans_no` and wait for commit/rollback signals
-from their application logic.
-
-## Code Conventions
-
-### Naming
-- Use English comments for public functions
-- Preserve example code in comments
-- Use descriptive variable names
-
-### Error Handling
-- Return errors as the last return value
-- Use `model.Query.Err` for query errors
-- Log errors using the `Logger` interface
-
-### Testing
-- Tests are in the `tests/` directory
-- Use table-driven tests
-- Clean up test data after each test
-- Run with `-race` flag to detect data races: `go test -race ./tests/...`
-
-## Database Drivers
-
-Drivers must implement the `model.Driver` interface:
-- `MigrateContext`: Run migrations
-- `DropTable`, `DropColumn`, `RenameColumn`, `RenameTable`: Schema modifications
-- `KeywordHandler`: Escape reserved keywords
-- `NewConnection`, `NewTransaction`: Connection management
-
-## Migration System
-
-Tables are auto-migrated from struct definitions:
-1. `AutoMigrate` scans registered tables
-2. `migrateFrom` builds `TableMigrate` structures
-3. The driver's `MigrateContext` generates and executes SQL
-
-Foreign keys are detected from:
-- `m2o` tag for many-to-one relationships
-- Field naming convention (`CategoryID` -> `Category`)
-- Table registry lookup for tables nested under schemas
-
-### Two-Phase Migration
-
-The migration process is split into two phases to handle table dependencies:
-
-1. **Phase 1 - Create Tables**: All tables are created without foreign key constraints. This ensures tables can be created in any order, even with circular references.
-
-2. **Phase 2 - Add Foreign Keys**: After all tables exist, foreign key constraints are added via `ALTER TABLE` statements.
-
-This approach:
-- Prevents "relation does not exist" errors
-- Preserves original field order in table definitions
-- Handles complex dependency graphs between tables
-
-### Foreign Key Auto-Generation
-
-Foreign keys are automatically generated for relationship fields:
-- `o2o` tag: Creates a one-to-one relationship with a unique constraint
-- `m2o` tag: Creates a foreign key column pointing to the parent table
-- `o2m` tag: Creates a foreign key column in the child table
-- `m2m` tag: Creates a junction table with foreign keys to both sides
-- Field naming convention: `CategoryID` automatically links to the `Category` table
-- The foreign key column is added in the correct position to preserve field order
-
-### Schema Organization
-
-The database structure follows a strict hierarchy:
-- **Database** -> **Schema** -> **Table**
-- Tables must be nested under schema structs
-- SQLite ignores schema names (tables are created directly)
-
-```go
-type Database struct {
-    Authentication AuthenticationSchema
-    Inventory     InventorySchema
-}
-
-type AuthenticationSchema struct {
-    User *goent.Table[User]
-    Role *goent.Table[Role]
-}
-
-type InventorySchema struct {
-    Product *goent.Table[Product]
-}
-```
-
-## Insert Operations
-
-### Auto-Increment Primary Keys
-
-For tables with auto-increment primary keys:
-- The primary key column is excluded from INSERT
-- `last_insert_rowid()` (SQLite) or `RETURNING` clause (PostgreSQL) is used to retrieve the generated ID
-- The ID is set back on the struct
-
-### Non-Auto-Increment Primary Keys (`not_incr` tag)
-
-Use the `not_incr` tag to prevent auto-increment behavior:
-- The primary key column is included in the INSERT statement
-- No `last_insert_rowid()` or `RETURNING` clause is used
-- Useful for UUID, string, or composite primary keys
-
-```go
-type User struct {
-    ID   string `goe:"pk;not_incr;default:uuid_generate_v4()"`
-    Name string
-}
-```
-
-### Composite Primary Keys
-
-Multiple fields with `pk` tag form a composite primary key:
-- All `pk` fields must have `not_incr` tag to prevent auto-increment
-- Batch inserts with `All(true, ...)` will not return generated IDs (composite keys are known)
-
-```go
-type OrderDetail struct {
-    OrderID   int `goe:"pk;not_incr"`
-    ProductID int `goe:"pk;not_incr"`
-    Quantity  int
-}
-```
-
-### Primary Keys with Default Values
-
-For tables with non-auto-increment primary keys that have default values:
-- The default value is extracted from the struct tag
-- The value is set on the struct before INSERT
-- The primary key column is included in the INSERT statement
-- `last_insert_rowid()` is NOT called (only works for auto-increment)
-
-```go
-type Default struct {
-    ID   string `goe:"default:'Default'"` // Default value 'Default'
-    Name string
-}
-
-d := Default{Name: "Test"}
-db.Default.Insert().One(&d)
-// d.ID == "Default" (set from default value)
-```
-
-## Important Notes
-
-1. **Do not use `Query` struct directly** - Use the `Builder` pattern instead
-2. **Do not use `Attribute` type directly** - Use `Field` and `Condition` instead
-3. **Always use pointers for Insert/Update/Save** - `One(obj *T)` not `One(obj T)`
-4. **Foreign key columns must maintain original order** - Don't remove from Columns
-5. **`last_insert_rowid()` only works for auto-increment columns** - Not for default values
-6. **Use `not_incr` tag for non-auto-increment primary keys** - UUID, string, or composite keys
-7. **`[]byte` is recognized as a valid slice type** - Not treated as a relationship field
-8. **PostgreSQL uses `RETURNING` clause** - SQLite uses `last_insert_rowid()` for auto-increment
-9. **LeftJoin auto-selects joined table columns** - No need to manually specify columns
-10. **Slice foreign fields are skipped in LeftJoin** - Use standard `Join` for slice relationships
-11. **Use code generator for best performance** - Generated code is 15-27x faster than reflection
-12. **Automatic use of generated code** - GoEnt automatically uses generated `ScanDest()` methods when available, providing performance improvements without manual changes
-13. **`Table.Filter()`/`Table.Where()` return `TableQuery[T]`** - Each call creates a new independent state, safe for concurrent use
-14. **Builder `core` fields are unexported** - Use `CoreWhere()`, `CoreLimit()`, `CoreTable()` accessors; internal build methods are also unexported
-15. **`With()` eager-loads foreign relationships** - Supports O2O, O2M, M2O, M2M; runs a separate query after `All()`, passing results directly to foreign key query functions
-16. **`InBatch()` splits large IN clauses** - Avoids SQLite 999 and PostgreSQL 65535 parameter limits
-17. **`GenSetForeign` interface for zero-reflection assignment** - Generated code can implement `SetForeign(name, value)` to bypass reflection
-18. **`QueryForeignByNameContext`/`QueryForeignsByNameContext` accept context and rows** - Enables transaction-scoped foreign queries; rows parameter provides the records to populate
-19. **`TableInfo` is embedded as a pointer in `Table[T]`** - Reduces struct size; use `table.TableInfo` (not `&table.TableInfo`) when passing to functions
-20. **`Watch()` enables event notifications** - Only single-table INSERT/UPDATE/DELETE emit events; JOIN updates, subquery updates, and clear-all deletes are excluded
-21. **Events include `trans_no` for transactions** - All operations in the same transaction share the same `trans_no`; non-transactional operations have an empty `trans_no`
-22. **`Query.RowsAffected` captures affected row count** - Drivers populate this field during `ExecContext`; used by the event system for the `affecteds` field
-
-## Common Tasks
-
-### Adding a new query type
-1. Add the type to `model.QueryType`
-2. Create a new state struct (e.g., `StateSelect`)
-3. Implement builder methods
-4. Add driver support for the new query
-
-### Adding a new database driver
-1. Create a new package under `drivers/`
-2. Implement `model.Driver` interface
-3. Implement `Connection` and `Transaction` interfaces
-4. Add migration support
-
-### Adding a new WHERE condition
-1. Add the function to `where.go`
-2. Return a `Condition` struct with template and fields
-3. Update builder to handle the condition
-
-### Using the code generator
-1. Install: `go install github.com/azhai/goent/cmd/goent-gen@latest`
-2. Generate tables from database:
-   ```bash
-   # Set database connection
-   export GOE_DATABASE_DSN="postgres://user:pass@localhost/db?sslmode=disable"
-   
-   # Generate tables with optional filters
-   goent-gen tables ./models --schema 'public' --prefix 't_' --force
-   ```
-   
-   **Command-line flags:**
-   - `--dsn`: Database DSN (required, or use `GOE_DATABASE_DSN` env var)
-   - `--schema`: Schema name to reverse (default: "public")
-   - `--prefix`: Table prefix filter (only reverse tables with this prefix)
-   - `--force`: Force overwrite existing files (default: creates backup with timestamp)
-   
-3. Generate fields:
-   ```bash
-   goent-gen fields ./models --force
-   # OR use go generate
-   go generate ./models
-   ```
-4. Use generated `ScanDest()` or `FetchXXX()` methods for best performance
-
-## Build and Test Commands
+---
+
+## 3. Build Everything as a Plugin (Capability Seams)
+
+From *deepseek-harness*: **everything is a plugin.** Behavior is composed from
+swappable capabilities, not hardcoded decisions. This keeps the runtime closure
+tight and makes the system testable and replaceable.
+
+### 3.1 The Capability Seam
+
+A *seam* is a swappable capability defined by three roles:
+
+| Role | Responsibility | Example |
+| --- | --- | --- |
+| **Service Definition** | Declares the interface (the seam). | `ctx.llm`, `ctx.fs`, `ctx.shell` |
+| **Service Provider** | Implements the interface. | `llm-deepseek`, `fs-local`, `fs-sandbox` |
+| **Consumer** | Uses the capability, often a tool. | `tool-bash` consuming the shell capability |
+
+Change behavior by swapping a **provider** — e.g. move from a local filesystem to
+a sandboxed one — without touching the **consumer** call sites.
+
+### 3.2 Rules
+
+- **Define the seam before the implementation.** Interface first; providers are interchangeable.
+- **Keep the runtime closure closed.** Don't let capability providers pull in unbounded transitive deps.
+- **Compose via an event bus / plugin host** (Cordis-style) rather than direct wiring.
+- **Prefer configuration over forking.** A new behavior is a new plugin, not a branch in core logic.
+
+Capability-seam pattern and provider checklist: `.ai-memory/capability-seams.md`.
+
+---
+
+## 4. Verify Before You Claim Done
+
+From *deepseek-harness*: an agent may not declare a task complete until it has
+passed the repo's quality gates. Guessing "it probably works" is not verification.
+
+### 4.1 Run the repo's gates
+
+Use the commands the project already defines (see `AGENTS.md` / `package.json`
+scripts). Typical gates:
 
 ```bash
-# Build the project
-go build ./...
-
-# Run tests
-go test ./tests/...
-
-# Run example
-cd example && go run main.go
+lint            # static analysis / style
+lint:fix        # auto-fix what is safe
+test            # unit + integration
+test:coverage   # coverage-gated run
+typecheck       # type equivalence / build
+knip            # dead-code / unused-export detection
+hygiene         # cross-cutting checks (i18n keys, final newline, etc.)
 ```
+
+If the repo defines its own gate command (e.g. `run-gates`), run **that**, not a
+hand-picked subset.
+
+### 4.2 Discipline
+
+- **Re-run after every change.** A green run before an edit proves nothing after it.
+- **Never skip verification** to "save time." An unverified claim is a bug waiting to ship.
+- **Log the run** in `progress.md` with the command and its exit status.
+- **Measure when possible.** Track LOC, tokens, cost, time, and safety impact so improvements are observable (ponytail's benchmark discipline).
+
+---
+
+## 5. Decide With ADRs
+
+Significant architectural or behavioral choices are recorded as **Architecture
+Decision Records** so future agents (and humans) understand *why*, not just *what*.
+
+### 5.1 When to write an ADR
+
+Write one when you introduce a **capability seam**, choose an **LLM/provider
+adapter**, change a **public interface**, or make a trade-off with a lasting
+ceiling (e.g. a `ponytail:` simplification).
+
+### 5.2 Format
+
+Store ADRs in `.ai-memory/adr/` (or `docs/adr/`), numbered sequentially:
+
+```md
+# ADR 000N: <Title>
+
+## Status
+Accepted | Proposed | Superseded by ADR 000M
+
+## Context
+What problem are we solving, and why now?
+
+## Decision
+What we chose, in one sentence.
+
+## Consequences
+What gets easier, what gets harder, and what ceilings we accept.
+```
+
+Template: `.ai-memory/adr/0000-template.md`.
+
+---
+
+## 6. Documentation Discipline
+
+- **Bilingual where required.** Ship docs as `name.md` + `name.zh.md` + an
+  `name.i18n.yaml` key catalog so translations stay in sync (harness convention).
+- **Safety notices for experimental features.** Mark experimental/unsafe surfaces
+  explicitly (mirror the harness `SAFETY.md` bilingual notice).
+- **Keep `AGENTS.md` and docs consistent.** If you change agent behavior, update
+  this file; if you change architecture, update `docs/` and the relevant ADR.
+- **Line-ending and formatting hygiene.** Enforce LF (` .gitattributes`) and final
+  newlines (`.editorconfig`) so diffs stay clean across platforms.
+
+---
+
+## 7. Memory Layout
+
+This repository keeps agent-facing knowledge in two tiers:
+
+- **`AGENTS.md`** (this file) — the single source of truth for *how to operate*.
+- **`.ai-memory/`** — supporting detail the agent reads on demand:
+
+| Path | Contents |
+| --- | --- |
+| `.ai-memory/references.md` | Summaries of the three source projects and where their ideas live. |
+| `.ai-memory/planning-template.md` | Copy-ready `task_plan.md` / `findings.md` / `progress.md` templates. |
+| `.ai-memory/ponytail-ladder.md` | The reuse ladder and `ponytail:` marker rules, in full. |
+| `.ai-memory/capability-seams.md` | The Capability Seam pattern and a provider checklist. |
+| `.ai-memory/safety-checklist.md` | The non-negotiable safety items, as a review checklist. |
+| `.ai-memory/adr/` | Architecture Decision Records (see §5). |
+
+Treat `.ai-memory/` as **durable working memory**: read it at the start of a
+task, update it as you learn, and rely on it to resume after a reset (§1.4).
+
+---
+
+## 8. Quick Reference (cheat sheet)
+
+On every turn, in order:
+
+1. **Plan on disk** — 3 files if the task is non-trivial (§1).
+2. **Understand first** — read and trace real code before simplifying (§2).
+3. **Reuse ladder** — YAGNI → reuse → stdlib → native → dep → one line → minimum (§2.1).
+4. **Swap, don't rewrite** — express new behavior as a plugin/provider (§3).
+5. **Verify** — run the repo's gates, log the result, never skip (§4).
+6. **Record** — ADR for lasting decisions; `ponytail:` for bounded cuts (§5, §2.3).
+7. **Resume-safe** — everything important is already in a file.
+
+### Do / Don't
+
+| Do | Don't |
+| --- | --- |
+| Persist plan + findings + progress to files. | Keep the plan only in chat context. |
+| Reuse existing code, stdlib, and platform features. | Rewrite what already works to "make it cleaner." |
+| Compose behavior as swappable plugins. | Hardcode a fork into core for one use case. |
+| Run the full gate suite before "done." | Declare success on a hunch. |
+| Cut code, never safety. | Drop validation, error handling, or a11y to save lines. |
+| Log every error and never repeat a failure. | Retry the same broken approach blindly. |
