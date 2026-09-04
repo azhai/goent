@@ -221,7 +221,13 @@ func GetBuilder() *Builder {
 }
 
 // PutBuilder resets and returns a Builder to the pool.
+//
+// Every Builder obtained from GetBuilder must be returned exactly once;
+// returning the same one twice lets two goroutines share it.
 func PutBuilder(b *Builder) {
+	if b == nil {
+		return
+	}
 	b.Reset()
 	builderPool.Put(b)
 }

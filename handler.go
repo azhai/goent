@@ -202,6 +202,30 @@ type fieldDestInfo struct {
 	mountIdx   int     // Mount index for foreign fields (0 = not foreign)
 }
 
+// foreignPlan describes one joined foreign struct that must be materialized per
+// scanned row. It is precomputed once per query by planOnce.
+type foreignPlan struct {
+	mountIdx     int           // Field index of the mount point in the result struct
+	elemType     reflect.Type  // Element type of the mount field (the foreign struct)
+	foreignTable uintptr       // Table address the foreign columns belong to
+}
+
+// destResolve describes how to obtain the scan pointer for one result column.
+// It is precomputed once per query so buildDest can resolve each column with a
+// direct slice index instead of a per-row map lookup.
+type destResolve struct {
+	kind    uint8 // destMain / destForeign / destDummy / destWildcard
+	fieldId int   // Field index in the (main or foreign) struct
+	planIdx int   // Index into foreignPlans for kind == destForeign
+}
+
+const (
+	destMain uint8 = iota
+	destForeign
+	destDummy
+	destWildcard
+)
+
 // fetchContext holds precomputed context for fetching and scanning query results.
 // It caches field scan info, destination info, and foreign key offsets
 // to minimize reflection overhead during row scanning.
@@ -214,6 +238,11 @@ type fetchContext struct {
 	destSize       int
 	foreignOffsets []foreignOffset
 	mainTableAddr  uintptr
+
+	// Precomputed once per query (by planOnce) to eliminate a per-row map
+	// allocation and map lookups in buildDest.
+	foreignPlans []foreignPlan
+	destResolve  []destResolve
 }
 
 type foreignOffset struct {
@@ -268,42 +297,83 @@ func (ctx *fetchContext) initDestInfos() {
 	}
 }
 
-func (ctx *fetchContext) buildDest(valueOf reflect.Value) []any {
-	dest := make([]any, 0, ctx.destSize)
-	foreignValues := make(map[uintptr]reflect.Value, len(ctx.foreigns))
-	ctx.initForeignOffsets(valueOf.Type())
-	ctx.initDestInfos()
-	for i := range ctx.foreigns {
-		fo := ctx.foreignOffsets[i]
+// planOnce precomputes foreignPlans and destResolve from the per-query
+// foreignOffsets and destInfos. It is idempotent and therefore cheap to call on
+// every row: after the first row both slices are already populated.
+func (ctx *fetchContext) planOnce() {
+	if ctx.destResolve != nil {
+		return
+	}
+	ctx.foreignPlans = make([]foreignPlan, 0, len(ctx.foreignOffsets))
+	planByTable := make(map[uintptr]int, len(ctx.foreignOffsets))
+	for _, fo := range ctx.foreignOffsets {
 		if fo.elemType == nil {
 			continue
 		}
-		foreignValue := reflect.New(fo.elemType)
-		valueOf.Field(fo.mountIdx).Set(foreignValue)
+		idx := len(ctx.foreignPlans)
+		ctx.foreignPlans = append(ctx.foreignPlans, foreignPlan{
+			mountIdx:     fo.mountIdx,
+			elemType:     fo.elemType,
+			foreignTable: fo.foreignTable,
+		})
 		if fo.foreignTable != 0 {
-			foreignValues[fo.foreignTable] = foreignValue
+			planByTable[fo.foreignTable] = idx
 		}
 	}
+	ctx.destResolve = make([]destResolve, len(ctx.destInfos))
+	for i, di := range ctx.destInfos {
+		switch {
+		case di.isWildcard:
+			ctx.destResolve[i] = destResolve{kind: destWildcard, fieldId: di.fieldId}
+		case di.isMain:
+			ctx.destResolve[i] = destResolve{kind: destMain, fieldId: di.fieldId}
+		case di.tableAddr != 0:
+			if pidx, ok := planByTable[di.tableAddr]; ok {
+				ctx.destResolve[i] = destResolve{kind: destForeign, fieldId: di.fieldId, planIdx: pidx}
+			} else {
+				ctx.destResolve[i] = destResolve{kind: destDummy, fieldId: di.fieldId}
+			}
+		default:
+			ctx.destResolve[i] = destResolve{kind: destDummy, fieldId: di.fieldId}
+		}
+	}
+}
+
+// buildDest builds the slice of scan destinations for a single result row.
+// Foreign structs are materialized once per row, and each column is resolved by
+// a precomputed destResolve entry (direct slice index) instead of a per-row map
+// lookup, eliminating the map allocation that the previous implementation paid
+// on every row.
+func (ctx *fetchContext) buildDest(valueOf reflect.Value) []any {
+	ctx.initForeignOffsets(valueOf.Type())
+	ctx.initDestInfos()
+	ctx.planOnce()
+	dest := make([]any, 0, ctx.destSize)
+	created := make([]reflect.Value, len(ctx.foreignPlans))
+	for i, fp := range ctx.foreignPlans {
+		created[i] = reflect.New(fp.elemType)
+		valueOf.Field(fp.mountIdx).Set(created[i])
+	}
 	var dummy any
-	for _, di := range ctx.destInfos {
-		if di.isWildcard {
+	for i := range ctx.destResolve {
+		di := &ctx.destInfos[i]
+		dr := ctx.destResolve[i]
+		switch dr.kind {
+		case destWildcard:
 			if info := GetTableInfo(di.tableAddr); info != nil {
 				dest = append(dest, AppendDestTable(info, valueOf)...)
 			}
-		} else if !di.isMain && di.tableAddr != 0 {
-			if fv, ok := foreignValues[di.tableAddr]; ok {
-				fieldOf := fv.Elem().Field(di.fieldId)
-				dest = append(dest, fieldOf.Addr().Interface())
-			} else {
-				dest = append(dest, &dummy)
-			}
-		} else if di.isMain {
-			if di.fieldId >= valueOf.NumField() {
-				panic(fmt.Sprintf("goent: buildDest field index out of range: fieldId=%d, numFields=%d, type=%s, tableName=%s, mainTableAddr=%d, fieldTableAddr=%d",
-					di.fieldId, valueOf.NumField(), valueOf.Type().Name(), ctx.tblInfo.TableName, ctx.mainTableAddr, di.tableAddr))
-			}
-			fieldOf := valueOf.Field(di.fieldId)
+		case destForeign:
+			fieldOf := created[dr.planIdx].Elem().Field(dr.fieldId)
 			dest = append(dest, fieldOf.Addr().Interface())
+		case destMain:
+			if dr.fieldId >= valueOf.NumField() {
+				panic(fmt.Sprintf("goent: buildDest field index out of range: fieldId=%d, numFields=%d, type=%s, tableName=%s, mainTableAddr=%d, fieldTableAddr=%d",
+					dr.fieldId, valueOf.NumField(), valueOf.Type().Name(), ctx.tblInfo.TableName, ctx.mainTableAddr, di.tableAddr))
+			}
+			dest = append(dest, valueOf.Field(dr.fieldId).Addr().Interface())
+		default: // destDummy
+			dest = append(dest, &dummy)
 		}
 	}
 	return dest

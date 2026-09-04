@@ -73,21 +73,24 @@ func And(branches ...Condition) Condition {
 		Fields: make([]*Field, 0, totalFields),
 		Values: make([]*Value, 0, totalValues),
 	}
+	var buf strings.Builder
 	idx := 0
 	for _, cond := range branches {
 		if cond.IsEmpty() {
 			continue
 		}
 		if idx > 0 {
-			res.Template += ") AND ("
+			buf.WriteString(") AND (")
 		}
-		res.Template += cond.Template
+		buf.WriteString(cond.Template)
 		res.Fields = append(res.Fields, cond.Fields...)
 		res.Values = append(res.Values, cond.Values...)
 		idx += 1
 	}
 	if idx >= 2 {
-		res.Template = fmt.Sprintf("(%s)", res.Template)
+		res.Template = "(" + buf.String() + ")"
+	} else {
+		res.Template = buf.String()
 	}
 	return res
 }
@@ -121,19 +124,21 @@ func Or(branches ...Condition) Condition {
 		Fields: make([]*Field, 0, totalFields),
 		Values: make([]*Value, 0, totalValues),
 	}
+	var buf strings.Builder
 	idx := 0
 	for _, cond := range branches {
 		if cond.IsEmpty() {
 			continue
 		}
 		if idx > 0 {
-			res.Template += " OR "
+			buf.WriteString(" OR ")
 		}
-		res.Template += cond.Template
+		buf.WriteString(cond.Template)
 		res.Fields = append(res.Fields, cond.Fields...)
 		res.Values = append(res.Values, cond.Values...)
 		idx += 1
 	}
+	res.Template = buf.String()
 	return res
 }
 
@@ -144,6 +149,9 @@ func Or(branches ...Condition) Condition {
 //
 //	cond := goent.Not(goent.Equals(field, "active"))
 func Not(cond Condition) Condition {
+	if cond.IsEmpty() {
+		return Condition{}
+	}
 	return Condition{Template: fmt.Sprintf("NOT (%s)", cond.Template), Fields: cond.Fields, Values: cond.Values}
 }
 
@@ -383,7 +391,12 @@ func applyFilter(w *Condition, conds ...Condition) Condition {
 		return *w
 	}
 	if !w.IsEmpty() {
-		conds = append(conds, *w)
+		// conds may share its backing array with the caller's slice (Filter(s...)),
+		// so copy before appending instead of writing past len(conds).
+		merged := make([]Condition, 0, len(conds)+1)
+		merged = append(merged, conds...)
+		merged = append(merged, *w)
+		conds = merged
 	}
 	return And(conds...)
 }

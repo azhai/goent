@@ -1,6 +1,7 @@
 package plus
 
 import (
+	"reflect"
 	"sort"
 
 	"github.com/azhai/goent"
@@ -87,9 +88,39 @@ type pkGetter interface {
 	GetID() int64
 }
 
+// getPrimaryKeyValue returns the primary key of item for ordering purposes.
+//
+// It first tries the GetID() int64 method and falls back to reflecting over an
+// "ID" field. Returning 0 for every row would make SelectPage silently return
+// an arbitrary order, so the fallback supports the common int/uint/string-free
+// int primary keys.
 func getPrimaryKeyValue(item any) int64 {
 	if g, ok := item.(pkGetter); ok {
 		return g.GetID()
+	}
+	return reflectIDValue(item)
+}
+
+func reflectIDValue(item any) int64 {
+	val := reflect.ValueOf(item)
+	for val.Kind() == reflect.Pointer {
+		if val.IsNil() {
+			return 0
+		}
+		val = val.Elem()
+	}
+	if val.Kind() != reflect.Struct {
+		return 0
+	}
+	field := val.FieldByName("ID")
+	if !field.IsValid() {
+		return 0
+	}
+	switch field.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return field.Int()
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return int64(field.Uint())
 	}
 	return 0
 }

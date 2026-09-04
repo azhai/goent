@@ -2,10 +2,12 @@ package plus
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"sync"
 
 	"github.com/azhai/goent"
+	"github.com/azhai/goent/utils"
 )
 
 // ShardedTable provides automatic table routing based on a shard key.
@@ -76,8 +78,14 @@ func (s *ShardedTable[T]) EachTable(fn func(*goent.Table[T]) error) error {
 }
 
 // Insert inserts a row into the correct sub-table determined by the shard key value.
+//
+// It returns ErrNoShardKey when the shard key field cannot be read from row,
+// so the row is never written to the wrong sub-table.
 func (s *ShardedTable[T]) Insert(row *T) error {
-	shardValue := s.extractShardValue(row)
+	shardValue, err := s.extractShardValue(row)
+	if err != nil {
+		return err
+	}
 	tbl := s.ResolveTable(shardValue)
 	return tbl.Insert().One(row)
 }
@@ -88,16 +96,25 @@ func (s *ShardedTable[T]) FindByPK(shardValue any, pk any) (*T, error) {
 	return tbl.Select().Filter(goent.Equals(tbl.Field("id"), pk)).One()
 }
 
-// DeleteByPK deletes a row by primary key from the sub-table for the given shard value.
-func (s *ShardedTable[T]) DeleteByPK(shardValue any) error {
+// DeleteByPK deletes the row with the given primary key from the sub-table
+// resolved from shardValue.
+//
+// shardValue only selects the sub-table; pk identifies the row. Passing the
+// shard value as the primary key would silently target the wrong row, so the
+// two are kept separate.
+func (s *ShardedTable[T]) DeleteByPK(shardValue any, pk any) error {
 	tbl := s.ResolveTable(shardValue)
-	return tbl.Delete().Filter(goent.Equals(tbl.Field("id"), shardValue)).Exec()
+	return tbl.Delete().Filter(goent.Equals(tbl.Field("id"), pk)).Exec()
 }
 
-// Update updates a row in the correct sub-table by primary key.
-func (s *ShardedTable[T]) Update(shardValue any, pairs ...goent.Pair) error {
+// Update updates the row with the given primary key in the sub-table resolved
+// from shardValue.
+//
+// As with DeleteByPK, shardValue only selects the sub-table and pk identifies
+// the row.
+func (s *ShardedTable[T]) Update(shardValue any, pk any, pairs ...goent.Pair) error {
 	tbl := s.ResolveTable(shardValue)
-	return tbl.Update().Set(pairs...).Filter(goent.Equals(tbl.Field("id"), shardValue)).Exec()
+	return tbl.Update().Set(pairs...).Filter(goent.Equals(tbl.Field("id"), pk)).Exec()
 }
 
 // FindOne finds a single row matching filters in the sub-table for the given shard value.
@@ -115,38 +132,31 @@ func (s *ShardedTable[T]) getOrCreate(tableName string) *goent.Table[T] {
 	return actual.(*goent.Table[T])
 }
 
-func (s *ShardedTable[T]) extractShardValue(row *T) any {
+// ErrNoShardKey is returned when the shard key field cannot be read from a row.
+var ErrNoShardKey = errors.New("goent/plus: shard key field not found")
+
+// extractShardValue reads the shard key column value out of row.
+//
+// Both a nil row and a type without the shard key field return ErrNoShardKey
+// instead of panicking on a nil dereference.
+func (s *ShardedTable[T]) extractShardValue(row *T) (any, error) {
+	if row == nil {
+		return nil, ErrNoShardKey
+	}
 	val := reflect.ValueOf(row).Elem()
+	if val.Kind() != reflect.Struct {
+		return nil, ErrNoShardKey
+	}
 	typ := val.Type()
 	for i := 0; i < val.NumField(); i++ {
 		field := typ.Field(i)
-		colName := toSnakeCase(field.Name)
+		colName := utils.ToSnakeCase(field.Name)
 		if colName == s.shardKey {
 			fv := val.Field(i)
 			if fv.CanInterface() {
-				return fv.Interface()
+				return fv.Interface(), nil
 			}
 		}
 	}
-	return nil
-}
-
-func toSnakeCase(s string) string {
-	var result []rune
-	for i, r := range s {
-		if r >= 'A' && r <= 'Z' {
-			if i > 0 {
-				prev := s[i-1]
-				if prev >= 'a' && prev <= 'z' {
-					result = append(result, '_')
-				} else if i+1 < len(s) && s[i+1] >= 'a' && s[i+1] <= 'z' {
-					result = append(result, '_')
-				}
-			}
-			result = append(result, r+32)
-		} else {
-			result = append(result, r)
-		}
-	}
-	return string(result)
+	return nil, ErrNoShardKey
 }

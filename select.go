@@ -168,7 +168,13 @@ func (s *StateSelect[T, R]) IterRows(to FetchFunc) iter.Seq2[*R, error] {
 	hd := NewHandler(s.ctx, conn, cfg)
 	seq := FetchResult[R](hd, qr, to)
 	return func(yield func(*R, error) bool) {
-		defer PutBuilder(builder)
+		// Ranging the same iterator twice would otherwise put the builder into
+		// the pool twice and hand the same *Builder to two goroutines.
+		b := builder
+		builder = nil
+		if b != nil {
+			defer PutBuilder(b)
+		}
 		for obj, err := range seq {
 			if !yield(obj, err) {
 				return

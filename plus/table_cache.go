@@ -74,21 +74,38 @@ func (c *TableCache) Match(pattern string) []string {
 	return result
 }
 
+// DefaultSchema is the schema used by Refresh on PostgreSQL.
+const DefaultSchema = "public"
+
 // Refresh loads all table names from the database into the cache.
+// On PostgreSQL it reads the tables of DefaultSchema; use RefreshSchema for
+// any other schema.
 func (c *TableCache) Refresh(ctx context.Context, db *goent.DB) error {
+	return c.RefreshSchema(ctx, db, DefaultSchema)
+}
+
+// RefreshSchema loads all table names of the given schema into the cache.
+// The schema name is ignored on SQLite, which has no schemas.
+func (c *TableCache) RefreshSchema(ctx context.Context, db *goent.DB, schema string) error {
 	conn := db.Driver().NewConnection()
 	cfg := db.Driver().GetDatabaseConfig()
 	driverName := db.DriverName()
 
 	var sqlStr string
+	var args []any
 	switch driverName {
 	case "PostgreSQL":
+		if schema == "" {
+			schema = DefaultSchema
+		}
+		// The placeholder must be bound: pgx rejects a query with $1 and no args.
 		sqlStr = "SELECT tablename FROM pg_tables WHERE schemaname = $1"
+		args = []any{schema}
 	default:
 		sqlStr = "SELECT name FROM sqlite_master WHERE type = 'table'"
 	}
 
-	qr := model.CreateQuery(sqlStr, nil)
+	qr := model.CreateQuery(sqlStr, args)
 	rows, err := qr.WrapQuery(ctx, conn, cfg)
 	if err != nil {
 		return fmt.Errorf("refresh table cache: %w", err)
@@ -102,6 +119,9 @@ func (c *TableCache) Refresh(ctx context.Context, db *goent.DB) error {
 			continue
 		}
 		tables[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("refresh table cache: %w", err)
 	}
 
 	c.mu.Lock()

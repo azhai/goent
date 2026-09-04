@@ -2,6 +2,7 @@ package plus
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"time"
 )
@@ -21,8 +22,31 @@ type ModuloHex struct {
 
 func (m ModuloHex) ResolveTableName(base string, shardValue any) string {
 	n := toInt64(shardValue)
-	mask := int64(1<<m.Bits) - 1
+	var mask int64
+	switch {
+	case m.Bits <= 0:
+		// Zero-value ModuloHex: a single shard, every value lands on _00.
+		mask = 0
+	case m.Bits >= 63:
+		// 1<<63 would overflow into a negative mask and produce names like
+		// "t_order_-10" for negative shard values.
+		mask = math.MaxInt64
+	default:
+		mask = 1<<m.Bits - 1
+	}
 	return fmt.Sprintf("%s_%02x", base, n&mask)
+}
+
+// ShardCount returns the number of sub-tables this strategy can produce,
+// which is 2^Bits (clamped to the largest representable shard count).
+func (m ModuloHex) ShardCount() int {
+	if m.Bits <= 0 {
+		return 1
+	}
+	if m.Bits >= 62 {
+		return math.MaxInt
+	}
+	return 1 << m.Bits
 }
 
 func (m ModuloHex) MatchPattern(base string) string {

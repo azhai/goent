@@ -92,14 +92,15 @@ func (ns *NestedSet[T]) BuildTree(records []*T) *TreeNode[T] {
 			Depth: len(stack) + 1,
 		}
 
-		for len(stack) > 0 && stack[len(stack)-1].Rgt < node.Lft {
+		// Pop until we find an ancestor that still contains node. Never pop the
+		// root: malformed rows (Lft beyond the root's Rgt) would otherwise be
+		// dropped from the tree entirely.
+		for len(stack) > 1 && stack[len(stack)-1].Rgt < node.Lft {
 			stack = stack[:len(stack)-1]
 		}
 
-		if len(stack) > 0 {
-			parent := stack[len(stack)-1]
-			parent.AddChild(node)
-		}
+		parent := stack[len(stack)-1]
+		parent.AddChild(node)
 		stack = append(stack, node)
 	}
 
@@ -107,8 +108,13 @@ func (ns *NestedSet[T]) BuildTree(records []*T) *TreeNode[T] {
 }
 
 // FlattenTree converts a tree back to flat records with updated Lft/Rgt values.
+// It returns the records in depth-first order and the last used Rgt value.
+// A nil root yields no records and start-1.
 func (ns *NestedSet[T]) FlattenTree(root *TreeNode[T], start int) ([]*T, int) {
-	var result []*T
+	if root == nil {
+		return nil, start - 1
+	}
+	result := make([]*T, 0, 8)
 	current := start
 	ns.flattenNode(root, &current, &result)
 	return result, current - 1
@@ -161,13 +167,36 @@ func getIntFieldValue(fieldName string, item any) int {
 
 func setIntFieldValue(fieldName string, item any, value int) {
 	val := reflect.ValueOf(item)
-	if val.Kind() == reflect.Pointer {
+	for val.Kind() == reflect.Pointer {
+		if val.IsNil() {
+			return
+		}
 		val = val.Elem()
 	}
-	if val.Kind() == reflect.Struct {
-		field := val.FieldByName(fieldName)
-		if field.IsValid() && field.CanSet() && field.Kind() == reflect.Int {
-			field.SetInt(int64(value))
+	if val.Kind() != reflect.Struct {
+		return
+	}
+	field := val.FieldByName(fieldName)
+	if !field.IsValid() || !field.CanSet() {
+		return
+	}
+	// Accept every signed/unsigned integer width; a model may declare Lft as
+	// int, int32, int64, ... and silently skipping the write corrupts the tree.
+	switch field.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		v := int64(value)
+		if field.OverflowInt(v) {
+			return
 		}
+		field.SetInt(v)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		if value < 0 {
+			return
+		}
+		v := uint64(value)
+		if field.OverflowUint(v) {
+			return
+		}
+		field.SetUint(v)
 	}
 }

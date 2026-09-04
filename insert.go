@@ -109,12 +109,17 @@ func (s *StateInsert[T]) queryLastInsertId() (int64, error) {
 // All inserts multiple records into the table
 // It handles batch insertion and optionally returns auto-increment primary keys
 func (s *StateInsert[T]) All(retPK bool, data []*T) error {
-	defer PutBuilder(s.builder)
+	// Each of the three branches must return the pooled builder exactly once.
+	// Delegating to One() while also deferring PutBuilder here would put the
+	// same *Builder into the pool twice, letting two goroutines share it and
+	// corrupt its Changes map.
 	if len(data) == 0 {
+		PutBuilder(s.builder)
 		return nil
 	} else if len(data) == 1 {
 		return s.One(data[0])
 	}
+	defer PutBuilder(s.builder)
 	s.builder.Type = model.InsertAllQuery
 	s.builder.SetTable(s.table.TableInfo)
 	s.builder.ResetForSave()
@@ -130,15 +135,9 @@ func (s *StateInsert[T]) All(retPK bool, data []*T) error {
 		pkFid = -1
 	}
 
-	s.builder.VisitFields = make([]*Field, 0, len(s.table.ColumnNames))
-	for _, name := range s.table.ColumnNames {
-		col := s.table.Columns[name]
-		if col.ColumnName == pkName && isAutoIncr {
-			continue
-		}
-		fld := s.table.Field(col.ColumnName)
-		s.builder.VisitFields = append(s.builder.VisitFields, fld)
-	}
+	// Reuse the per-table cached field list instead of rebuilding it (with a
+	// Field() lookup per column) on every bulk insert call.
+	s.builder.VisitFields = s.table.GetBulkInsertFields()
 
 	size := len(s.builder.VisitFields)
 	useGenInsertValues := len(data) > 0 && data[0] != nil

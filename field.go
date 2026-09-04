@@ -13,6 +13,11 @@ type Field struct {
 	ColumnName string  // Database column name
 	AliasName  string  // Alias name for the field
 	Function   string  // SQL function to apply to the field
+
+	// qualifiedName caches the resolved "table.column" name. It is populated
+	// once at table registration for the cached sorted-fields, so String() can
+	// skip the registry lookup on the hot query-building path.
+	qualifiedName string
 }
 
 // SameTable checks if two fields belong to the same table
@@ -58,11 +63,20 @@ func (f *Field) Simple() string {
 }
 
 // String returns the qualified field name (table.column) with any SQL function applied
-// It includes the table name for unambiguous reference
+// It includes the table name for unambiguous reference.
+// The qualified name is cached on the field (populated at registration time), so the
+// common path — including aggregate functions like COUNT(%s) — avoids a registry
+// lookup and string formatting on every query build.
 func (f *Field) String() string {
-	res, err := GetTableFieldName(f.TableAddr, f.ColumnName)
-	if err != nil {
-		return ""
+	var res string
+	if f.qualifiedName != "" {
+		res = f.qualifiedName
+	} else {
+		r, err := GetTableFieldName(f.TableAddr, f.ColumnName)
+		if err != nil {
+			return ""
+		}
+		res = r
 	}
 	if f.Function != "" {
 		return fmt.Sprintf(f.Function, res)
