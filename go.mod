@@ -43,4 +43,4 @@ require (
 	modernc.org/memory v1.12.1 // indirect
 )
 
-replace github.com/azhai/gobus => ../gobus
+// replace github.com/azhai/gobus => ../gobus
