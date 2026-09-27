@@ -63,7 +63,7 @@ type TableInfo struct {
 	// insertOneFields is the cached field list for INSERT (non-PK, non-default columns).
 	insertOneFields []*Field
 	// insertOneOnce ensures insertOneSql is initialized only once (concurrent-safe).
-	insertOneOnce   sync.Once
+	insertOneOnce sync.Once
 	// bulkInsertFields is the cached field list for bulk INSERT (auto-increment PK excluded).
 	bulkInsertFields []*Field
 	// bulkInsertOnce ensures bulkInsertFields is initialized only once (concurrent-safe).
@@ -384,9 +384,9 @@ func buildSimpleColumns(info *TableInfo) {
 		info.Columns[columnName] = column
 		info.ColumnNames = append(info.ColumnNames, columnName)
 		info.sortedFields = append(info.sortedFields, &Field{
-			TableAddr:    info.TableAddr,
-			ColumnName:   columnName,
-			FieldId:      column.FieldId,
+			TableAddr:     info.TableAddr,
+			ColumnName:    columnName,
+			FieldId:       column.FieldId,
 			qualifiedName: info.TableName + "." + columnName,
 		})
 
@@ -532,9 +532,9 @@ func NewTableReflect(db *DB, typeOf reflect.Type, addr uintptr, fieldName, schem
 		info.Columns[columnName] = column
 		info.ColumnNames = append(info.ColumnNames, columnName)
 		info.sortedFields = append(info.sortedFields, &Field{
-			TableAddr:    info.TableAddr,
-			ColumnName:   columnName,
-			FieldId:      column.FieldId,
+			TableAddr:     info.TableAddr,
+			ColumnName:    columnName,
+			FieldId:       column.FieldId,
 			qualifiedName: info.TableName + "." + columnName,
 		})
 

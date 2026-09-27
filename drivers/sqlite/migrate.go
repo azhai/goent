@@ -406,13 +406,14 @@ func alterSqlite(b body) {
 
 // tableAttributesWithDB builds insert column names from the model and select expressions
 // that map to the actual database columns. For columns that exist in the DB, use the DB
-// column name; for new columns not yet in the DB, use the default value expression.
+// column name; for new columns not yet in the DB, use a concrete literal so the
+// INSERT..SELECT never yields a bare comma and never violates a NOT NULL column.
 func tableAttributesWithDB(b body) (string, string) {
 	insertCols := &strings.Builder{}
 	selectExprs := &strings.Builder{}
 
-	// Helper to append a column pair
-	appendPair := func(modelColName string, dbColName string, defaultVal string) {
+	// appendPair adds one column pair; missingExpr is the SELECT value used when the column is absent in the DB.
+	appendPair := func(modelColName, dbColName, missingExpr string) {
 		if insertCols.Len() > 0 {
 			insertCols.WriteString(",")
 			selectExprs.WriteString(",")
@@ -421,9 +422,20 @@ func tableAttributesWithDB(b body) (string, string) {
 		if dbColName != "" {
 			selectExprs.WriteString(dbColName)
 		} else {
-			// New column not in DB: use default value
-			selectExprs.WriteString(defaultVal)
+			selectExprs.WriteString(missingExpr)
 		}
+	}
+	// missingExpr computes the SELECT value for a column the DB does not have yet:
+	// a goe default tag literal if present, else NULL for nullable columns, else the
+	// type's zero value so a NOT NULL column still admits the copy.
+	missingExpr := func(dataTypeName string, nullable bool, defaultVal string) string {
+		if defaultVal != "" {
+			return defaultVal
+		}
+		if nullable {
+			return "NULL"
+		}
+		return checkDataType(dataTypeName, b.dataMap).zeroValue
 	}
 
 	// Primary keys
@@ -432,7 +444,7 @@ func tableAttributesWithDB(b body) (string, string) {
 		if c, ok := b.dbTable.columns[p.Name]; ok {
 			dbColName = c.columnName
 		}
-		appendPair(p.EscapingName, dbColName, setDefault(p.Default))
+		appendPair(p.EscapingName, dbColName, missingExpr(p.DataType, false, p.Default))
 	}
 
 	// Attributes
@@ -441,7 +453,7 @@ func tableAttributesWithDB(b body) (string, string) {
 		if c, ok := b.dbTable.columns[a.Name]; ok {
 			dbColName = c.columnName
 		}
-		appendPair(a.EscapingName, dbColName, setDefault(a.Default))
+		appendPair(a.EscapingName, dbColName, missingExpr(a.DataType, a.Nullable, a.Default))
 	}
 
 	// OneToSomes
@@ -450,7 +462,7 @@ func tableAttributesWithDB(b body) (string, string) {
 		if c, ok := b.dbTable.columns[a.Name]; ok {
 			dbColName = c.columnName
 		}
-		appendPair(a.EscapingName, dbColName, setDefault(a.Default))
+		appendPair(a.EscapingName, dbColName, missingExpr(a.DataType, a.Nullable, a.Default))
 	}
 
 	// ManyToSomes
@@ -459,7 +471,7 @@ func tableAttributesWithDB(b body) (string, string) {
 		if c, ok := b.dbTable.columns[a.Name]; ok {
 			dbColName = c.columnName
 		}
-		appendPair(a.EscapingName, dbColName, setDefault(a.Default))
+		appendPair(a.EscapingName, dbColName, missingExpr(a.DataType, a.Nullable, a.Default))
 	}
 
 	return insertCols.String(), selectExprs.String()

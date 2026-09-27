@@ -205,9 +205,9 @@ type fieldDestInfo struct {
 // foreignPlan describes one joined foreign struct that must be materialized per
 // scanned row. It is precomputed once per query by planOnce.
 type foreignPlan struct {
-	mountIdx     int           // Field index of the mount point in the result struct
-	elemType     reflect.Type  // Element type of the mount field (the foreign struct)
-	foreignTable uintptr       // Table address the foreign columns belong to
+	mountIdx     int          // Field index of the mount point in the result struct
+	elemType     reflect.Type // Element type of the mount field (the foreign struct)
+	foreignTable uintptr      // Table address the foreign columns belong to
 }
 
 // destResolve describes how to obtain the scan pointer for one result column.

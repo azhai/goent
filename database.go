@@ -166,6 +166,7 @@ func (db *DB) RawQueryContext(ctx context.Context, rawSql string, args ...any) (
 // It returns a non-nil Row whose Scan will report the underlying error
 // (including sql.ErrNoRows when no row matches), so callers can safely
 // chain .Scan(...) without a nil check.
+// 返回的 Row 会在调用方 Scan 后自动关闭底层 rows，避免连接与读锁泄漏。
 func (db *DB) RawQueryRowContext(ctx context.Context, rawSql string, args ...any) model.Row {
 	conn := db.driver.NewConnection()
 	dc := db.driver.GetDatabaseConfig()
@@ -175,10 +176,22 @@ func (db *DB) RawQueryRowContext(ctx context.Context, rawSql string, args ...any
 		return errRow{err: err}
 	}
 	if rows.Next() {
-		return rows
+		return rowCloser{rows: rows}
 	}
 	rows.Close()
 	return errRow{err: sql.ErrNoRows}
+}
+
+// rowCloser 包装已定位到首行的 Rows：调用方 Scan 后无论成功与否都关闭底层 rows，
+// 防止 model.Row 接口（仅含 Scan）无法释放 *sql.Rows 而泄漏连接/读锁。
+type rowCloser struct {
+	rows model.Rows
+}
+
+func (r rowCloser) Scan(dest ...any) error {
+	err := r.rows.Scan(dest...)
+	_ = r.rows.Close()
+	return err
 }
 
 // errRow is a Row implementation that always returns the same error from Scan.

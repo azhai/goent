@@ -44,7 +44,7 @@ func TestNestedSet_Int64FieldsRoundTrip(t *testing.T) {
 
 // CategoryU exercises unsigned columns, which the writer must also accept.
 type CategoryU struct {
-	ID   int64  `goe:"pk"`
+	ID   int64 `goe:"pk"`
 	Name string
 	Lft  uint32
 	Rgt  uint32

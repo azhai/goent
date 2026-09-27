@@ -1,7 +1,11 @@
 # ADR 0000: <Title>
 
-Template for Architecture Decision Records. See `AGENTS.md` §5.
-Store as `.ai-memory/adr/NNNN-kebab-slug.md`, numbered sequentially.
+Template for Architecture Decision Records. See `AGENTS.md` §7.
+Copy this file to `.ai-agents/adr/NNNN-kebab-slug.md` (create the directory on the
+first ADR; number from `0001` — `0000` is this template). One location only —
+this repo has no `docs/adr/` and no `.ai-memory/adr/`. When you instantiate it,
+replace the prompt text under each heading with the real content and keep the
+heading order.
 
 ## Status
 Proposed | Accepted | Deprecated | Superseded by ADR 000N
