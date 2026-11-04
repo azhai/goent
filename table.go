@@ -857,7 +857,7 @@ func (t *Table[T]) Truncate() error {
 // TruncateContext removes all rows from the table and resets auto-increment counters with a specific context.
 func (t *Table[T]) TruncateContext(ctx context.Context) error {
 	var sql string
-	tableName := t.getFullName()
+	tableName := t.GetFormattedName()
 	switch t.db.DriverName() {
 	case "PostgreSQL":
 		sql = "TRUNCATE TABLE " + tableName + " RESTART IDENTITY CASCADE"
