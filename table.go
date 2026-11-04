@@ -236,7 +236,7 @@ func (info *TableInfo) GetSelectByPKSql() string {
 	info.selectByPKOnce.Do(func() {
 		if len(info.PrimaryKeys) == 1 {
 			pkName := info.PrimaryKeys[0].ColumnName
-			info.selectByPKSql = "SELECT * FROM " + info.getFullName() + " WHERE " + pkName + " = $1"
+			info.selectByPKSql = "SELECT * FROM " + info.GetFormattedName() + " WHERE " + pkName + " = $1"
 		}
 	})
 	return info.selectByPKSql
@@ -246,7 +246,7 @@ func (info *TableInfo) GetDeleteByPKSql() string {
 	info.deleteByPKOnce.Do(func() {
 		if len(info.PrimaryKeys) == 1 {
 			pkName := info.PrimaryKeys[0].ColumnName
-			info.deleteByPKSql = "DELETE FROM " + info.getFullName() + " WHERE " + pkName + " = $1"
+			info.deleteByPKSql = "DELETE FROM " + info.GetFormattedName() + " WHERE " + pkName + " = $1"
 		}
 	})
 	return info.deleteByPKSql
