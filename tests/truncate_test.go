@@ -8,8 +8,20 @@ import (
 	"github.com/azhai/goent/drivers/sqlite"
 )
 
-type truncateTestDB struct {
+type sqliteTestDB struct {
 	*goent.DB
+}
+
+// openSQLiteTestDB 打开一个独立的内存 SQLite 库，避免依赖 .env 里的共享库类型。
+func openSQLiteTestDB(t *testing.T) *sqliteTestDB {
+	t.Helper()
+	drv := sqlite.OpenInMemory(sqlite.NewConfig(sqlite.Config{}))
+	db, err := goent.Open[sqliteTestDB](drv)
+	if err != nil {
+		t.Fatalf("Expected sqlite db, got error: %v", err)
+	}
+	t.Cleanup(func() { _ = drv.Close() })
+	return db
 }
 
 // TruncateRecord 挂在 schema "bakery" 下，用于复现带 schema 前缀的表名。
@@ -23,15 +35,10 @@ type TruncateRecord struct {
 // 这样的表名会清表失败。
 func TestTruncateUsesFormattedTableName(t *testing.T) {
 	ctx := context.Background()
-	drv := sqlite.OpenInMemory(sqlite.NewConfig(sqlite.Config{}))
-	db, err := goent.Open[truncateTestDB](drv)
-	if err != nil {
-		t.Fatalf("Expected sqlite db, got error: %v", err)
-	}
-	defer drv.Close()
+	db := openSQLiteTestDB(t)
 
 	// SQLite 忽略 schema，实际存在的表名只有 t_raw_material
-	err = db.RawExecContext(ctx,
+	err := db.RawExecContext(ctx,
 		"CREATE TABLE t_raw_material (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)")
 	if err != nil {
 		t.Fatalf("Expected create table, got error: %v", err)
