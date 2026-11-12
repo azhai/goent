@@ -2,7 +2,6 @@ package goent
 
 import (
 	"context"
-	"iter"
 	"math"
 	"reflect"
 	"strings"
@@ -156,45 +155,39 @@ func (s *StateSelect[T, R]) ByPK(id int64) (*R, error) {
 	return s.FetchRow(qr, nil)
 }
 
-// IterRows returns an iterator over the query results
-// It yields each row along with any error encountered
-func (s *StateSelect[T, R]) IterRows(to FetchFunc) iter.Seq2[*R, error] {
+// EachRow walks the query results row by row — the Go 1.22-friendly face of
+// IterRows. Returning false from fn stops the walk.
+func (s *StateSelect[T, R]) EachRow(to FetchFunc, fn func(*R, error) bool) {
 	if to == nil {
 		to = s.getFetchFunc()
 	}
 	qr := model.CreateQuery(s.builder.Build(false))
 	builder := s.builder
+	s.builder = nil
+	if builder != nil {
+		defer PutBuilder(builder)
+	}
 	conn, cfg := s.Prepare(s.table.TableInfo)
 	hd := NewHandler(s.ctx, conn, cfg)
-	seq := FetchResult[R](hd, qr, to)
-	return func(yield func(*R, error) bool) {
-		// Ranging the same iterator twice would otherwise put the builder into
-		// the pool twice and hand the same *Builder to two goroutines.
-		b := builder
-		builder = nil
-		if b != nil {
-			defer PutBuilder(b)
-		}
-		for obj, err := range seq {
-			if !yield(obj, err) {
-				return
-			}
-		}
-	}
+	FetchEach[R](hd, qr, to, fn)
 }
 
 // All executes the query and returns all rows as a slice
 // It pre-allocates the slice capacity if a limit is specified
 // If With() was called, it also eager-loads the specified foreign relationships
 func (s *StateSelect[T, R]) All() (res []*R, err error) {
-	var obj *R
 	size := max(s.builder.core.Limit, 0)
 	res = make([]*R, 0, size)
-	for obj, err = range s.IterRows(nil) {
-		if err != nil {
-			return
+	s.EachRow(nil, func(obj *R, e error) bool {
+		if e != nil {
+			err = e
+			return false
 		}
 		res = append(res, obj)
+		return true
+	})
+	if err != nil {
+		return
 	}
 	if err == nil && s.sameModel && len(s.withForeigns) > 0 {
 		rows := *(*[]*T)(unsafe.Pointer(&res))
@@ -211,16 +204,22 @@ func (s *StateSelect[T, R]) Map(key string) (map[int64]*R, error) {
 		return nil, model.NewColumnNotFoundError(key)
 	}
 	size := max(s.builder.core.Limit, 0)
-	res := make(map[int64]*R, size)
-	for obj, err := range s.IterRows(nil) {
-		if err != nil {
-			return nil, err
+	out := make(map[int64]*R, size)
+	var err error
+	s.EachRow(nil, func(obj *R, e error) bool {
+		if e != nil {
+			err = e
+			return false
 		}
 		if id, ok := col.GetInt64(obj); ok {
-			res[id] = obj
+			out[id] = obj
 		}
+		return true
+	})
+	if err != nil {
+		return nil, err
 	}
-	return res, nil
+	return out, nil
 }
 
 // Rank executes the query and returns results as a map keyed by the specified column
@@ -232,13 +231,19 @@ func (s *StateSelect[T, R]) Rank(key string) (map[int64][]*R, error) {
 	}
 	size := max(s.builder.core.Limit, 0)
 	res := make(map[int64][]*R, size)
-	for obj, err := range s.IterRows(nil) {
-		if err != nil {
-			return nil, err
+	var err error
+	s.EachRow(nil, func(obj *R, e error) bool {
+		if e != nil {
+			err = e
+			return false
 		}
 		if id, ok := col.GetInt64(obj); ok {
 			res[id] = append(res[id], obj)
 		}
+		return true
+	})
+	if err != nil {
+		return nil, err
 	}
 	return res, nil
 }

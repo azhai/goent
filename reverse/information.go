@@ -282,9 +282,9 @@ func GenerateModel(buf *bytes.Buffer, info *TableInfo,
 func FindJunctionTables(allTables *TableRegistry) map[string]*JunctionInfo {
 	result := make(map[string]*JunctionInfo)
 
-	for tableName, info := range allTables.Each() {
+	allTables.ForEach(func(tableName string, info *TableInfo) bool {
 		if len(info.ForeignKeys) != 2 {
-			continue
+			return true
 		}
 
 		hasNonKeyNonBool := false
@@ -301,7 +301,7 @@ func FindJunctionTables(allTables *TableRegistry) map[string]*JunctionInfo {
 			}
 		}
 		if hasNonKeyNonBool {
-			continue
+			return true
 		}
 
 		var referencedTables []string
@@ -316,7 +316,8 @@ func FindJunctionTables(allTables *TableRegistry) map[string]*JunctionInfo {
 				ReferencedTables: referencedTables,
 			}
 		}
-	}
+		return true
+	})
 	return result
 }
 
@@ -324,20 +325,21 @@ func FindJunctionTables(allTables *TableRegistry) map[string]*JunctionInfo {
 func FindComplexJunctionTables(allTables *TableRegistry, junctionTables map[string]*JunctionInfo) map[string]string {
 	result := make(map[string]string)
 
-	for tableName, info := range allTables.Each() {
+	allTables.ForEach(func(tableName string, info *TableInfo) bool {
 		if len(info.ForeignKeys) != 2 {
-			continue
+			return true
 		}
 
 		if _, isJunction := junctionTables[tableName]; isJunction {
-			continue
+			return true
 		}
 
 		primaryTable := determinePrimaryTable(tableName, info.ForeignKeys)
 		if primaryTable != "" {
 			result[primaryTable] = tableName
 		}
-	}
+		return true
+	})
 
 	return result
 }

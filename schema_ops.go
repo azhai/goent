@@ -3,7 +3,6 @@ package goent
 import (
 	"context"
 
-	"github.com/azhai/goent/drivers/pgsql"
 	"github.com/azhai/goent/drivers/sqlite"
 	"github.com/azhai/goent/model"
 )
@@ -26,7 +25,7 @@ func NewSchemaOpsWithSchema(db *DB, schema string) *SchemaOps {
 		return db.RawExecContext(ctx, sql, args...)
 	}
 	if db.DriverName() == "PostgreSQL" {
-		s.Structurer = pgsql.NewPgSchemaDriver(schema, queryFn, execFn)
+		s.Structurer = newPgSchemaDriver(schema, queryFn, execFn)
 	} else {
 		s.Structurer = sqlite.NewSQLiteSchemaDriver(queryFn, execFn)
 	}

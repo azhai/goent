@@ -5,7 +5,6 @@ import (
 
 	"github.com/azhai/gobus/environ"
 	"github.com/azhai/gobus/log"
-	"github.com/azhai/goent/drivers/pgsql"
 	"github.com/azhai/goent/drivers/sqlite"
 	"github.com/azhai/goent/model"
 )
@@ -44,11 +43,14 @@ func Connect(cfg DatabaseConfig) (model.Driver, error) {
 }
 
 // OpenDialect opens a database driver.
+//
+// PostgreSQL 分支走 openPgDialect：默认构建是真实驱动，`-tags nopgsql` 构建换成
+// 返回 nil 的空实现，且 pgsql 包不参与编译（pgx 不进二进制）。
 func OpenDialect(dbType, dbDSN string) model.Driver {
 	if dbType == "pgsql" || dbType == "postgres" {
-		return pgsql.OpenDSN(dbDSN)
+		return openPgDialect(dbDSN)
 	} else if dbType == "" && strings.HasPrefix(dbDSN, "postgres://") {
-		return pgsql.OpenDSN(dbDSN)
+		return openPgDialect(dbDSN)
 	} else {
 		_ = log.MakeDirForFile(dbDSN)
 		return sqlite.OpenDSN(dbDSN)

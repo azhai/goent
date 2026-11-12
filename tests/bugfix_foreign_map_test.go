@@ -7,8 +7,9 @@ import (
 	"github.com/azhai/gobus/comap"
 )
 
-// TestCoMapEachShallowCopy tests that CoMap.Each() returns a shallow snapshot
-// and modifications to the original map during iteration don't affect the iterator.
+// TestCoMapEachShallowCopy tests that CoMap.ForEach() walks a shallow snapshot
+// and modifications to the original map during iteration don't affect the walk.
+// (ForEach is the Go 1.22-friendly face of Each, which returns an iterator.)
 func TestCoMapEachShallowCopy(t *testing.T) {
 	m := comap.NewCoMap[string, int]()
 
@@ -17,7 +18,7 @@ func TestCoMapEachShallowCopy(t *testing.T) {
 	m.Set("c", ptr(3))
 
 	count := 0
-	for k, v := range m.Each() {
+	m.ForEach(func(k string, v *int) bool {
 		if k == "" {
 			t.Error("Key should not be empty")
 		}
@@ -25,7 +26,8 @@ func TestCoMapEachShallowCopy(t *testing.T) {
 			t.Error("Value should not be nil")
 		}
 		count++
-	}
+		return true
+	})
 	if count != 3 {
 		t.Errorf("Expected 3 iterations, got %d", count)
 	}
@@ -38,10 +40,10 @@ func TestCoMapEachSnapshotIsolation(t *testing.T) {
 	m.Set("x", ptr(10))
 
 	// Start iteration, then modify the map
-	for range m.Each() {
+	m.ForEach(func(string, *int) bool {
 		m.Set("y", ptr(20)) // This should not affect the current iteration
-		break
-	}
+		return false
+	})
 
 	// After iteration, the new key should be present
 	if _, ok := m.Get("y"); !ok {

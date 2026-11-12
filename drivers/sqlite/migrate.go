@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -80,14 +81,11 @@ func (dr *Driver) rawExecContext(ctx context.Context, rawSql string, args ...any
 		query := model.CreateQuery(rawSql, args)
 		return query.WrapExec(ctx, dr.NewConnection(), dr.GetDatabaseConfig())
 	}
-	root, err := os.OpenRoot(dr.config.MigratePath)
-	if err != nil {
-		return err
-	}
-	defer root.Close()
-
-	filename := dr.Name() + "_" + strconv.FormatInt(time.Now().Unix(), 10) + ".sql"
-	file, err := root.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
+	// os.OpenRoot needs Go 1.24; the filename is generated here, so a plain
+	// join into the configured directory is equivalent.
+	filename := filepath.Join(dr.config.MigratePath,
+		dr.Name()+"_"+strconv.FormatInt(time.Now().Unix(), 10)+".sql")
+	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		return err
 	}

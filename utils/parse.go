@@ -120,8 +120,8 @@ func GetTagValue(tag string, key string) (string, bool) {
 // Example: "public;prefix:t_" returns ("public", "t_")
 // Example: "auth" returns ("auth", "")
 func ParseSchemaTag(tag string) (schema, prefix string) {
-	parts := strings.SplitSeq(tag, ";")
-	for part := range parts {
+	parts := strings.Split(tag, ";")
+	for _, part := range parts {
 		if after, ok := strings.CutPrefix(part, "prefix:"); ok {
 			prefix = after
 		} else if part != "" {
@@ -161,8 +161,8 @@ func GetFieldNames(typeOf reflect.Type) (names []string) {
 	if typeOf.Kind() != reflect.Struct {
 		return names
 	}
-	for field := range typeOf.Fields() {
-		names = append(names, field.Name)
+	for i := 0; i < typeOf.NumField(); i++ {
+		names = append(names, typeOf.Field(i).Name)
 	}
 	return
 }

@@ -2,8 +2,8 @@ package utils
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
-	"maps"
 	"slices"
 )
 
@@ -24,7 +24,27 @@ func (s *Imports) AddStdPackage(pkg string) {
 }
 
 func (s *Imports) GetStdPackage() []string {
-	return slices.Sorted(maps.Keys(s.stdPackages))
+	return sortedKeys(s.stdPackages)
+}
+
+// SortedKeys is slices.Sorted(maps.Keys(m)) without the Go 1.23 iterators.
+func SortedKeys[K cmp.Ordered, V any](m map[K]V) []K {
+	keys := make([]K, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+// sortedKeys is slices.Sorted(maps.Keys(m)) without the Go 1.23 iterators.
+func sortedKeys(m map[string]bool) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
 }
 
 func (s *Imports) AddThirdPackage(pkg string) {
@@ -32,7 +52,7 @@ func (s *Imports) AddThirdPackage(pkg string) {
 }
 
 func (s *Imports) GetThirdPackage() []string {
-	return slices.Sorted(maps.Keys(s.thirdPackages))
+	return sortedKeys(s.thirdPackages)
 }
 
 func (s *Imports) WriteTo(buf *bytes.Buffer) {

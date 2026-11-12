@@ -18,7 +18,7 @@ import (
 
 func BenchmarkBuilderPoolGetPut(b *testing.B) {
 	b.ReportAllocs()
-	for b.Loop() {
+	for range b.N {
 		builder := goent.GetBuilder()
 		goent.PutBuilder(builder)
 	}
@@ -27,7 +27,7 @@ func BenchmarkBuilderPoolGetPut(b *testing.B) {
 func BenchmarkBuilderPoolGetOnly(b *testing.B) {
 	b.ReportAllocs()
 	builders := make([]*goent.Builder, 0, b.N)
-	for b.Loop() {
+	for range b.N {
 		builders = append(builders, goent.GetBuilder())
 	}
 	_ = builders
@@ -35,7 +35,7 @@ func BenchmarkBuilderPoolGetOnly(b *testing.B) {
 
 func BenchmarkDeleteBuilderPoolGetPut(b *testing.B) {
 	b.ReportAllocs()
-	for b.Loop() {
+	for range b.N {
 		builder := goent.GetDeleteBuilder()
 		goent.PutDeleteBuilder(builder)
 	}
@@ -54,7 +54,7 @@ func BenchmarkConditionEquals(b *testing.B) {
 	field := db.Status.Field("id")
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		_ = goent.Equals(field, 42)
 	}
 }
@@ -69,7 +69,7 @@ func BenchmarkConditionAnd(b *testing.B) {
 	f2 := db.Status.Field("name")
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		_ = goent.And(
 			goent.Equals(f1, 1),
 			goent.Like(f2, "%test%"),
@@ -87,7 +87,7 @@ func BenchmarkConditionOr(b *testing.B) {
 	f2 := db.Status.Field("name")
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		_ = goent.Or(
 			goent.Equals(f1, 1),
 			goent.Like(f2, "%test%"),
@@ -105,7 +105,7 @@ func BenchmarkConditionIn(b *testing.B) {
 	vals := []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		_ = goent.In(field, vals)
 	}
 }
@@ -120,7 +120,7 @@ func BenchmarkConditionComplex(b *testing.B) {
 	f2 := db.Status.Field("name")
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		_ = goent.And(
 			goent.Or(
 				goent.Equals(f1, 1),
@@ -138,14 +138,14 @@ func BenchmarkConditionComplex(b *testing.B) {
 
 func BenchmarkNewValueInt64(b *testing.B) {
 	b.ReportAllocs()
-	for b.Loop() {
+	for range b.N {
 		_ = goent.NewValue(int64(42))
 	}
 }
 
 func BenchmarkNewValueString(b *testing.B) {
 	b.ReportAllocs()
-	for b.Loop() {
+	for range b.N {
 		_ = goent.NewValue("hello world")
 	}
 }
@@ -153,7 +153,7 @@ func BenchmarkNewValueString(b *testing.B) {
 func BenchmarkNewValueSliceInt64(b *testing.B) {
 	vals := []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 	b.ReportAllocs()
-	for b.Loop() {
+	for range b.N {
 		_ = goent.NewValue(vals)
 	}
 }
@@ -161,7 +161,7 @@ func BenchmarkNewValueSliceInt64(b *testing.B) {
 func BenchmarkNewValueSliceAny(b *testing.B) {
 	vals := []any{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 	b.ReportAllocs()
-	for b.Loop() {
+	for range b.N {
 		_ = goent.NewValue(vals)
 	}
 }
@@ -170,7 +170,7 @@ func BenchmarkNewValueReflect(b *testing.B) {
 	type customStruct struct{ X int }
 	val := customStruct{X: 42}
 	b.ReportAllocs()
-	for b.Loop() {
+	for range b.N {
 		_ = goent.NewValueReflect(val)
 	}
 }
@@ -187,7 +187,7 @@ func BenchmarkFieldAccess(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		_ = db.Status.Field("id")
 		_ = db.Status.Field("name")
 	}
@@ -221,7 +221,7 @@ func BenchmarkTableQueryFilter(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		_ = db.Status.Filter(goent.Equals(db.Status.Field("id"), 1))
 	}
 }
@@ -234,7 +234,7 @@ func BenchmarkTableQueryChainedFilter(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		_ = db.Status.
 			Filter(goent.Greater(db.Status.Field("id"), 0)).
 			Filter(goent.Less(db.Status.Field("id"), 100))
@@ -249,7 +249,7 @@ func BenchmarkTableQueryWhere(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		_ = db.Status.Where("id > ?", 0)
 	}
 }
@@ -267,7 +267,7 @@ func BenchmarkInsertOne(b *testing.B) {
 	db.Status.Delete().Exec()
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		s := &Status{Name: "Test"}
 		_ = db.Status.Insert().One(s)
 	}
@@ -282,7 +282,7 @@ func BenchmarkInsertOneFastPath(b *testing.B) {
 	db.Status.Delete().Exec()
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		s := &Status{Name: "Test"}
 		_ = db.Status.InsertOne(s)
 	}
@@ -301,7 +301,7 @@ func BenchmarkInsertBatch(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		_ = db.Status.Insert().All(false, data)
 	}
 }
@@ -317,7 +317,7 @@ func BenchmarkSelectOne(b *testing.B) {
 	db.Status.Insert().One(s)
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		_, _ = db.Status.Select().ByPK(s.ID)
 	}
 }
@@ -333,7 +333,7 @@ func BenchmarkFindByPK(b *testing.B) {
 	db.Status.Insert().One(s)
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		_, _ = db.Status.FindByPK(s.ID)
 	}
 }
@@ -352,7 +352,7 @@ func BenchmarkSelectFilter(b *testing.B) {
 	db.Status.Insert().All(false, data)
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		_, _ = db.Status.Select().Filter(goent.Greater(db.Status.Field("id"), 0)).Take(10).All()
 	}
 }
@@ -371,7 +371,7 @@ func BenchmarkTableQueryCount(b *testing.B) {
 	db.Status.Insert().All(false, data)
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		_, _ = db.Status.Count("id")
 	}
 }
@@ -390,7 +390,7 @@ func BenchmarkTableQueryFilterCount(b *testing.B) {
 	db.Status.Insert().All(false, data)
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		_, _ = db.Status.Filter(goent.Greater(db.Status.Field("id"), 50)).Count("id")
 	}
 }
@@ -409,7 +409,7 @@ func BenchmarkTableQueryFilterSelect(b *testing.B) {
 	db.Status.Insert().All(false, data)
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		_, _ = db.Status.Filter(goent.Greater(db.Status.Field("id"), 50)).Select().Take(10).All()
 	}
 }
@@ -425,7 +425,7 @@ func BenchmarkUpdateOne(b *testing.B) {
 	db.Status.Insert().One(s)
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		_ = db.Status.Update().
 			Set(goent.Pair{Key: "name", Value: "Updated"}).
 			Filter(goent.Equals(db.Status.Field("id"), s.ID)).
@@ -441,7 +441,7 @@ func BenchmarkDeleteOne(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		b.StopTimer()
 		db.Status.Delete().Exec()
 		s := &Status{Name: "Test"}
@@ -533,7 +533,7 @@ func BenchmarkConcurrentConditionBuild(b *testing.B) {
 
 func BenchmarkScanDestGenerated(b *testing.B) {
 	b.ReportAllocs()
-	for b.Loop() {
+	for range b.N {
 		s := &Status{Name: "Test"}
 		_ = s.ScanDest()
 	}
@@ -550,7 +550,7 @@ func BenchmarkFieldStringCached(b *testing.B) {
 	f := db.Status.Field("id")
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		_ = f.String()
 	}
 }
@@ -564,7 +564,7 @@ func BenchmarkScanDestReflection(b *testing.B) {
 	info := db.Status.TableInfo
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		s := &Status{Name: "Test"}
 		valueOf := reflect.ValueOf(s).Elem()
 		_ = goent.AppendDestTable(info, valueOf)
@@ -579,7 +579,7 @@ func BenchmarkBuilderPoolStress(b *testing.B) {
 	var wg sync.WaitGroup
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -594,7 +594,7 @@ func BenchmarkDeleteBuilderPoolStress(b *testing.B) {
 	var wg sync.WaitGroup
 	b.ReportAllocs()
 	b.ResetTimer()
-	for b.Loop() {
+	for range b.N {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -643,7 +643,7 @@ func BenchmarkRawPgxPoolSelectOne(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 
-	for b.Loop() {
+	for range b.N {
 		var s Status
 		err := pool.QueryRow(context.Background(), sql, id).Scan(&s.ID, &s.Name)
 		if err != nil {

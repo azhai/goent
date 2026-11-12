@@ -42,7 +42,7 @@ func BenchmarkSelect(b *testing.B) {
 	}
 	db.Status.Insert().All(false, data)
 
-	for b.Loop() {
+	for range b.N {
 		query := db.Status.Select().Take(size)
 		result, _ := query.All()
 		_ = result
@@ -60,7 +60,7 @@ func BenchmarkSelectUUID(b *testing.B) {
 	}
 	db.Animal.Insert().All(false, animals)
 
-	for b.Loop() {
+	for range b.N {
 		result, _ := db.Animal.Select().All()
 		_ = result
 	}
@@ -79,7 +79,7 @@ func BenchmarkSelectRaw(b *testing.B) {
 	tableName := db.Animal.TableName
 	sql := fmt.Sprintf("select a.id, a.name, a.info_id, a.habitat_id from %s a;", tableName)
 
-	for b.Loop() {
+	for range b.N {
 		rows, err := db.DB.RawQueryContext(context.Background(), sql)
 		if err != nil {
 			panic(err)
@@ -120,7 +120,7 @@ func BenchmarkJoin(b *testing.B) {
 	af := AnimalFood{AnimalId: a.Id, FoodId: f.Id}
 	db.AnimalFood.Insert().One(&af)
 
-	for b.Loop() {
+	for range b.N {
 		result, _ := db.Food.Select().
 			Join(model.InnerJoin, db.AnimalFood.TableInfo, goent.Equals(db.Food.Field("id"), db.AnimalFood.Field("food_id"))).
 			Join(model.InnerJoin, db.Animal.TableInfo, goent.Equals(db.AnimalFood.Field("animal_id"), db.Animal.Field("id"))).
@@ -167,7 +167,7 @@ func BenchmarkJoinSql(b *testing.B) {
 	sql = fmt.Sprintf(sql, db.Food.TableName, db.AnimalFood.TableName,
 		db.Animal.TableName, db.Habitat.TableName, db.Weather.TableName)
 
-	for b.Loop() {
+	for range b.N {
 		rows, _ := db.DB.RawQueryContext(context.Background(), sql, f.Id, f.Name)
 		defer rows.Close()
 

@@ -236,10 +236,33 @@ func (info *TableInfo) GetSelectByPKSql() string {
 	info.selectByPKOnce.Do(func() {
 		if len(info.PrimaryKeys) == 1 {
 			pkName := info.PrimaryKeys[0].ColumnName
-			info.selectByPKSql = "SELECT * FROM " + info.GetFormattedName() + " WHERE " + pkName + " = $1"
+			// The columns are listed explicitly, in struct order, instead of
+			// "SELECT *". The scan destinations are built from sortedFields
+			// (struct order), so a star select silently misaligns as soon as the
+			// physical table order differs — which is exactly what happens with
+			// a table created by an earlier hand-written schema where a column
+			// was added with ALTER TABLE.
+			info.selectByPKSql = "SELECT " + info.sortedColumnList() + " FROM " +
+				info.GetFormattedName() + " WHERE " + pkName + " = $1"
 		}
 	})
 	return info.selectByPKSql
+}
+
+// sortedColumnList renders the table's columns as a comma-separated list in
+// struct order, matching the order GetSortedFields hands to row.Scan.
+func (info *TableInfo) sortedColumnList() string {
+	if len(info.sortedFields) == 0 {
+		return "*"
+	}
+	var sb strings.Builder
+	for i, fld := range info.sortedFields {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		sb.WriteString(fld.Simple())
+	}
+	return sb.String()
 }
 
 func (info *TableInfo) GetDeleteByPKSql() string {

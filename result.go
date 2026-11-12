@@ -32,11 +32,17 @@ func FetchSingleResult[T, V any](state *StateSelect[T, ResultFunc[V]]) (V, error
 // Example: names, err := FetchArrayResult[string](query)
 func FetchArrayResult[T, V any](state *StateSelect[T, ResultFunc[V]]) ([]V, error) {
 	var res []V
-	for row, err := range state.IterRows(FetchValue) {
+	var firstErr error
+	state.EachRow(FetchValue, func(row *ResultFunc[V], err error) bool {
 		if err != nil {
-			return nil, err
+			firstErr = err
+			return false
 		}
 		res = append(res, row.Value)
+		return true
+	})
+	if firstErr != nil {
+		return nil, firstErr
 	}
 	return res, nil
 }

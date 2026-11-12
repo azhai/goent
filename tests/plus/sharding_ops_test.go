@@ -1,6 +1,7 @@
 package plus_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -198,7 +199,7 @@ func TestTableCache_RefreshSchema_Sqlite(t *testing.T) {
 	conn := db.Driver().NewConnection()
 	_ = conn
 
-	if err := cache.Refresh(t.Context(), db.DB); err != nil {
+	if err := cache.Refresh(context.Background(), db.DB); err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
 	if cache.Size() == 0 {

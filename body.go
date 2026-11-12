@@ -116,8 +116,8 @@ func skipPrimaryKey[T comparable](slice []T, value T, tables reflect.Value, fiel
 }
 
 func getTagValue(FieldTag string, subTag string) string {
-	values := strings.SplitSeq(FieldTag, ";")
-	for v := range values {
+	values := strings.Split(FieldTag, ";")
+	for _, v := range values {
 		if after, found := strings.CutPrefix(v, subTag); found {
 			return after
 		}

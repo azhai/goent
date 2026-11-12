@@ -447,7 +447,7 @@ func TestTx(t *testing.T) {
 func TestRace(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 10 {
-		wg.Go(func() {
+		goRun(&wg, func() {
 			driver := env.GetStr("DB_TYPE", "sqlite")
 			driver = strings.ToLower(driver)
 			var raceDb *Database

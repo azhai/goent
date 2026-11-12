@@ -329,8 +329,8 @@ func hasMethod(st *ModelStruct, methodName string) bool {
 	if st.named == nil {
 		return false
 	}
-	for method := range st.named.Methods() {
-		if method.Name() == methodName {
+	for i := 0; i < st.named.NumMethods(); i++ {
+		if st.named.Method(i).Name() == methodName {
 			return true
 		}
 	}

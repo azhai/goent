@@ -2,13 +2,13 @@ package goent
 
 import (
 	"context"
-	"maps"
 	"reflect"
 	"slices"
 	"strings"
 	"sync/atomic"
 
 	"github.com/azhai/goent/model"
+	"github.com/azhai/goent/utils"
 )
 
 const (
@@ -249,7 +249,7 @@ func querySome2OneReflect[T any](ctx context.Context, foreign *Foreign, table *T
 		return model.NewForeignKeyNotFoundError(foreign.ForeignKey)
 	}
 	reg := mapRowsByField(rows, col)
-	pkIds := slices.Sorted(maps.Keys(reg))
+	pkIds := utils.SortedKeys(reg)
 	filter := And(foreign.Where, InBatch(foreign.Reference, pkIds, 500))
 
 	pkName := foreign.Reference.ColumnName
@@ -307,7 +307,7 @@ func queryOne2ManyReflect[T any](ctx context.Context, foreign *Foreign, table *T
 	reg := mapRowsByPK(rows, table, foreign)
 
 	fkName := foreign.ForeignKey // e.g. "order_id" in the child table
-	pkIds := slices.Sorted(maps.Keys(reg))
+	pkIds := utils.SortedKeys(reg)
 
 	// Build filter: WHERE order_id IN (5557, ...) using the FK column in the child table
 	fkField := &Field{ColumnName: fkName}
@@ -456,7 +456,7 @@ func QuerySome2One[T, R any](foreign *Foreign, table *Table[T], refer *Table[R],
 	}
 	reg := mapRowsByField(rows, col)
 	pkName := foreign.Reference.ColumnName
-	pkIds := slices.Sorted(maps.Keys(reg))
+	pkIds := utils.SortedKeys(reg)
 	filter := And(foreign.Where, InBatch(foreign.Reference, pkIds, 500))
 	data, err := refer.Select().Filter(filter).Map(pkName)
 	if err != nil {
@@ -487,7 +487,7 @@ func QueryOne2Many[T, R any](foreign *Foreign, table *Table[T], refer *Table[R],
 	reg := mapRowsByPK(rows, table, foreign)
 
 	pkName := foreign.Reference.ColumnName
-	pkIds := slices.Sorted(maps.Keys(reg))
+	pkIds := utils.SortedKeys(reg)
 	filter := And(foreign.Where, InBatch(foreign.Reference, pkIds, 500))
 	data, err := refer.Select().Filter(filter).Rank(pkName)
 	if err != nil {

@@ -105,7 +105,8 @@ func createPk(db *DB, schema *string, table string, attributeName string, autoIn
 
 func fieldsByTags(tag string, typeOf reflect.Type) []reflect.StructField {
 	var fields []reflect.StructField
-	for field := range typeOf.Fields() {
+	for i := 0; i < typeOf.NumField(); i++ {
+		field := typeOf.Field(i)
 		if utils.HasTagValue(field.Tag.Get("goe"), tag) {
 			fields = append(fields, field)
 		}

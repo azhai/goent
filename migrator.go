@@ -346,8 +346,8 @@ func getIndex(field reflect.StructField) string {
 }
 
 func getIndexValue(valueTag string, tag string) string {
-	values := strings.SplitSeq(valueTag, " ")
-	for v := range values {
+	values := strings.Split(valueTag, " ")
+	for _, v := range values {
 		if _, value, ok := strings.Cut(v, tag); ok {
 			return value
 		}
@@ -359,7 +359,7 @@ func checkIndex(b body, at model.AttributeMigrate, skipUnique bool) error {
 	migTable, migField := b.migrate.table, b.migrate.field
 	indexFunc := getIndex(migField)
 	if indexFunc != "" {
-		for index := range strings.SplitSeq(indexFunc, ",") {
+		for _, index := range strings.Split(indexFunc, ",") {
 			indexName := getIndexValue(index, "n:")
 
 			if indexName == "" {

@@ -74,7 +74,7 @@ func GenerateModelsFile(buf *bytes.Buffer, cfg *reverse.ReverseConfig, pkgName s
 	junctionTables := reverse.FindJunctionTables(allTables)
 	complexJunctionTables := reverse.FindComplexJunctionTables(allTables, junctionTables)
 
-	for _, info := range allTables.Each() {
+	allTables.ForEach(func(_ string, info *reverse.TableInfo) bool {
 		for _, col := range info.Columns {
 			goType := reverse.MapSQLTypeToGo(col.DataType, cfg.DriverType)
 			if goType == "time.Time" {
@@ -87,7 +87,8 @@ func GenerateModelsFile(buf *bytes.Buffer, cfg *reverse.ReverseConfig, pkgName s
 				importPkgs.AddStdPackage("\"encoding/json\"")
 			}
 		}
-	}
+		return true
+	})
 
 	importPkgs.WriteTo(buf)
 	prefix := cmp.Or(cfg.TablePrefix, extractCommonPrefix())

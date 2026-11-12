@@ -148,7 +148,7 @@ func TestInsert(t *testing.T) {
 			testCase: func(t *testing.T) {
 				var wg sync.WaitGroup
 				for range 10 {
-					wg.Go(func() {
+					goRun(&wg, func() {
 						a := Animal{Name: "Cat"}
 						db.Animal.Insert().One(&a)
 					})
